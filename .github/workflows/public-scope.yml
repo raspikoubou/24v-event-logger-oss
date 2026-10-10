@@ -1,0 +1,19 @@
+name: Public scope
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  public-scope:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python packaging/check_public_tree.py --history
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node packaging/build_frontend.cjs --check
