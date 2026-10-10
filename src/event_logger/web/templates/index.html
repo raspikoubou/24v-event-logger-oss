@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="description" content="設備イベントロガーのWeb UI">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>設備イベントロガー</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-main">
+        <div class="product-name">設備イベントロガー</div>
+        <div class="equipment-name"><span>設備名</span><strong id="page-title">第2組立機</strong></div>
+        <div class="header-right">
+          <div class="live-badge" id="logging-badge"><span class="pulse-dot"></span><span>記録中</span></div>
+          <time class="system-clock mono" id="system-clock">--:--:--</time>
+        </div>
+      </div>
+      <nav class="main-nav" aria-label="メインメニュー">
+        <button class="nav-item is-active" data-view="dashboard" type="button">ダッシュボード</button>
+        <button class="nav-item" data-view="logs" type="button">ログ</button>
+        <button class="nav-item" data-view="settings" type="button">設定</button>
+        <button class="nav-item" data-view="diagnostics" type="button">診断</button>
+      </nav>
+    </header>
+
+    <main class="main-content">
+      <div class="banner banner--maintenance" id="maintenance-banner" role="status" hidden>
+        <span class="banner-icon" aria-hidden="true">!</span>
+        <div><strong>メンテナンス中：入力は記録されていません</strong></div>
+        <button class="text-button" data-view-link="diagnostics" type="button">診断を開く</button>
+      </div>
+      <div class="banner banner--warning" role="status" hidden>
+        <span class="banner-icon" aria-hidden="true">!</span>
+        <div><strong></strong></div>
+        <button class="text-button" data-view-link="diagnostics" type="button">対応方法を見る</button>
+      </div>
+      <div class="banner banner--storage" id="storage-warning-banner" role="alert" hidden>
+        <span class="banner-icon" aria-hidden="true">!</span>
+        <div><strong></strong><span id="storage-warning-message"></span></div>
+        <button class="text-button" data-view-link="diagnostics" type="button">診断を開く</button>
+      </div>
+
+      <section class="view is-active" id="view-dashboard" aria-labelledby="dashboard-heading">
+        <div class="page-heading">
+          <div><h1 id="dashboard-heading">ダッシュボード</h1></div>
+        </div>
+
+        <section class="dashboard-zone dashboard-zone--realtime current-state-area" aria-labelledby="current-state-heading">
+          <div class="section-heading">
+            <div><h2 id="current-state-heading">リアルタイム</h2></div>
+            <span class="realtime-label">1秒ごとに更新</span>
+          </div>
+          <div class="dashboard-widget-grid" id="dashboard-realtime-grid">
+            <article class="overview-card is-active-state" data-widget="current-state" data-size="medium" data-widget-type="現在状態" data-widget-channel="IN1" data-on-label="ON" data-off-label="OFF" data-show-elapsed="true"><div class="overview-label" data-widget-title>運転状態</div><strong>ON</strong><p>42分継続</p><small>IN1</small></article>
+          </div>
+        </section>
+
+        <section class="dashboard-zone dashboard-zone--history history-area" aria-labelledby="history-heading">
+          <div class="history-heading">
+            <div><h2 id="history-heading">集計・履歴</h2></div>
+            <div class="period-control" aria-label="集計・履歴の表示期間">
+              <span>期間</span>
+              <button class="period-button" data-period="1h" type="button">1時間</button>
+              <button class="period-button is-active" data-period="8h" type="button">8時間</button>
+              <button class="period-button" data-period="24h" type="button">24時間</button>
+              <button class="period-button" data-period="today" type="button">今日</button>
+              <button class="period-button" data-period="yesterday" type="button">昨日</button>
+              <button class="period-button" data-period="this_week" type="button">今週</button>
+              <button class="period-button" data-period="custom" type="button">任意</button>
+            </div>
+          </div>
+          <div class="custom-period-fields" id="dashboard-custom-period" hidden>
+            <label>開始<input id="dashboard-custom-from" type="datetime-local"></label>
+            <label>終了<input id="dashboard-custom-to" type="datetime-local"></label>
+            <button class="secondary-button" id="apply-dashboard-custom-period" type="button">期間を適用</button>
+          </div>
+
+          <div class="dashboard-widget-grid" id="dashboard-history-grid">
+            <article class="summary-card" data-widget="cycle-count" data-size="small" data-widget-type="イベント回数" data-widget-channel="IN3" data-widget-period="follow" data-widget-edge="ON" data-widget-count-mode="period" data-widget-unit="回"><div><span data-widget-title>完了回数</span><small id="count-period-label">直近8時間</small></div><div class="summary-value"><strong id="cycle-count">0</strong><span>回</span></div></article>
+            <article class="summary-card" data-widget="on-time" data-size="small" data-widget-type="ON/OFF時間" data-widget-channel="IN1" data-widget-period="follow" data-widget-state="ON" data-widget-time-unit="human"><div><span data-widget-title>ON時間</span><small id="on-time-period-label">直近8時間</small></div><div class="summary-value"><strong id="on-time-value">--</strong></div></article>
+            <article class="last-event-card" data-widget="last-alarm" data-size="small" data-widget-type="最終イベント" data-widget-channel="IN2" data-widget-period="follow" data-widget-edge="ON" data-show-absolute="true" data-show-event-elapsed="false"><div><span data-widget-title>最終異常</span><small id="last-alarm-period-label">IN2・直近8時間</small></div><strong id="last-alarm-value">10:31:22</strong></article>
+            <article class="panel timeline-panel" data-widget="timeline" data-size="large" data-widget-type="タイムライン" data-widget-channel="IN1,IN2,IN3,IN4,OUT1" data-widget-period="follow">
+              <div class="panel-head"><div><h2 data-widget-title>タイムライン</h2><button class="link-button" data-view-link="logs" type="button">ログで詳しく見る</button></div><div class="timeline-zoom" role="group" aria-label="タイムラインの拡大縮小"><button class="secondary-button small-button" id="timeline-zoom-out" type="button" aria-label="縮小">−</button><output id="timeline-zoom-label" aria-live="polite">1倍</output><button class="secondary-button small-button" id="timeline-zoom-in" type="button" aria-label="拡大">＋</button></div></div>
+              <div class="timeline-scroll" id="timeline-scroll" tabindex="0"><div class="timeline" id="timeline" aria-label="8時間の信号タイムライン"></div></div>
+            </article>
+            <article class="panel recent-panel" data-widget="recent-events" data-size="medium" data-widget-type="イベント一覧" data-widget-channel="IN1,IN2,IN3,IN4,OUT1" data-widget-period="follow" data-widget-count="10" data-widget-value="all">
+              <div class="panel-head"><div><h2 data-widget-title>イベント一覧</h2><button class="link-button" data-view-link="logs" type="button">ログで詳しく見る</button></div></div>
+              <div class="event-list" id="recent-events"></div>
+            </article>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="view-logs" aria-labelledby="logs-heading">
+        <div class="page-heading"><div><h1 id="logs-heading">記録履歴</h1></div><button class="primary-button" id="download-csv" type="button">CSVに保存</button></div>
+        <div class="filter-panel">
+          <label>期間<select id="log-period"><option value="8h">直近8時間</option><option value="1h">直近1時間</option><option value="24h">直近24時間</option><option value="today">今日</option><option value="yesterday">昨日</option><option value="this_week">今週</option><option value="custom">任意期間</option></select></label>
+          <label>信号<select id="log-signal"></select></label>
+          <label>変化<select id="log-value"><option value="all">ONとOFF</option><option value="ON">ONになった</option><option value="OFF">OFFになった</option></select></label>
+          <label>記録の種類<select id="log-kind"><option value="edge" selected>入力の変化</option><option value="snapshot">記録開始時の状態</option><option value="output">出力の記録</option><option value="all">すべて</option></select></label>
+          <label>OUT発生源<select id="log-source"><option value="all">すべて</option><option value="rule">条件ルール</option><option value="heartbeat">Heartbeat</option><option value="test">動作テスト</option><option value="startup">起動時OFF</option></select></label>
+        </div>
+        <div class="custom-period-fields" id="log-custom-period" hidden><label>開始<input id="log-custom-from" type="datetime-local"></label><label>終了<input id="log-custom-to" type="datetime-local"></label><button class="secondary-button" id="apply-log-custom-period" type="button">期間を適用</button></div>
+        <div class="table-card">
+          <div class="table-summary"><strong id="log-count">0件</strong><label class="page-size-label">表示件数<select id="log-page-size"><option value="50">50件</option><option value="100" selected>100件</option><option value="500">500件</option></select></label><span>新しい順</span></div>
+          <div class="table-scroll"><table><thead><tr><th>日時</th><th>信号</th><th>変化</th><th>記録の種類</th><th>時刻</th></tr></thead><tbody id="log-table-body"></tbody></table></div>
+          <div class="pagination"><button id="log-prev" type="button" disabled>前へ</button><span id="log-page-label">1 / 1ページ</span><button id="log-next" type="button" disabled>次へ</button></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-settings" aria-labelledby="settings-heading">
+        <div class="page-heading"><div><h1 id="settings-heading">設定</h1></div></div>
+        <nav class="settings-nav" aria-label="設定項目">
+          <button class="is-active" type="button" data-settings-target="dashboard-settings">ダッシュボード</button>
+          <button type="button" data-settings-target="input-settings">入力信号</button>
+          <button type="button" data-settings-target="output-settings">出力動作</button>
+          <button type="button" data-settings-target="system-settings">本体・データ</button>
+        </nav>
+        <section class="panel settings-section is-active-settings" id="dashboard-settings">
+          <div class="panel-head"><div><h2>ダッシュボード表示・配置</h2><p>表示する信号や集計方法、並び順を設定します。入力の記録や出力の動作は変更しません。</p></div></div>
+          <div class="widget-settings-list" id="widget-settings-list">
+            <section class="widget-group" aria-labelledby="realtime-widget-heading">
+              <div class="widget-group-heading"><strong id="realtime-widget-heading">リアルタイム</strong><button class="primary-button small-button" type="button" data-add-widget-group="realtime">表示項目を追加</button></div>
+              <div class="widget-group-list" data-widget-group="realtime">
+            <div class="widget-setting-row" draggable="true" data-widget-row="current-state" data-dashboard-size="medium" data-widget-type="現在状態" data-widget-channel="IN1" data-on-label="ON" data-off-label="OFF" data-show-elapsed="true"><span class="drag-handle" aria-hidden="true">⋮⋮</span><div><strong>運転状態</strong><small>現在状態・IN1・継続時間を表示</small></div><label class="widget-size">表示幅<select aria-label="運転状態の表示幅"><option value="small">小</option><option value="medium" selected>中</option><option value="large">大</option></select></label><div class="row-move-buttons"><button class="icon-button move-up" type="button" aria-label="運転状態を上へ移動">↑</button><button class="icon-button move-down" type="button" aria-label="運転状態を下へ移動">↓</button></div><div class="widget-row-actions"><button class="secondary-button small-button edit-widget" type="button">編集</button><button class="secondary-button small-button duplicate-widget" type="button">複製</button><button class="danger-text-button delete-widget" type="button">削除</button></div><button class="switch is-on" type="button" role="switch" aria-checked="true" aria-label="運転状態を表示" data-on-label="表示中" data-off-label="非表示"><span></span></button></div>
+              </div>
+            </section>
+            <section class="widget-group" aria-labelledby="history-widget-heading">
+              <div class="widget-group-heading"><strong id="history-widget-heading">集計・履歴</strong><button class="primary-button small-button" type="button" data-add-widget-group="history">表示項目を追加</button></div>
+              <div class="widget-group-list" data-widget-group="history">
+            <div class="widget-setting-row" draggable="true" data-widget-row="cycle-count" data-dashboard-size="small" data-widget-type="イベント回数" data-widget-channel="IN3" data-widget-period="follow" data-widget-edge="ON" data-widget-count-mode="period" data-widget-unit="回"><span class="drag-handle" aria-hidden="true">⋮⋮</span><div><strong>完了回数</strong><small>イベント回数・IN3・ダッシュボード期間に追従</small></div><label class="widget-size">表示幅<select aria-label="完了回数の表示幅"><option value="small" selected>小</option><option value="medium">中</option><option value="large">大</option></select></label><div class="row-move-buttons"><button class="icon-button move-up" type="button" aria-label="完了回数を上へ移動">↑</button><button class="icon-button move-down" type="button" aria-label="完了回数を下へ移動">↓</button></div><div class="widget-row-actions"><button class="secondary-button small-button edit-widget" type="button">編集</button><button class="secondary-button small-button duplicate-widget" type="button">複製</button><button class="danger-text-button delete-widget" type="button">削除</button></div><button class="switch is-on" type="button" role="switch" aria-checked="true" aria-label="完了回数を表示"><span></span></button></div>
+            <div class="widget-setting-row" draggable="true" data-widget-row="on-time" data-dashboard-size="small" data-widget-type="ON/OFF時間" data-widget-channel="IN1" data-widget-period="follow" data-widget-state="ON" data-widget-time-unit="human"><span class="drag-handle" aria-hidden="true">⋮⋮</span><div><strong>ON時間</strong><small>ON/OFF時間・IN1・ダッシュボード期間に追従</small></div><label class="widget-size">表示幅<select aria-label="ON時間の表示幅"><option value="small" selected>小</option><option value="medium">中</option><option value="large">大</option></select></label><div class="row-move-buttons"><button class="icon-button move-up" type="button" aria-label="ON時間を上へ移動">↑</button><button class="icon-button move-down" type="button" aria-label="ON時間を下へ移動">↓</button></div><div class="widget-row-actions"><button class="secondary-button small-button edit-widget" type="button">編集</button><button class="secondary-button small-button duplicate-widget" type="button">複製</button><button class="danger-text-button delete-widget" type="button">削除</button></div><button class="switch is-on" type="button" role="switch" aria-checked="true" aria-label="ON時間を表示"><span></span></button></div>
+            <div class="widget-setting-row" draggable="true" data-widget-row="last-alarm" data-dashboard-size="small" data-widget-type="最終イベント" data-widget-channel="IN2" data-widget-period="follow" data-widget-edge="ON" data-show-absolute="true" data-show-event-elapsed="false"><span class="drag-handle" aria-hidden="true">⋮⋮</span><div><strong>最終異常</strong><small>最終イベント・IN2・ダッシュボード期間に追従</small></div><label class="widget-size">表示幅<select aria-label="最終異常の表示幅"><option value="small" selected>小</option><option value="medium">中</option><option value="large">大</option></select></label><div class="row-move-buttons"><button class="icon-button move-up" type="button" aria-label="最終異常を上へ移動">↑</button><button class="icon-button move-down" type="button" aria-label="最終異常を下へ移動">↓</button></div><div class="widget-row-actions"><button class="secondary-button small-button edit-widget" type="button">編集</button><button class="secondary-button small-button duplicate-widget" type="button">複製</button><button class="danger-text-button delete-widget" type="button">削除</button></div><button class="switch is-on" type="button" role="switch" aria-checked="true" aria-label="最終異常を表示"><span></span></button></div>
+            <div class="widget-setting-row" draggable="true" data-widget-row="timeline" data-dashboard-size="large" data-widget-type="タイムライン" data-widget-channel="IN1,IN2,IN3,IN4,OUT1" data-widget-period="follow"><span class="drag-handle" aria-hidden="true">⋮⋮</span><div><strong>タイムライン</strong><small>タイムライン・IN1〜IN4・OUT1・ダッシュボード期間に追従</small></div><label class="widget-size">表示幅<select aria-label="タイムラインの表示幅"><option value="small">小</option><option value="medium">中</option><option value="large" selected>大</option></select></label><div class="row-move-buttons"><button class="icon-button move-up" type="button" aria-label="タイムラインを上へ移動">↑</button><button class="icon-button move-down" type="button" aria-label="タイムラインを下へ移動">↓</button></div><div class="widget-row-actions"><button class="secondary-button small-button edit-widget" type="button">編集</button><button class="secondary-button small-button duplicate-widget" type="button">複製</button><button class="danger-text-button delete-widget" type="button">削除</button></div><button class="switch is-on" type="button" role="switch" aria-checked="true" aria-label="タイムラインを表示"><span></span></button></div>
+            <div class="widget-setting-row" draggable="true" data-widget-row="recent-events" data-dashboard-size="medium" data-widget-type="イベント一覧" data-widget-channel="IN1,IN2,IN3,IN4,OUT1" data-widget-period="follow" data-widget-count="10" data-widget-value="all"><span class="drag-handle" aria-hidden="true">⋮⋮</span><div><strong>イベント一覧</strong><small>イベント一覧・IN1〜IN4・OUT1・直近10件</small></div><label class="widget-size">表示幅<select aria-label="イベント一覧の表示幅"><option value="small">小</option><option value="medium" selected>中</option><option value="large">大</option></select></label><div class="row-move-buttons"><button class="icon-button move-up" type="button" aria-label="イベント一覧を上へ移動">↑</button><button class="icon-button move-down" type="button" aria-label="イベント一覧を下へ移動">↓</button></div><div class="widget-row-actions"><button class="secondary-button small-button edit-widget" type="button">編集</button><button class="secondary-button small-button duplicate-widget" type="button">複製</button><button class="danger-text-button delete-widget" type="button">削除</button></div><button class="switch is-on" type="button" role="switch" aria-checked="true" aria-label="イベント一覧を表示"><span></span></button></div>
+              </div>
+            </section>
+          </div>
+        </section>
+        <section class="panel settings-section" id="input-settings"><div class="panel-head"><div><h2>入力信号</h2><p>記録するIN信号、名称、信号確定待ち時間を設定します。短いパルスを記録する場合は、待ち時間を小さくしてください。</p></div></div><div class="channel-settings" id="channel-settings"></div></section>
+        <section class="panel settings-section" id="output-settings">
+          <div class="panel-head"><div><h2>出力動作</h2><p>OUT信号をどの条件で動かすかを設定します。ダッシュボードの表示対象はここでは変更しません。</p></div></div>
+          <div class="heartbeat-settings">
+            <div class="heartbeat-copy"><strong>動作確認信号（Heartbeat）</strong><small>正常に記録できていることを、外部機器へ周期信号で知らせます。</small></div>
+            <div class="settings-field"><span class="field-label">使用</span><button class="switch" id="heartbeat-enabled" type="button" role="switch" aria-checked="false" aria-label="Heartbeatを使用" data-on-label="有効" data-off-label="無効"><span></span></button></div>
+            <label>出力先<select id="heartbeat-output"></select></label>
+            <label>切替間隔<input id="heartbeat-interval" type="number" min="1" max="60" step="1" inputmode="numeric"><small>1〜60秒</small></label>
+          </div>
+          <div class="rule-table"><div class="rule-table-head"><span>条件ルール</span><button class="secondary-button" type="button" id="add-output-rule">条件ルールを追加</button></div><div id="output-rule-list"></div></div>
+        </section>
+        <section class="panel compact-panel settings-section" id="system-settings"><div class="panel-head"><div><h2>本体・データ</h2><p>本体情報、時刻、アクセス保護、記録の保存期間を設定します。</p></div></div><div class="system-settings-grid"><label>設備名<input id="device-name" maxlength="40"></label><label>ホスト名<input id="hostname" maxlength="63"><small>変更は再起動後に反映されます。</small></label><label>タイムゾーン<select id="timezone"><option value="Asia/Tokyo">Asia/Tokyo</option><option value="UTC">UTC</option></select></label><div class="settings-field"><span class="field-label">パスワード保護</span><button class="switch" id="password-protection" type="button" role="switch" aria-checked="false" aria-label="パスワード保護" data-on-label="有効" data-off-label="無効"><span></span></button></div><label id="shared-password-field" hidden>共有パスワード<input id="shared-password" type="password" autocomplete="new-password"></label><label>記録を残す期間<select id="retention-days"><option value="365">365日</option><option value="180">180日</option><option value="90">90日</option><option value="30">30日</option><option value="730">730日</option><option value="1825">1825日</option><option value="">無期限</option></select></label></div><p class="help-text">DBがSD総容量の40%に達した場合、または空き容量が20%未満になった場合は、古い記録から容量保護を実行します。</p></section>
+        <div class="settings-save-bar"><span>設定を変えたら保存してください。</span><button class="primary-button" id="save-settings" type="button">変更を保存</button></div>
+      </section>
+
+      <section class="view" id="view-diagnostics" aria-labelledby="diagnostics-heading">
+        <div class="page-heading"><div><h1 id="diagnostics-heading">点検・診断</h1></div><span class="health-pill warning" id="diagnostic-warning-count" hidden>確認事項 1件</span></div>
+        <div class="diagnostic-warning" id="unsynchronized-warning" hidden><strong></strong><span></span></div>
+        <div class="diagnostic-warning" id="write-latency-warning" hidden><strong>ログ保存に遅延があります</strong><span></span></div>
+        <div class="diagnostic-warning" id="configuration-sync-warning" hidden><strong>loggerdの設定反映を確認してください</strong><span></span><button class="secondary-button" id="retry-config-sync" type="button" hidden>設定を再読込</button></div>
+        <div class="diagnostic-warning" id="storage-warning-detail" hidden><strong></strong><span></span></div>
+        <div class="diagnostic-grid">
+          <section class="panel health-overview"><div class="panel-head"><div><h2>システム状態</h2></div></div><div class="health-items" id="health-items"></div></section>
+          <section class="panel io-panel"><div class="panel-head"><div><h2>現在の入出力</h2></div><span class="updated-time">1秒ごとに更新</span></div><div class="io-grid" id="io-grid"></div></section>
+          <section class="panel maintenance-panel"><div class="panel-head"><div><h2>記録停止・出力テスト</h2></div></div><p class="safety-note">設備は停止しません</p><div class="maintenance-state" id="maintenance-state"><span class="status-dot status-dot--ok"></span><div><strong>記録中</strong><small>入力記録・動作確認信号・出力ルールが動作中</small></div></div><button class="danger-button" id="toggle-logging" type="button">記録を停止して出力テストへ</button><div class="output-tests" id="output-tests" aria-label="出力テスト"></div></section>
+        </div>
+        <section class="panel update-panel" id="update-panel" aria-labelledby="update-heading">
+          <div class="panel-head">
+            <div><h2 id="update-heading">ソフトウェア更新</h2><p>更新確認はボタンを押したときだけ行います。適用は別途確認してから開始します。</p></div>
+            <div class="update-actions"><button class="secondary-button" id="update-check" type="button">更新を確認</button><button class="primary-button" id="update-apply" type="button" disabled>更新を適用</button></div>
+          </div>
+          <dl class="update-versions">
+            <div><dt>現在のVersion</dt><dd id="update-current-version">未確認</dd></div>
+            <div><dt>最新の安定版</dt><dd id="update-latest-version">未確認</dd></div>
+          </dl>
+          <p class="update-status" id="update-status" role="status" aria-live="polite">更新状態はまだ確認していません。</p>
+          <p class="update-message" id="update-message" role="status" aria-live="polite">更新を確認すると、配布元への通信が行われます。</p>
+          <pre class="update-notes" id="update-notes" hidden></pre>
+        </section>
+      </section>
+    </main>
+
+    <aside class="timeline-detail" id="timeline-event-detail" role="tooltip" hidden></aside>
+    <dialog id="confirm-dialog"><form method="dialog"><div class="dialog-icon" aria-hidden="true">!</div><h2 id="dialog-title">確認</h2><p id="dialog-message"></p><div class="dialog-actions"><button class="secondary-button" value="cancel">キャンセル</button><button class="danger-button" id="dialog-confirm" value="confirm">停止する</button></div></form></dialog>
+    <dialog id="widget-dialog">
+      <form method="dialog">
+        <div class="dialog-step" id="widget-step-count">1 / 3</div>
+        <h2 id="widget-dialog-title">表示項目を追加</h2>
+        <section class="widget-step is-active" data-widget-step="1">
+          <label>何を見たいですか？<select id="new-widget-type"><option>現在状態</option><option>イベント回数</option><option>ON/OFF時間</option><option>最終イベント</option><option>経過時間</option><option>タイムライン</option><option>イベント一覧</option></select></label>
+          <p class="step-help" id="widget-type-help">指定入力の現在値を表示します。</p>
+        </section>
+        <section class="widget-step" data-widget-step="2">
+          <label id="widget-single-channel-field">どの信号を見ますか？<select id="new-widget-channel"></select></label>
+          <fieldset class="channel-checks" id="widget-multi-channel-field" hidden><legend>どの信号を見ますか？（複数選択可）</legend><div id="widget-channel-checks"></div></fieldset>
+        </section>
+        <section class="widget-step" data-widget-step="3">
+          <label>タイトル<input id="new-widget-title" value=""></label>
+          <label id="widget-period-field">期間<select id="new-widget-period"><option value="follow">ダッシュボードに追従</option><option value="1h">直近1時間</option><option value="8h">直近8時間</option><option value="24h">直近24時間</option><option value="7d">直近7日</option><option value="30d">直近30日</option><option value="today">今日</option><option value="yesterday">昨日</option><option value="this_week">今週</option><option value="custom">任意期間</option></select></label>
+          <details id="widget-detail-options"><summary>詳細設定</summary><div class="detail-fields">
+            <div id="current-state-options"><label>ON表示文字<input id="new-widget-on-label" value="ON"></label><label>OFF表示文字<input id="new-widget-off-label" value="OFF"></label><div class="settings-field dialog-switch-field"><span class="field-label">継続時間</span><button class="switch is-on" id="new-widget-show-elapsed" type="button" role="switch" aria-checked="true" data-on-label="表示" data-off-label="非表示"><span></span></button></div></div>
+            <label id="widget-edge-field"><span id="widget-edge-label">数える変化</span><select id="new-widget-edge"><option value="ON">OFF → ON</option><option value="OFF">ON → OFF</option></select></label>
+            <div id="widget-count-fields"><label>カウント方式<select id="new-widget-count-mode"><option value="period">期間内</option><option value="since_reset">リセット後</option><option value="stored_total">保存期間内累計</option></select></label><label>単位文字<input id="new-widget-unit" maxlength="12" value="回"></label></div>
+            <label id="widget-elapsed-source-field" hidden>経過時間の基準<select id="new-widget-source"><option value="state">指定状態から</option><option value="event">指定イベントから</option></select></label>
+            <label id="widget-state-field"><span id="widget-state-label">合計する状態</span><select id="new-widget-state"><option value="ON">ON</option><option value="OFF">OFF</option></select></label>
+            <label id="widget-time-unit-field">表示単位<select id="new-widget-time-unit"><option value="human">時間・分・秒</option><option value="hms">hh:mm:ss</option><option value="minutes">分</option><option value="hours_decimal">時間（小数）</option></select></label>
+            <div id="widget-last-event-fields"><div class="settings-field dialog-switch-field"><span class="field-label">絶対時刻</span><button class="switch is-on" id="new-widget-show-absolute" type="button" role="switch" aria-checked="true" data-on-label="表示" data-off-label="非表示"><span></span></button></div><div class="settings-field dialog-switch-field"><span class="field-label">経過時間</span><button class="switch" id="new-widget-show-event-elapsed" type="button" role="switch" aria-checked="false" data-on-label="表示" data-off-label="非表示"><span></span></button></div></div>
+            <div id="widget-list-fields"><label>表示件数<select id="new-widget-count"><option value="5">5件</option><option value="10" selected>10件</option><option value="20">20件</option></select></label><label>状態<select id="new-widget-value"><option value="all">ONとOFF</option><option value="ON">ONのみ</option><option value="OFF">OFFのみ</option></select></label></div>
+          </div></details>
+        </section>
+        <div class="dialog-actions"><button class="secondary-button" value="cancel">キャンセル</button><button class="secondary-button is-hidden" id="widget-back" type="button">戻る</button><button class="primary-button" id="widget-next" type="button">次へ</button><button class="primary-button is-hidden" id="confirm-add-widget" value="confirm">追加</button></div>
+      </form>
+    </dialog>
+    <dialog id="output-rule-dialog">
+      <form method="dialog">
+        <h2 id="output-rule-dialog-title">条件ルールを追加</h2>
+        <label>ルール名<input id="rule-name" maxlength="40"></label>
+        <label>条件<select id="rule-condition"><option value="state_duration">指定状態が続いたら</option><option value="event_absence">指定イベントが発生しなかったら</option></select></label>
+        <label>入力信号<select id="rule-channel"></select></label>
+        <label id="rule-value-field">状態<select id="rule-value"><option value="OFF">OFF</option><option value="ON">ON</option></select></label>
+        <label id="rule-edge-field" hidden>イベント<select id="rule-edge"><option value="ON">OFF → ON</option><option value="OFF">ON → OFF</option></select></label>
+        <div class="inline-fields"><label>時間<input id="rule-duration" type="number" min="1" max="86400" step="1" inputmode="numeric"></label><label>単位<select id="rule-duration-unit"><option value="seconds">秒</option><option value="minutes">分</option><option value="hours">時間</option></select></label></div>
+        <label>出力先<select id="rule-output"></select></label>
+        <div class="settings-field dialog-switch-field"><span class="field-label">ルールの状態</span><button class="switch is-on" id="rule-enabled" type="button" role="switch" aria-checked="true" aria-label="このルールを有効にする" data-on-label="有効" data-off-label="無効"><span></span></button></div>
+        <p class="form-error" id="rule-error" role="alert" hidden></p>
+        <div class="dialog-actions split-actions"><button class="danger-text-button" id="delete-output-rule" type="button">削除</button><span></span><button class="secondary-button" value="cancel">キャンセル</button><button class="primary-button" id="save-output-rule" type="button">保存</button></div>
+      </form>
+    </dialog>
+    <dialog id="setup-dialog">
+      <form method="dialog">
+        <h2>初回設定</h2>
+        <p>記録を始めるための基本設定を行います。</p>
+        <label>設備名<input id="setup-device-name" maxlength="40" value="第2組立機"></label>
+        <label>タイムゾーン<select id="setup-timezone"><option value="Asia/Tokyo">Asia/Tokyo</option><option value="UTC">UTC</option></select></label>
+        <div class="settings-field dialog-switch-field"><span class="field-label">パスワード保護</span><button class="switch" id="setup-password-protection" type="button" role="switch" aria-checked="false" aria-label="パスワード保護" data-on-label="有効" data-off-label="無効"><span></span></button></div>
+        <label id="setup-password-field" hidden>共有パスワード<input id="setup-password" type="password" autocomplete="new-password"></label>
+        <fieldset class="setup-channels"><legend>使用する入力・名称・信号確定待ち時間</legend><div id="setup-channel-list"></div></fieldset>
+        <label>記録を残す期間<select id="setup-retention"><option value="30">30日</option><option value="90">90日</option><option value="180">180日</option><option value="365" selected>365日</option><option value="730">730日</option><option value="1825">1825日</option><option value="">無期限</option></select></label>
+        <p class="form-error" id="setup-error" role="alert" hidden></p>
+        <div class="dialog-actions"><button class="primary-button" id="complete-setup" type="button">設定を完了して記録を開始</button></div>
+      </form>
+    </dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script>window.EVENT_LOGGER_LIVE = true; window.EVENT_LOGGER_DEMO = {{ 'true' if demo else 'false' }};</script>
+    <script src="{{ url_for('static', filename='update_panel.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='widget_config.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='refresh_policy.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='storage_policy.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='time_format.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='retention_policy.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='csv_format.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='query_policy.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='view_format.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  </body>
+</html>

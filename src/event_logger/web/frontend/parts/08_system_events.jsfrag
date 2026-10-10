@@ -1,0 +1,184 @@
+  document.querySelector("#save-settings").addEventListener("click", async () => {
+    const pendingChannels = [...document.querySelectorAll("#channel-settings .channel-row")].map((row) => {
+      const debounceValue = row.querySelector(".channel-debounce").value.trim();
+      return {
+        id: Number(row.dataset.channel),
+        name: row.querySelector(".channel-name").value.trim(),
+        enabled: switchIsOn(row.querySelector(".switch")),
+        debounce: debounceValue === "" ? Number.NaN : Number(debounceValue)
+      };
+    });
+    const heartbeatEnabled = switchIsOn(document.querySelector("#heartbeat-enabled"));
+    const heartbeatOutputId = Number(document.querySelector("#heartbeat-output").value);
+    const intervalSeconds = Number(document.querySelector("#heartbeat-interval").value);
+    const conflictingRule = fixtures.outputRules.find((rule) => rule.outputId === heartbeatOutputId);
+    const invalidDebounce = pendingChannels.find((channel) => !Number.isInteger(channel.debounce) || channel.debounce < 0 || channel.debounce > 5000);
+    const deviceName = document.querySelector("#device-name").value.trim();
+    const hostname = document.querySelector("#hostname").value.trim();
+    const passwordProtection = switchIsOn(document.querySelector("#password-protection"));
+    if (invalidDebounce) {
+      openSettingsSection("input-settings");
+      showToast(`IN${invalidDebounce.id}の信号確定待ち時間は0〜5000msで入力してください`);
+      return;
+    }
+    if (!deviceName || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(hostname)) {
+      openSettingsSection("system-settings");
+      showToast(!deviceName ? "設備名を入力してください" : "ホスト名は英小文字・数字・ハイフンで入力してください");
+      return;
+    }
+    if (passwordProtection && !fixtures.settings.passwordProtection && !document.querySelector("#shared-password").value) {
+      openSettingsSection("system-settings");
+      showToast("共有パスワードを入力してください");
+      return;
+    }
+    if (heartbeatEnabled && (!Number.isInteger(intervalSeconds) || intervalSeconds < 1 || intervalSeconds > 60)) {
+      openSettingsSection("output-settings");
+      document.querySelector("#heartbeat-interval").focus();
+      showToast("Heartbeatの切替間隔は1〜60秒で入力してください");
+      return;
+    }
+    if (heartbeatEnabled && conflictingRule) {
+      openSettingsSection("output-settings");
+      document.querySelector("#heartbeat-output").focus();
+      showToast(`OUT${heartbeatOutputId}は${conflictingRule.name}で使用中です`);
+      return;
+    }
+    if (liveMode) {
+      try {
+        for (const pending of pendingChannels) {
+          await liveJson(`/api/channels/${pending.id}`, {
+            method: "POST",
+            body: JSON.stringify({
+              name: pending.name,
+              enabled: pending.enabled,
+              debounce_ms: pending.debounce,
+              on_label: "ON",
+              off_label: "OFF"
+            })
+          });
+        }
+        await liveJson("/api/settings/heartbeat", {
+          method: "POST",
+          body: JSON.stringify({
+            enabled: heartbeatEnabled,
+            channel_id: heartbeatOutputId,
+            interval_ms: intervalSeconds * 1000
+          })
+        });
+        await liveJson("/api/settings/retention", {
+          method: "POST",
+          body: JSON.stringify({ retention_days: retentionDaysFromSelectValue(document.querySelector("#retention-days").value) })
+        });
+        await liveJson("/api/settings/system", {
+          method: "POST",
+          body: JSON.stringify({
+            device_name: deviceName,
+            hostname,
+            timezone: document.querySelector("#timezone").value,
+            password_protection: passwordProtection,
+            password: document.querySelector("#shared-password").value || null
+          })
+        });
+        await saveWidgetSettings();
+        await refreshLiveState();
+        showToast("設定を保存しました");
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "設定の保存に失敗しました");
+      }
+      return;
+    }
+    pendingChannels.forEach((pending) => {
+      Object.assign(fixtures.channels.find((channel) => channel.id === pending.id), pending);
+    });
+    fixtures.settings.heartbeat = { enabled: heartbeatEnabled, outputId: heartbeatOutputId, intervalSeconds };
+    fixtures.settings.retentionDays = retentionDaysFromSelectValue(document.querySelector("#retention-days").value);
+    fixtures.settings.deviceName = deviceName;
+    fixtures.settings.hostname = hostname;
+    fixtures.settings.timezone = document.querySelector("#timezone").value;
+    fixtures.settings.passwordProtection = passwordProtection;
+    document.querySelector("#page-title").textContent = deviceName;
+    updateOutputOwners();
+    renderLogSignalOptions();
+    renderRecentEvents();
+    renderTimeline();
+    renderLogs();
+    renderHealth();
+    renderOutputSettings(true);
+    renderDashboardOutputs();
+    refreshCurrentStateCards();
+    renderCustomHistoryWidgets();
+    renderChannelSettings();
+    showToast("設定を保存しました");
+  });
+  document.querySelectorAll("[data-settings-target]").forEach((button) => {
+    button.addEventListener("click", () => openSettingsSection(button.dataset.settingsTarget));
+  });
+  document.querySelector("#channel-settings").addEventListener("click", (event) => {
+    const button = event.target.closest(".switch");
+    if (!button) return;
+    const enabled = !switchIsOn(button);
+    setSwitchState(button, enabled);
+    button.closest(".channel-row").classList.toggle("is-disabled", !enabled);
+  });
+  document.querySelector("#heartbeat-enabled").addEventListener("click", (event) => {
+    setSwitchState(event.currentTarget, !switchIsOn(event.currentTarget));
+    syncHeartbeatFields();
+  });
+  document.querySelector("#password-protection").addEventListener("click", (event) => {
+    const enabled = !switchIsOn(event.currentTarget);
+    setSwitchState(event.currentTarget, enabled);
+    document.querySelector("#shared-password-field").hidden = !enabled;
+  });
+  document.querySelector("#setup-password-protection").addEventListener("click", (event) => {
+    const enabled = !switchIsOn(event.currentTarget);
+    setSwitchState(event.currentTarget, enabled);
+    document.querySelector("#setup-password-field").hidden = !enabled;
+  });
+  document.querySelector("#setup-channel-list").addEventListener("click", (event) => {
+    const button = event.target.closest(".switch");
+    if (button) setSwitchState(button, !switchIsOn(button));
+  });
+  document.querySelector("#rule-enabled").addEventListener("click", (event) => {
+    setSwitchState(event.currentTarget, !switchIsOn(event.currentTarget));
+  });
+  document.querySelector("#complete-setup").addEventListener("click", completeSetup);
+  document.querySelector("#add-output-rule").addEventListener("click", () => openOutputRuleDialog());
+  document.querySelector("#output-rule-list").addEventListener("click", (event) => {
+    const switchButton = event.target.closest("[data-rule-enabled]");
+    if (switchButton) {
+      toggleOutputRule(Number(switchButton.dataset.ruleEnabled));
+      return;
+    }
+    const button = event.target.closest("[data-edit-rule]");
+    if (button) openOutputRuleDialog(Number(button.dataset.editRule));
+  });
+  document.querySelector("#rule-condition").addEventListener("change", updateRuleConditionFields);
+  document.querySelector("#save-output-rule").addEventListener("click", saveOutputRule);
+  document.querySelector("#delete-output-rule").addEventListener("click", async () => {
+    const rule = fixtures.outputRules.find((item) => item.id === editingOutputRuleId);
+    if (!rule) return;
+    if (liveMode) {
+      try {
+        await liveJson(`/api/output-rules/${rule.id}`, { method: "DELETE" });
+        await refreshLiveState();
+        editingOutputRuleId = null;
+        document.querySelector("#output-rule-dialog").close();
+        showToast("条件ルールを削除しました");
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "条件ルールを削除できませんでした");
+      }
+      return;
+    }
+    fixtures.outputRules = fixtures.outputRules.filter((item) => item.id !== editingOutputRuleId);
+    const output = fixtures.outputs.find((item) => item.id === rule.outputId);
+    output.value = "OFF";
+    editingOutputRuleId = null;
+    updateOutputOwners();
+    renderOutputSettings(true);
+    renderLogSignalOptions();
+    renderDashboardOutputs();
+    renderHealth();
+    renderDataViews();
+    document.querySelector("#output-rule-dialog").close();
+    showToast("条件ルールを削除しました");
+  });

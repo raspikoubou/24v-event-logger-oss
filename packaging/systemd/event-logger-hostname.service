@@ -1,0 +1,16 @@
+[Unit]
+Description=24V Event Logger OS hostname
+After=local-fs.target
+Before=event-loggerd.service event-logger-web.service
+ConditionPathExists=/var/lib/event-logger/logger.db
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/event-logger
+ExecStart=/opt/event-logger/current/packaging/run_with_private_sqlite.sh /opt/event-logger/current/venv/bin/event-logger-apply-hostname --database /var/lib/event-logger/logger.db
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

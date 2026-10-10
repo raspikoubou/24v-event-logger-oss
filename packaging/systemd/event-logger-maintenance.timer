@@ -1,0 +1,11 @@
+[Unit]
+Description=Run 24V Event Logger database maintenance daily
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=event-logger-maintenance.service
+
+[Install]
+WantedBy=timers.target

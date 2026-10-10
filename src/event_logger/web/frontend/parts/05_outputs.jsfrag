@@ -1,0 +1,355 @@
+  function renderOutputSettings(preserveForm = false) {
+    const heartbeat = fixtures.settings.heartbeat;
+    if (!preserveForm) {
+      setSwitchState(document.querySelector("#heartbeat-enabled"), heartbeat.enabled);
+      document.querySelector("#heartbeat-output").innerHTML = fixtures.outputs.map((output) => (
+        `<option value="${output.id}">OUT${output.id}</option>`
+      )).join("");
+      document.querySelector("#heartbeat-output").value = String(heartbeat.outputId);
+      document.querySelector("#heartbeat-interval").value = String(heartbeat.intervalSeconds);
+      document.querySelector("#retention-days").value = fixtures.settings.retentionDays == null
+        ? ""
+        : String(fixtures.settings.retentionDays);
+      document.querySelector("#device-name").value = fixtures.settings.deviceName;
+      document.querySelector("#hostname").value = fixtures.settings.hostname;
+      document.querySelector("#timezone").value = fixtures.settings.timezone;
+      setSwitchState(document.querySelector("#password-protection"), fixtures.settings.passwordProtection);
+      document.querySelector("#shared-password-field").hidden = !fixtures.settings.passwordProtection;
+    }
+    syncHeartbeatFields();
+    const list = document.querySelector("#output-rule-list");
+    list.innerHTML = fixtures.outputRules.map((rule) => {
+      const channelEnabled = fixtures.channels.find((channel) => `IN${channel.id}` === rule.channelId)?.enabled;
+      const paused = rule.enabled && !channelEnabled;
+      return `
+      <div class="rule-row" data-rule-id="${rule.id}">
+        <div><strong>${escapeHtml(rule.name)}</strong><small>${escapeHtml(ruleDescription(rule))}${paused ? "・入力無効のため一時停止" : ""}</small></div>
+        <span>OUT${rule.outputId}</span>
+        <button class="switch${rule.enabled ? " is-on" : ""}" type="button" role="switch" aria-checked="${rule.enabled}" aria-label="${escapeHtml(rule.name)}を有効にする" data-rule-enabled="${rule.id}" data-on-label="有効" data-off-label="無効"><span></span></button>
+        <button class="secondary-button small-button" type="button" data-edit-rule="${rule.id}">編集</button>
+      </div>
+    `;
+    }).join("") || '<p class="empty-rule-list">条件ルールはありません。</p>';
+  }
+
+  async function toggleOutputRule(ruleId) {
+    const rule = fixtures.outputRules.find((item) => item.id === ruleId);
+    if (!rule) return;
+    const enabled = !rule.enabled;
+    if (enabled) {
+      const channel = fixtures.channels.find((item) => `IN${item.id}` === rule.channelId);
+      if (!channel?.enabled) {
+        showToast(`${rule.channelId}が無効です。先に入力を有効にしてください`);
+        return;
+      }
+      const conflict = outputConflict(rule.outputId, rule.id);
+      if (conflict) {
+        showToast(`OUT${rule.outputId}は${conflict}で使用中です`);
+        return;
+      }
+    }
+    if (liveMode) {
+      try {
+        const unitMs = { seconds: 1000, minutes: 60_000, hours: 3_600_000 };
+        await liveJson(`/api/output-rules/${rule.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            name: rule.name,
+            condition: rule.condition,
+            input_channel: Number(rule.channelId.replace("IN", "")),
+            output_channel: rule.outputId,
+            duration_ms: rule.duration * unitMs[rule.durationUnit],
+            value: rule.value === "ON",
+            edge: rule.edge === "ON" ? "rising" : "falling",
+            enabled
+          })
+        });
+        await refreshLiveState();
+        showToast(enabled ? `${rule.name}を有効にしました` : `${rule.name}を無効にしました`);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "条件ルールを変更できませんでした");
+      }
+      return;
+    }
+    rule.enabled = enabled;
+    updateOutputOwners();
+    renderOutputSettings(true);
+    renderLogSignalOptions();
+    renderDashboardOutputs();
+    renderHealth();
+    showToast(enabled ? `${rule.name}を有効にしました` : `${rule.name}を無効にしました`);
+  }
+
+  function populateInputSelect(select, selectedId) {
+    select.innerHTML = fixtures.channels.map((channel) => (
+      `<option value="IN${channel.id}">${escapeHtml(channelLabel(channel))}</option>`
+    )).join("");
+    select.value = selectedId || "IN1";
+  }
+
+  function updateRuleConditionFields() {
+    const absence = document.querySelector("#rule-condition").value === "event_absence";
+    document.querySelector("#rule-value-field").hidden = absence;
+    document.querySelector("#rule-edge-field").hidden = !absence;
+  }
+
+  function openOutputRuleDialog(ruleId = null) {
+    editingOutputRuleId = ruleId;
+    const rule = fixtures.outputRules.find((item) => item.id === ruleId);
+    document.querySelector("#output-rule-dialog-title").textContent = rule ? "条件ルールを編集" : "条件ルールを追加";
+    document.querySelector("#rule-name").value = rule?.name || "";
+    document.querySelector("#rule-condition").value = rule?.condition || "state_duration";
+    populateInputSelect(document.querySelector("#rule-channel"), rule?.channelId || "IN1");
+    document.querySelector("#rule-value").value = rule?.value || "OFF";
+    document.querySelector("#rule-edge").value = rule?.edge || "ON";
+    document.querySelector("#rule-duration").value = String(rule?.duration || 5);
+    document.querySelector("#rule-duration-unit").value = rule?.durationUnit || "minutes";
+    document.querySelector("#rule-output").innerHTML = fixtures.outputs.map((output) => `<option value="${output.id}">OUT${output.id}</option>`).join("");
+    document.querySelector("#rule-output").value = String(rule?.outputId || 4);
+    setSwitchState(document.querySelector("#rule-enabled"), rule?.enabled ?? true);
+    document.querySelector("#delete-output-rule").hidden = !rule;
+    const error = document.querySelector("#rule-error");
+    error.hidden = true;
+    error.textContent = "";
+    updateRuleConditionFields();
+    document.querySelector("#output-rule-dialog").showModal();
+  }
+
+  function outputConflict(outputId, ignoredRuleId = null) {
+    const heartbeat = fixtures.settings.heartbeat;
+    if (heartbeat.enabled && heartbeat.outputId === outputId) return "Heartbeat";
+    const rule = fixtures.outputRules.find((item) => item.outputId === outputId && item.id !== ignoredRuleId);
+    return rule?.name || "";
+  }
+
+  function validRuleDuration(value) {
+    const duration = Number(value);
+    return Number.isInteger(duration) && duration >= 1 && duration <= 86400;
+  }
+
+  async function saveOutputRule() {
+    const error = document.querySelector("#rule-error");
+    const name = document.querySelector("#rule-name").value.trim();
+    const channelId = document.querySelector("#rule-channel").value;
+    const outputId = Number(document.querySelector("#rule-output").value);
+    const duration = Number(document.querySelector("#rule-duration").value);
+    const enabled = switchIsOn(document.querySelector("#rule-enabled"));
+    const channel = fixtures.channels.find((item) => `IN${item.id}` === channelId);
+    const conflict = outputConflict(outputId, editingOutputRuleId);
+    let message = "";
+    if (!name) message = "ルール名を入力してください。";
+    else if (!validRuleDuration(duration)) message = "時間は1〜86400の整数で入力してください。";
+    else if (enabled && !channel.enabled) message = `${channelId}が無効です。先に入力を有効にしてください。`;
+    else if (conflict) message = `OUT${outputId}は${conflict}で使用中です。`;
+    if (message) {
+      error.textContent = message;
+      error.hidden = false;
+      return;
+    }
+    const values = {
+      name,
+      condition: document.querySelector("#rule-condition").value,
+      channelId,
+      value: document.querySelector("#rule-value").value,
+      edge: document.querySelector("#rule-edge").value,
+      duration,
+      durationUnit: document.querySelector("#rule-duration-unit").value,
+      outputId,
+      enabled
+    };
+    const wasEditing = Boolean(editingOutputRuleId);
+    if (liveMode) {
+      try {
+        const unitMs = { seconds: 1000, minutes: 60_000, hours: 3_600_000 };
+        const body = {
+          name,
+          condition: values.condition,
+          input_channel: Number(channelId.replace("IN", "")),
+          output_channel: outputId,
+          duration_ms: duration * unitMs[values.durationUnit],
+          value: values.value === "ON",
+          edge: values.edge === "ON" ? "rising" : "falling",
+          enabled
+        };
+        const path = editingOutputRuleId === null
+          ? "/api/output-rules"
+          : `/api/output-rules/${editingOutputRuleId}`;
+        await liveJson(path, { method: editingOutputRuleId === null ? "POST" : "PUT", body: JSON.stringify(body) });
+        await refreshLiveState();
+        document.querySelector("#output-rule-dialog").close();
+        editingOutputRuleId = null;
+        showToast(wasEditing ? "条件ルールを変更しました" : "条件ルールを追加しました");
+      } catch (requestError) {
+        error.textContent = requestError instanceof Error ? requestError.message : "条件ルールの保存に失敗しました";
+        error.hidden = false;
+      }
+      return;
+    }
+    if (wasEditing) {
+      Object.assign(fixtures.outputRules.find((item) => item.id === editingOutputRuleId), values);
+    } else {
+      const id = Math.max(0, ...fixtures.outputRules.map((item) => item.id)) + 1;
+      fixtures.outputRules.push({ id, ...values });
+    }
+    updateOutputOwners();
+    renderOutputSettings(true);
+    renderLogSignalOptions();
+    renderDashboardOutputs();
+    renderHealth();
+    renderDataViews();
+    document.querySelector("#output-rule-dialog").close();
+    showToast(wasEditing ? "条件ルールを変更しました" : "条件ルールを追加しました");
+    editingOutputRuleId = null;
+  }
+
+  async function setLoggingState(nextLogging) {
+    if (liveMode) {
+      try {
+        await liveJson(nextLogging ? "/api/logging/start" : "/api/logging/stop", { method: "POST" });
+        await refreshLiveState();
+        showToast(nextLogging ? "記録を再開しました" : "記録を停止してメンテナンス状態へ移行しました");
+      } catch (error) {
+        await refreshLiveState().catch(() => {});
+        showToast(error instanceof Error ? error.message : "ロギング状態を変更できませんでした");
+      }
+      return;
+    }
+    if (activeOutputTest) finishOutputTest(false);
+    logging = nextLogging;
+    if (logging) {
+      loggingStartedAtMs = demoNowMs();
+      const gap = unknownIntervals.at(-1);
+      if (gap && !gap.endMs) gap.endMs = loggingStartedAtMs;
+      loggingStoppedAtMs = null;
+      const nextEventId = Math.max(0, ...fixtures.events.map((event) => event.id)) + 1;
+      const snapshots = fixtures.channels.filter((channel) => channel.enabled).map((channel, index) => ({
+        id: nextEventId + index,
+        timestamp: new Date(loggingStartedAtMs).toISOString(),
+        time: formatLocalDateTime(loggingStartedAtMs, true).slice(11, 23),
+        signal: `IN${channel.id}`,
+        value: channel.value,
+        kind: "snapshot",
+        source: "",
+        synced: true
+      }));
+      fixtures.events.unshift(...snapshots.reverse());
+    } else {
+      loggingStoppedAtMs = demoNowMs();
+      unknownIntervals.push({ startMs: loggingStoppedAtMs, endMs: null });
+    }
+    updateOutputOwners();
+    if (!logging) fixtures.outputs.forEach((output) => { output.value = "OFF"; });
+    const badge = document.querySelector("#logging-badge");
+    const toggle = document.querySelector("#toggle-logging");
+    const state = document.querySelector("#maintenance-state");
+    badge.classList.toggle("is-stopped", !logging);
+    badge.querySelector("span:last-child").textContent = logging ? "記録中" : "記録停止中";
+    toggle.textContent = logging ? "記録を停止して出力テストへ" : "記録を再開";
+    toggle.classList.toggle("danger-button", logging);
+    toggle.classList.toggle("primary-button", !logging);
+    state.innerHTML = logging
+      ? `<span class="status-dot status-dot--ok"></span><div><strong>記録中</strong><small>入力記録・動作確認信号・出力ルールが動作中</small></div>`
+      : `<span class="status-dot status-dot--stopped"></span><div><strong>記録停止中（メンテナンス）</strong><small>入力は記録されません。通常OUTはOFFです。設備の運転は停止していません。</small></div>`;
+    document.querySelector("#maintenance-banner").hidden = logging;
+    renderOutputTests();
+    renderDashboardOutputs();
+    renderHealth();
+    refreshCurrentStateCards();
+    renderDashboardPeriod();
+    renderCustomHistoryWidgets();
+    showToast(logging ? "記録を再開しました" : "記録を停止してメンテナンス状態へ移行しました");
+  }
+
+  function openConfirmation(title, message, confirmLabel, action) {
+    const dialog = document.querySelector("#confirm-dialog");
+    document.querySelector("#dialog-title").textContent = title;
+    document.querySelector("#dialog-message").textContent = message;
+    document.querySelector("#dialog-confirm").textContent = confirmLabel;
+    pendingAction = action;
+    dialog.showModal();
+  }
+
+  function downloadCsv() {
+    if (liveMode) {
+      const anchor = document.createElement("a");
+      anchor.href = `/api/logs.csv?${logApiQuery(false)}`;
+      anchor.download = "events.csv";
+      anchor.hidden = true;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      return;
+    }
+    const rows = filteredEvents();
+    const text = serializeDemoCsv(rows, { formatLocalDateTime, eventTimeMs, signalDisplayName });
+    const blob = new Blob(["\ufeff", text], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "event-log-demo.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    showToast(`${rows.length}件のイベントを書き出しました`);
+  }
+
+  function openSettingsSection(sectionId) {
+    switchView("settings");
+    document.querySelectorAll(".settings-section").forEach((section) => {
+      section.classList.toggle("is-active-settings", section.id === sectionId);
+    });
+    document.querySelectorAll("[data-settings-target]").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.settingsTarget === sectionId);
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function showWidgetStep(step) {
+    currentWidgetStep = step;
+    document.querySelectorAll("[data-widget-step]").forEach((panel) => {
+      panel.classList.toggle("is-active", Number(panel.dataset.widgetStep) === step);
+    });
+    document.querySelector("#widget-step-count").textContent = `${step} / 3`;
+    document.querySelector("#widget-back").classList.toggle("is-hidden", step === 1);
+    document.querySelector("#widget-next").classList.toggle("is-hidden", step === 3);
+    document.querySelector("#confirm-add-widget").classList.toggle("is-hidden", step !== 3);
+  }
+
+  function setWidgetTypeOptions(group, selectedType) {
+    const types = group === "realtime"
+      ? ["現在状態"]
+      : ["イベント回数", "ON/OFF時間", "最終イベント", "経過時間", "タイムライン", "イベント一覧"];
+    const typeSelect = document.querySelector("#new-widget-type");
+    typeSelect.innerHTML = types.map((type) => `<option>${type}</option>`).join("");
+    typeSelect.value = types.includes(selectedType) ? selectedType : types[0];
+    document.querySelector("#widget-type-help").textContent = widgetTypeHelp[typeSelect.value];
+  }
+
+  function renderWidgetChannelOptions() {
+    const select = document.querySelector("#new-widget-channel");
+    select.innerHTML = fixtures.channels.map((channel) => (
+      `<option value="IN${channel.id}">${escapeHtml(channelLabel(channel))}</option>`
+    )).join("");
+    const inputs = fixtures.channels.map((channel) => `
+      <label><input type="checkbox" value="IN${channel.id}">${escapeHtml(channelLabel(channel))}</label>
+    `);
+    const outputs = fixtures.outputs.map((output) => `
+      <label><input type="checkbox" value="OUT${output.id}">OUT${output.id} ${escapeHtml(output.name)}</label>
+    `);
+    document.querySelector("#widget-channel-checks").innerHTML = [...inputs, ...outputs].join("");
+  }
+
+  function setWidgetChannels(value) {
+    const ids = signalIds(value);
+    document.querySelector("#new-widget-channel").value = ids[0] || "IN1";
+    document.querySelectorAll("#widget-channel-checks input").forEach((input) => {
+      input.checked = ids.includes(input.value);
+    });
+  }
+
+  function selectedWidgetChannels() {
+    const type = document.querySelector("#new-widget-type").value;
+    if (!["タイムライン", "イベント一覧"].includes(type)) return document.querySelector("#new-widget-channel").value;
+    const checked = [...document.querySelectorAll("#widget-channel-checks input:checked")].map((input) => input.value);
+    return checked.join(",");
+  }
+

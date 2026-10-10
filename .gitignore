@@ -1,0 +1,54 @@
+# Python・ビルド生成物
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# ローカルのデータ・認証情報
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+.env
+*.pem
+*.key
+*.secret
+event-logger.env
+.DS_Store
+SDバックアップ/
+*.img
+*.cdr
+
+# 公開リポジトリ：ルートでは配布対象だけを追跡する
+# 内部設計書・AGENTS.md・sites-demo・qa・testsなどは含めない
+/*
+!/.gitignore
+!/README.md
+!/LICENSE
+!/pyproject.toml
+!/src/
+!/packaging/
+!/docs/
+
+# docsは利用者向けの説明書・リリースノート・説明画像だけを追跡する
+/docs/*
+!/docs/概要説明書.md
+!/docs/インストール説明書.md
+!/docs/取扱説明書.md
+!/docs/リリースノート_*.md
+!/docs/images/
+/docs/images/*
+!/docs/images/manual/
+
+# 公開範囲を検査するCIだけを許可する
+!/.github/
+/.github/*
+!/.github/workflows/
+/.github/workflows/*
+!/.github/workflows/public-scope.yml

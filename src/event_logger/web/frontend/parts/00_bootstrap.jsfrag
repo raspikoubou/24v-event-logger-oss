@@ -1,0 +1,237 @@
+(() => {
+  "use strict";
+
+  // Sitesは固定fixtureのまま確認でき、Piのテンプレートだけが実機APIを有効化する。
+  const liveMode = Boolean(window.EVENT_LOGGER_LIVE);
+
+  const {
+    createRefreshCoordinator,
+    shouldRefreshDashboard,
+    shouldDeferTimelineRender,
+    shouldDeferTimelineWidgetRender,
+    shouldRefreshLogPage
+  } = window.EventLoggerRefreshPolicy;
+
+  async function liveJson(path, options = {}) {
+    const requestOptions = { ...options, headers: { ...(options.headers || {}) } };
+    if (requestOptions.body && !requestOptions.headers["Content-Type"]) {
+      requestOptions.headers["Content-Type"] = "application/json";
+    }
+    if (requestOptions.method && requestOptions.method !== "GET") {
+      const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
+      if (csrf) requestOptions.headers["X-CSRF-Token"] = csrf;
+    }
+    const response = await fetch(path, requestOptions);
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error?.message || "サーバーとの通信に失敗しました");
+    }
+    return payload.data;
+  }
+
+  const { dashboardApiUrl, buildLogApiQuery, logValueFilterForWidget } = window.EventLoggerQueryPolicy;
+
+  const {
+    retentionDaysFromSelectValue,
+    retentionDaysFromStatus
+  } = window.EventLoggerRetentionPolicy;
+  const { serializeDemoCsv } = window.EventLoggerCsvFormat;
+
+  async function loadLiveFixtures(
+    period = null,
+    includeDashboard = false,
+    customRange = null,
+    includeEvents = true
+  ) {
+    if (!liveMode) {
+      return {
+        ...window.DEMO_FIXTURES,
+        nowMs: Date.now(),
+        loggerStatus: "logging",
+        storage: null,
+        storageError: false,
+        dashboardValues: null,
+        dashboardWarning: null,
+        unsynchronizedCount: 3,
+        configurationSync: { outOfSync: false, stopped: false, message: "" }
+      };
+    }
+    const status = await liveJson("/api/status");
+    const storageWarning = storageWarningFor(
+      status.storage,
+      Boolean(status.storage_error)
+    );
+    const selectedPeriod = period || status.dashboard_period || "8h";
+    const selectedCustomRange = customRange || status.dashboard_custom_range;
+    const [widgets, rules, setup, logs, dashboard] = await Promise.all([
+      liveJson("/api/widgets"),
+      liveJson("/api/output-rules"),
+      liveJson("/api/setup"),
+      includeEvents ? liveJson("/api/logs?limit=500") : Promise.resolve(null),
+      includeDashboard
+        ? liveJson(dashboardApiUrl(selectedPeriod, selectedCustomRange))
+        : Promise.resolve(null)
+    ]);
+    const nowMs = Number(status.clock?.utc_ms || Date.now());
+    const timezone = status.system?.timezone || "Asia/Tokyo";
+    const periods = {
+      "1h": { label: "直近1時間", durationMs: 3_600_000 },
+      "8h": { label: "直近8時間", durationMs: 28_800_000 },
+      "24h": { label: "直近24時間", durationMs: 86_400_000 },
+      "7d": { label: "直近7日", durationMs: 7 * 86_400_000 },
+      "30d": { label: "直近30日", durationMs: 30 * 86_400_000 },
+      today: { label: "今日", durationMs: 86_400_000 },
+      yesterday: { label: "昨日", durationMs: 86_400_000 },
+      this_week: { label: "今週", durationMs: 7 * 86_400_000 },
+      custom: { label: "任意期間", durationMs: 14_400_000 }
+    };
+    if (
+      Number.isInteger(dashboard?.from_ms)
+      && Number.isInteger(dashboard?.to_ms)
+      && periods[selectedPeriod]
+    ) {
+      periods[selectedPeriod] = {
+        ...periods[selectedPeriod],
+        startAt: new Date(dashboard.from_ms).toISOString(),
+        endAt: new Date(dashboard.to_ms).toISOString(),
+        durationMs: dashboard.to_ms - dashboard.from_ms
+      };
+    }
+    const knownLoggerState = ["logging", "maintenance", "critical"].includes(status.logger_status);
+    const channels = (status.channels || []).map((channel) => ({
+      id: channel.id,
+      name: channel.name || `IN${channel.id}`,
+      enabled: Boolean(channel.enabled),
+      value: knownLoggerState
+        ? status.inputs?.[String(channel.id)] ? "ON" : "OFF"
+        : "UNKNOWN",
+      debounce: channel.debounce_ms,
+      onLabel: channel.on_label || "ON",
+      offLabel: channel.off_label || "OFF"
+    }));
+    const outputRules = (rules.items || []).map((rule) => ({
+      id: rule.id,
+      name: rule.name,
+      condition: rule.condition,
+      channelId: `IN${rule.input_channel}`,
+      value: rule.value ? "ON" : "OFF",
+      edge: rule.edge === "falling" ? "OFF" : "ON",
+      duration: Math.max(1, Math.round(rule.duration_ms / 1000)),
+      durationUnit: "seconds",
+      outputId: rule.output_channel,
+      enabled: Boolean(rule.enabled)
+    }));
+    const heartbeat = status.heartbeat || { enabled: false, channel_id: null, interval_ms: 5000 };
+    const outputs = Array.from({ length: 6 }, (_, index) => {
+      const id = index + 1;
+      const rule = outputRules.find((item) => item.outputId === id);
+      const isHeartbeat = heartbeat.enabled && heartbeat.channel_id === id;
+      return {
+        id,
+        name: isHeartbeat ? "Heartbeat" : rule?.name || "未使用",
+        owner: isHeartbeat ? "Heartbeat" : rule ? "条件ルール" : "未使用",
+        value: knownLoggerState
+          ? status.outputs?.[String(id)] ? "ON" : "OFF"
+          : "UNKNOWN"
+      };
+    });
+    const events = logs === null ? null : (logs.items || []).map((event, index) => ({
+      id: Number(event.id?.split(":").pop()) || index + 1,
+      timestamp: event.timestamp,
+      signal: event.signal,
+      value: event.value,
+      kind: event.kind,
+      source: event.source || "",
+      synced: Boolean(event.clock_synced)
+    }));
+    return {
+      nowMs,
+      dashboardPeriods: periods,
+      channels,
+      outputs,
+      settings: {
+        deviceName: status.system?.device_name || "設備名未設定",
+        hostname: status.system?.hostname || "",
+        timezone,
+        passwordProtection: Boolean(status.system?.password_protection),
+        setupCompleted: Boolean(setup.completed),
+        dashboardPeriod: status.dashboard_period || "8h",
+        dashboardCustomRange: status.dashboard_custom_range || null,
+        heartbeat: {
+          enabled: Boolean(heartbeat.enabled),
+          outputId: heartbeat.channel_id || 1,
+          intervalSeconds: Math.max(1, Math.round((heartbeat.interval_ms || 5000) / 1000))
+        },
+        retentionDays: retentionDaysFromStatus(status)
+      },
+      outputRules,
+      outputTestChannel: status.daemon?.output_test_channel ?? null,
+      events,
+      counterResets: {},
+      widgets: widgets.items || [],
+      dashboardValues: dashboard?.items || null,
+      dashboardWarning: dashboard?.warning || null,
+      storage: status.storage || null,
+      storageError: Boolean(status.storage_error),
+      unsynchronizedCount: Number(status.unsynchronized_event_count || 0),
+      writeLatency: status.daemon?.write_latency || null,
+      configurationSync: {
+        outOfSync: status.configuration_sync?.out_of_sync === true,
+        stopped: status.configuration_sync?.stopped === true,
+        message: String(status.configuration_sync?.message || "")
+      },
+      health: [
+        { label: "App version", value: String(status.app_version || "--"), state: "ok" },
+        {
+          label: "logger状態",
+          value: status.logger_status === "logging"
+            ? "動作中"
+            : status.logger_status === "critical"
+              ? "異常停止（Critical）"
+              : status.logger_status === "maintenance"
+                ? "メンテナンス"
+                : "状態不明",
+          state: status.logger_status === "logging"
+            ? "ok"
+            : status.logger_status === "critical"
+              ? "critical"
+              : "warning"
+        },
+        {
+          label: "loggerd設定反映",
+          value: status.configuration_sync?.out_of_sync === true ? "要再確認" : "一致",
+          state: status.configuration_sync?.out_of_sync === true ? "warning" : "ok"
+        },
+        { label: "DB使用量", value: formatBytes(status.storage?.db_bytes), state: "ok" },
+        { label: "SD総容量", value: formatBytes(status.storage?.total_bytes), state: "ok" },
+        { label: "SD使用量", value: formatBytes(status.storage?.used_bytes), state: "ok" },
+        { label: "SD空き容量", value: formatBytes(status.storage?.free_bytes), state: "ok" },
+        { label: "SD空き率", value: `${Math.round((status.storage?.free_ratio || 0) * 100)}%`, state: storageWarning.severity || (status.storage?.status === "normal" ? "ok" : "warning") },
+        { label: "ストレージ状態", value: status.storage?.status === "normal" ? "正常" : String(status.storage?.status || "不明"), state: storageWarning.severity || (status.storage?.status === "normal" ? "ok" : "warning") },
+        {
+          label: "ログ保存遅延（直近5分）",
+          value: status.daemon?.write_latency
+            ? `${Number(status.daemon.write_latency.delayed_count_5m || 0)}回 · 最大${Number(status.daemon.write_latency.max_delay_ms_5m || 0)}ms · 最長滞留${Number(status.daemon.write_latency.oldest_pending_ms || 0)}ms · 未保存${Number(status.daemon.pending_event_count || 0)}件`
+            : "--",
+          state: status.daemon?.write_latency?.warning ? "warning" : "ok"
+        },
+        { id: "diagnostic-clock", label: "システム時刻", value: "--", state: "ok" },
+        { label: "NTP同期状態", value: status.clock?.synchronized ? "同期済み" : "未同期", state: status.clock?.synchronized ? "ok" : "warning" },
+        { label: "Heartbeat状態", value: heartbeat.enabled ? `OUT${heartbeat.channel_id} · ${Math.round((heartbeat.interval_ms || 5000) / 1000)}秒` : "無効", state: heartbeat.enabled ? "ok" : "warning" }
+      ],
+      loggerStatus: status.logger_status
+    };
+  }
+
+  const {
+    formatBytes,
+    storageWarningFor,
+    storageWarningMessage,
+    warningVisibilityFor
+  } = window.EventLoggerStoragePolicy;
+
+  async function start() {
+    const fixtures = await loadLiveFixtures(null, liveMode);
+    runApp(fixtures);
+  }
+

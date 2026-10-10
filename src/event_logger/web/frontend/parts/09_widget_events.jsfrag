@@ -1,0 +1,225 @@
+  document.querySelector("#widget-settings-list").addEventListener("click", (event) => {
+    const addButton = event.target.closest("[data-add-widget-group]");
+    if (addButton) {
+      editingWidgetRow = null;
+      document.querySelector("#new-widget-title").value = "";
+      openWidgetDialog(false, addButton.dataset.addWidgetGroup);
+      return;
+    }
+    const button = event.target.closest(".switch");
+    const row = event.target.closest(".widget-setting-row");
+    const moveButton = event.target.closest(".move-up, .move-down");
+    if (moveButton && row) {
+      moveWidgetRow(row, moveButton.classList.contains("move-up") ? "up" : "down");
+      return;
+    }
+    if (button) {
+      const enabled = !switchIsOn(button);
+      setSwitchState(button, enabled);
+      const widget = dashboardWidgetById(row.dataset.widgetRow);
+      if (widget) widget.classList.toggle("is-hidden-widget", !enabled);
+      markWidgetSettingsDirty();
+      showToast(enabled ? "ウィジェットを表示しました" : "ウィジェットを非表示にしました");
+      return;
+    }
+    if (event.target.closest(".duplicate-widget") && row) {
+      duplicateWidget(row);
+      return;
+    }
+    if (event.target.closest(".delete-widget") && row) {
+      deleteWidget(row);
+      return;
+    }
+    if (event.target.closest(".edit-widget") && row) {
+      editingWidgetRow = row;
+      document.querySelector("#new-widget-title").value = row.querySelector("strong").textContent;
+      openWidgetDialog(true);
+    }
+  });
+  document.querySelector("#widget-settings-list").addEventListener("change", (event) => {
+    const sizeSelect = event.target.closest(".widget-size select");
+    if (!sizeSelect) return;
+    const row = sizeSelect.closest(".widget-setting-row");
+    row.dataset.dashboardSize = sizeSelect.value;
+    syncDashboardLayout();
+    markWidgetSettingsDirty();
+    showToast("表示幅を変更しました");
+  });
+  document.querySelector("#widget-settings-list").addEventListener("dragstart", (event) => {
+    const row = event.target.closest(".widget-setting-row");
+    if (!row || event.target.closest("button, select, input")) {
+      event.preventDefault();
+      return;
+    }
+    draggedWidgetRow = row;
+    draggedWidgetOrigin = { parent: row.parentElement, next: row.nextElementSibling };
+    dragWasDropped = false;
+    row.classList.add("is-dragging");
+    event.dataTransfer.effectAllowed = "move";
+  });
+  document.querySelector("#widget-settings-list").addEventListener("dragover", (event) => {
+    const targetRow = event.target.closest(".widget-setting-row");
+    if (
+      !draggedWidgetRow
+      || !targetRow
+      || targetRow === draggedWidgetRow
+      || targetRow.parentElement !== draggedWidgetRow.parentElement
+    ) return;
+    event.preventDefault();
+    document.querySelectorAll(".widget-setting-row.is-drag-target").forEach((row) => {
+      row.classList.remove("is-drag-target");
+    });
+    targetRow.classList.add("is-drag-target");
+    const rect = targetRow.getBoundingClientRect();
+    const insertAfter = event.clientY > rect.top + rect.height / 2;
+    targetRow.parentElement.insertBefore(
+      draggedWidgetRow,
+      insertAfter ? targetRow.nextElementSibling : targetRow
+    );
+  });
+  document.querySelector("#widget-settings-list").addEventListener("drop", (event) => {
+    if (!draggedWidgetRow) return;
+    event.preventDefault();
+    dragWasDropped = true;
+    syncDashboardLayout();
+    markWidgetSettingsDirty();
+    showToast("表示順を変更しました");
+  });
+  document.querySelector("#widget-settings-list").addEventListener("dragend", () => {
+    document.querySelectorAll(".widget-setting-row.is-drag-target").forEach((row) => {
+      row.classList.remove("is-drag-target");
+    });
+    if (draggedWidgetRow) {
+      draggedWidgetRow.classList.remove("is-dragging");
+      if (!dragWasDropped && draggedWidgetOrigin) draggedWidgetOrigin.parent.insertBefore(draggedWidgetRow, draggedWidgetOrigin.next);
+    }
+    draggedWidgetRow = null;
+    draggedWidgetOrigin = null;
+    dragWasDropped = false;
+    updateMoveButtons();
+  });
+  document.querySelector("#widget-next").addEventListener("click", () => showWidgetStep(Math.min(3, currentWidgetStep + 1)));
+  document.querySelector("#widget-back").addEventListener("click", () => showWidgetStep(Math.max(1, currentWidgetStep - 1)));
+  document.querySelector("#new-widget-type").addEventListener("change", (event) => {
+    document.querySelector("#widget-type-help").textContent = widgetTypeHelp[event.target.value];
+    updateWidgetTypeFields();
+  });
+  document.querySelector("#new-widget-count-mode").addEventListener("change", updateWidgetTypeFields);
+  document.querySelector("#new-widget-source").addEventListener("change", updateWidgetTypeFields);
+  ["#new-widget-show-elapsed", "#new-widget-show-absolute", "#new-widget-show-event-elapsed"].forEach((selector) => {
+    document.querySelector(selector).addEventListener("click", (event) => setSwitchState(event.currentTarget, !switchIsOn(event.currentTarget)));
+  });
+  document.querySelector("#confirm-add-widget").addEventListener("click", (event) => {
+    const type = document.querySelector("#new-widget-type").value;
+    if (["タイムライン", "イベント一覧"].includes(type) && !selectedWidgetChannels()) {
+      event.preventDefault();
+      showToast("表示する信号を1つ以上選択してください");
+    }
+  });
+  document.querySelector("#widget-dialog").addEventListener("close", (event) => {
+    if (event.target.returnValue !== "confirm") return;
+    const title = document.querySelector("#new-widget-title").value || document.querySelector("#new-widget-type").value;
+    const type = document.querySelector("#new-widget-type").value;
+    const channelId = selectedWidgetChannels();
+    const onLabel = document.querySelector("#new-widget-on-label").value || "ON";
+    const offLabel = document.querySelector("#new-widget-off-label").value || "OFF";
+    const showElapsed = boolControlValue(document.querySelector("#new-widget-show-elapsed"));
+    const period = document.querySelector("#new-widget-period").value;
+    const edge = document.querySelector("#new-widget-edge").value;
+    const state = document.querySelector("#new-widget-state").value;
+    const source = document.querySelector("#new-widget-source").value;
+    const count = Number(document.querySelector("#new-widget-count").value);
+    const value = document.querySelector("#new-widget-value").value;
+    const countMode = document.querySelector("#new-widget-count-mode").value;
+    const unit = document.querySelector("#new-widget-unit").value.trim() || "回";
+    const timeUnit = document.querySelector("#new-widget-time-unit").value;
+    const showAbsolute = boolControlValue(document.querySelector("#new-widget-show-absolute"));
+    const showEventElapsed = boolControlValue(document.querySelector("#new-widget-show-event-elapsed"));
+    markWidgetSettingsDirty();
+    if (editingWidgetRow) {
+      editingWidgetRow.querySelector("strong").textContent = title;
+      editingWidgetRow.dataset.widgetType = type;
+      editingWidgetRow.dataset.widgetChannel = channelId;
+      editingWidgetRow.dataset.onLabel = onLabel;
+      editingWidgetRow.dataset.offLabel = offLabel;
+      editingWidgetRow.dataset.showElapsed = String(showElapsed);
+      editingWidgetRow.dataset.widgetPeriod = period;
+      editingWidgetRow.dataset.widgetEdge = edge;
+      editingWidgetRow.dataset.widgetState = state;
+      editingWidgetRow.dataset.widgetSource = source;
+      editingWidgetRow.dataset.widgetCount = String(count);
+      editingWidgetRow.dataset.widgetValue = value;
+      editingWidgetRow.dataset.widgetCountMode = countMode;
+      editingWidgetRow.dataset.widgetUnit = unit;
+      editingWidgetRow.dataset.widgetTimeUnit = timeUnit;
+      editingWidgetRow.dataset.showAbsolute = String(showAbsolute);
+      editingWidgetRow.dataset.showEventElapsed = String(showEventElapsed);
+      editingWidgetRow.querySelector(".widget-size select").setAttribute("aria-label", `${title}の表示幅`);
+      editingWidgetRow.querySelector(".move-up").setAttribute("aria-label", `${title}を上へ移動`);
+      editingWidgetRow.querySelector(".move-down").setAttribute("aria-label", `${title}を下へ移動`);
+      editingWidgetRow.querySelector(".switch").setAttribute("aria-label", `${title}を表示`);
+      editingWidgetRow.querySelector("small").textContent = widgetSettingSummary(type, channelId, period, {
+        showElapsed,
+        count,
+        countMode,
+        source,
+        edge,
+        state
+      });
+      const widget = dashboardWidgetById(editingWidgetRow.dataset.widgetRow);
+      if (widget && type === "現在状態") {
+        updateCurrentStateCard(widget, { title, channelId, onLabel, offLabel, showElapsed });
+      } else {
+        const widgetTitle = widget?.querySelector("[data-widget-title]");
+        if (widgetTitle) widgetTitle.textContent = title;
+        if (widget) {
+          widget.dataset.widgetChannel = channelId;
+          widget.dataset.widgetPeriod = period;
+          widget.dataset.widgetEdge = edge;
+          widget.dataset.widgetState = state;
+          widget.dataset.widgetSource = source;
+          widget.dataset.widgetCount = String(count);
+          widget.dataset.widgetValue = value;
+          widget.dataset.widgetCountMode = countMode;
+          widget.dataset.widgetUnit = unit;
+          widget.dataset.widgetTimeUnit = timeUnit;
+          widget.dataset.showAbsolute = String(showAbsolute);
+          widget.dataset.showEventElapsed = String(showEventElapsed);
+        }
+        if (widget?.matches("[data-custom-history-widget]")) {
+          widget.dataset.widgetType = type;
+          widget.dataset.widgetChannel = channelId;
+          widget.dataset.widgetPeriod = period;
+          renderHistoryWidgetCard(widget);
+        }
+        renderDashboardPeriod();
+      }
+      editingWidgetRow.classList.add("is-highlighted");
+      editingWidgetRow = null;
+      showToast("表示項目の設定を変更しました");
+      return;
+    }
+    if (addingWidgetGroup === "realtime") {
+      const realtimeList = document.querySelector('[data-widget-group="realtime"]');
+      let number = realtimeList.children.length + 1;
+      let id = `current-state-${number}`;
+      while (document.querySelector(`[data-widget="${id}"]`)) {
+        number += 1;
+        id = `current-state-${number}`;
+      }
+      const config = { id, title, channelId, onLabel, offLabel, showElapsed, size: "medium" };
+      realtimeList.insertAdjacentHTML("beforeend", currentStateSettingRowHtml(config));
+      document.querySelector("#dashboard-realtime-grid").insertAdjacentHTML("beforeend", currentStateCardHtml(config));
+      syncDashboardLayout();
+      showToast("現在状態を追加しました");
+      return;
+    }
+    const list = document.querySelector('[data-widget-group="history"]');
+    const id = uniqueWidgetId("custom-widget");
+      const config = { id, title, type, channelId, period, edge, state, source, count, value, countMode, unit, timeUnit, showAbsolute, showEventElapsed, size: type === "タイムライン" ? "large" : "small" };
+    list.insertAdjacentHTML("beforeend", historyWidgetSettingRowHtml(config));
+    document.querySelector("#dashboard-history-grid").insertAdjacentHTML("beforeend", historyWidgetCardHtml(config));
+    syncDashboardLayout();
+    bindTimelineEvents();
+    showToast("表示項目を追加しました");
+  });

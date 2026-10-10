@@ -1,0 +1,458 @@
+  function renderHistoryWidgetCard(card) {
+    if (card.dataset.widgetType === "タイムライン") {
+      const focusedEvent = document.activeElement?.matches("[data-timeline-event]")
+        ? document.activeElement
+        : null;
+      const hoveredEvent = document.querySelector("[data-timeline-event]:hover");
+      const detail = document.querySelector("#timeline-event-detail");
+      if (shouldDeferTimelineWidgetRender({
+        containsPinnedEvent: Boolean(pinnedTimelineEvent && card.contains(pinnedTimelineEvent)),
+        containsFocusedEvent: Boolean(focusedEvent && card.contains(focusedEvent)),
+        containsHoveredEvent: Boolean(hoveredEvent && card.contains(hoveredEvent)),
+        containsDetailEvent: Boolean(
+          detail
+          && !detail.hidden
+          && activeTimelineDetailEvent
+          && card.contains(activeTimelineDetailEvent)
+        )
+      })) {
+        // custom timelineも定期更新のたびにbodyを置換すると、固定した区間と
+        // focus先が切り離される。操作が終われば次のrefreshで最新状態に戻す。
+        return;
+      }
+    }
+    card.querySelector("[data-history-widget-body]").innerHTML = historyWidgetBodyHtml({
+      id: card.dataset.widget,
+      type: card.dataset.widgetType,
+      channelId: card.dataset.widgetChannel,
+      period: card.dataset.widgetPeriod,
+      edge: card.dataset.widgetEdge,
+      state: card.dataset.widgetState,
+      count: Number(card.dataset.widgetCount || 10),
+      value: card.dataset.widgetValue || "all",
+      countMode: card.dataset.widgetCountMode || "period",
+      unit: card.dataset.widgetUnit || "回",
+      timeUnit: card.dataset.widgetTimeUnit || "human",
+      source: card.dataset.widgetSource || "event",
+      durationMs: Number(card.dataset.widgetDurationMs || 0),
+      showAbsolute: card.dataset.showAbsolute !== "false",
+      showEventElapsed: card.dataset.showEventElapsed === "true"
+    });
+    applyMiniTimelineZoom(card);
+    bindTimelineEvents();
+  }
+
+  function applyMiniTimelineZoom(card) {
+    const label = card.querySelector("[data-mini-zoom-label]");
+    if (!label) return;
+    const index = Math.max(0, Math.min(timelineZoomLevels.length - 1, Number(card.dataset.miniZoomIndex || 0)));
+    card.dataset.miniZoomIndex = String(index);
+    const zoom = timelineZoomLevels[index];
+    card.querySelectorAll("[data-mini-timeline-track]").forEach((track) => {
+      track.style.width = `${zoom * 100}%`;
+    });
+    label.textContent = `${zoom}倍`;
+    card.querySelector('[data-mini-zoom="out"]').disabled = index === 0;
+    card.querySelector('[data-mini-zoom="in"]').disabled = index === timelineZoomLevels.length - 1;
+  }
+
+  function renderCustomHistoryWidgets() {
+    document.querySelectorAll("[data-custom-history-widget]").forEach(renderHistoryWidgetCard);
+  }
+
+  function historyWidgetCardHtml(config) {
+    const hiddenClass = config.enabled === false ? " is-hidden-widget" : "";
+    const logLink = ["タイムライン", "イベント一覧"].includes(config.type)
+      ? '<button class="link-button" data-custom-log-link type="button">ログで詳しく見る</button>'
+      : "";
+    return `
+      <article class="panel custom-history-widget${hiddenClass}" data-custom-history-widget data-widget="${escapeHtml(config.id)}" data-size="${escapeHtml(config.size)}" data-widget-type="${escapeHtml(config.type)}" data-widget-channel="${escapeHtml(config.channelId)}" data-widget-period="${escapeHtml(config.period)}" data-widget-edge="${escapeHtml(config.edge || "ON")}" data-widget-state="${escapeHtml(config.state || "ON")}" data-widget-source="${escapeHtml(config.source || "event")}" data-widget-duration-ms="${escapeHtml(config.durationMs || "")}" data-widget-count="${escapeHtml(config.count || 10)}" data-widget-value="${escapeHtml(config.value || "all")}" data-widget-count-mode="${escapeHtml(config.countMode || "period")}" data-widget-unit="${escapeHtml(config.unit || "回")}" data-widget-time-unit="${escapeHtml(config.timeUnit || "human")}" data-show-absolute="${config.showAbsolute !== false}" data-show-event-elapsed="${Boolean(config.showEventElapsed)}">
+        <div class="panel-head"><div><h2 data-widget-title>${escapeHtml(config.title)}</h2>${logLink}</div></div>
+        <div data-history-widget-body>${historyWidgetBodyHtml(config)}</div>
+      </article>
+    `;
+  }
+
+  function historyWidgetSettingRowHtml(config) {
+    const summary = widgetSettingSummary(config.type, config.channelId, config.period, config);
+    const enabled = config.enabled !== false;
+    return `
+      <div class="widget-setting-row is-highlighted" draggable="true" data-widget-row="${escapeHtml(config.id)}" data-dashboard-size="${escapeHtml(config.size)}" data-api-config="${escapeHtml(JSON.stringify(config.apiConfig || {}))}" data-widget-type="${escapeHtml(config.type)}" data-widget-channel="${escapeHtml(config.channelId)}" data-widget-period="${escapeHtml(config.period)}" data-widget-edge="${escapeHtml(config.edge || "ON")}" data-widget-state="${escapeHtml(config.state || "ON")}" data-widget-source="${escapeHtml(config.source || "event")}" data-widget-duration-ms="${escapeHtml(config.durationMs || "")}" data-widget-count="${escapeHtml(config.count || 10)}" data-widget-value="${escapeHtml(config.value || "all")}" data-widget-count-mode="${escapeHtml(config.countMode || "period")}" data-widget-unit="${escapeHtml(config.unit || "回")}" data-widget-time-unit="${escapeHtml(config.timeUnit || "human")}" data-show-absolute="${config.showAbsolute !== false}" data-show-event-elapsed="${Boolean(config.showEventElapsed)}">
+        <span class="drag-handle" aria-hidden="true">⋮⋮</span>
+        <div><strong>${escapeHtml(config.title)}</strong><small>${escapeHtml(summary)}</small></div>
+        <label class="widget-size">表示幅<select aria-label="${escapeHtml(config.title)}の表示幅">${sizeOptionsHtml(config.size)}</select></label>
+        <div class="row-move-buttons"><button class="icon-button move-up" type="button" aria-label="${escapeHtml(config.title)}を上へ移動">↑</button><button class="icon-button move-down" type="button" aria-label="${escapeHtml(config.title)}を下へ移動">↓</button></div>
+        <div class="widget-row-actions"><button class="secondary-button small-button edit-widget" type="button">編集</button><button class="secondary-button small-button duplicate-widget" type="button">複製</button><button class="danger-text-button delete-widget" type="button">削除</button></div>
+        <button class="switch${enabled ? " is-on" : ""}" type="button" role="switch" aria-checked="${enabled}" aria-label="${escapeHtml(config.title)}を表示" data-on-label="表示中" data-off-label="非表示"><span></span></button>
+      </div>
+    `;
+  }
+
+  // DOMに依存しない表示項目の相互変換は別スクリプトで管理する。
+  const { widgetConfigFromApi, widgetPayloadFromConfig } =
+    window.EventLoggerWidgetConfig;
+
+  function widgetApiPayloadFromRow(row, sortOrder) {
+    // DOMの読取りはUI側、形式変換は専用モジュールに分離する。
+    return widgetPayloadFromConfig(
+      widgetConfigFromRow(row),
+      sortOrder,
+      switchIsOn(row.querySelector(".switch")),
+      row.dataset.widgetSource
+    );
+  }
+
+  function renderPersistedWidgets(items) {
+    const realtimeList = document.querySelector('[data-widget-group="realtime"]');
+    const historyList = document.querySelector('[data-widget-group="history"]');
+    const realtimeDashboard = document.querySelector("#dashboard-realtime-grid");
+    const historyDashboard = document.querySelector("#dashboard-history-grid");
+    realtimeList.replaceChildren();
+    historyList.replaceChildren();
+    realtimeDashboard.replaceChildren();
+    historyDashboard.replaceChildren();
+    (items || []).forEach((item) => {
+      const config = widgetConfigFromApi(item);
+      if (config.type === "現在状態") {
+        realtimeList.insertAdjacentHTML("beforeend", currentStateSettingRowHtml(config));
+        realtimeDashboard.insertAdjacentHTML("beforeend", currentStateCardHtml(config));
+      } else {
+        historyList.insertAdjacentHTML("beforeend", historyWidgetSettingRowHtml(config));
+        historyDashboard.insertAdjacentHTML("beforeend", historyWidgetCardHtml(config));
+      }
+    });
+    initializeWidgetSwitchLabels();
+    syncDashboardLayout();
+    renderCustomHistoryWidgets();
+  }
+
+  function markWidgetSettingsDirty() {
+    if (liveMode) widgetSettingsDirty = true;
+  }
+
+  async function saveWidgetSettings() {
+    if (!liveMode || !widgetSettingsDirty) return;
+    // 途中の通信失敗で一部だけ保存された場合も、再試行時はDBの最新状態を
+    // 基準に差分を作る。古い一覧のままPOSTすると重複IDで復旧できなくなる。
+    const current = await liveJson("/api/widgets");
+    fixtures.widgets = current.items || [];
+    const currentById = new Map(fixtures.widgets.map((widget) => [widget.id, widget]));
+    const rowsById = new Set();
+    for (const group of document.querySelectorAll("#widget-settings-list .widget-group-list")) {
+      const rows = [...group.querySelectorAll(".widget-setting-row")];
+      for (const [sortOrder, row] of rows.entries()) {
+        const payload = widgetApiPayloadFromRow(row, sortOrder);
+        rowsById.add(payload.id);
+        const existing = currentById.get(payload.id);
+        const method = existing ? "PUT" : "POST";
+        const path = existing
+          ? `/api/widgets/${encodeURIComponent(payload.id)}`
+          : "/api/widgets";
+        await liveJson(path, { method, body: JSON.stringify(payload) });
+      }
+    }
+    for (const widget of currentById.values()) {
+      if (!rowsById.has(widget.id)) {
+        await liveJson(`/api/widgets/${encodeURIComponent(widget.id)}`, { method: "DELETE" });
+      }
+    }
+    const response = await liveJson("/api/widgets");
+    fixtures.widgets = response.items || [];
+    widgetSettingsDirty = false;
+    renderPersistedWidgets(fixtures.widgets);
+  }
+
+  // rolling期間の境界は更新されるため、描画済み区間の詳細は絶対時刻を優先する。
+  function timelineEventTimeBounds(dataset, periodBoundsValue) {
+    const periodDurationMs = periodBoundsValue.endMs - periodBoundsValue.startMs;
+    const storedStartMs = Number(dataset.startMs);
+    const eventStartMs = Number.isFinite(storedStartMs)
+      ? storedStartMs
+      : periodBoundsValue.startMs + periodDurationMs * Number(dataset.start) / 100;
+    const storedEndMs = Number(dataset.endMs);
+    const eventEndMs = Number.isFinite(storedEndMs)
+      ? storedEndMs
+      : dataset.kind === "pulse"
+        ? eventStartMs + Number(dataset.durationMs)
+        : periodBoundsValue.startMs + periodDurationMs * Number(dataset.end) / 100;
+    return { eventStartMs, eventEndMs };
+  }
+
+  function timelineEventDetails(button) {
+    const periodBoundsValue = button.dataset.period
+      ? periodBounds(button.dataset.period)
+      : timelinePeriodBounds();
+    const { eventStartMs, eventEndMs } = timelineEventTimeBounds(
+      button.dataset,
+      periodBoundsValue
+    );
+    return {
+      name: button.dataset.name,
+      signalId: button.dataset.signalId,
+      content: button.dataset.state === "UNKNOWN" ? "監視できていない区間" : button.dataset.kind === "pulse" ? "ONパルス" : "ON状態",
+      start: formatTimelineTime(eventStartMs),
+      end: formatTimelineTime(eventEndMs),
+      duration: formatDuration(Math.max(0, Math.round(eventEndMs - eventStartMs))),
+      source: button.dataset.source || ""
+    };
+  }
+
+  function positionTimelineDetail(button) {
+    const detail = document.querySelector("#timeline-event-detail");
+    const rect = button.getBoundingClientRect();
+    const margin = 10;
+    const maxLeft = window.innerWidth - detail.offsetWidth - margin;
+    const left = Math.max(margin, Math.min(rect.left + rect.width / 2 - detail.offsetWidth / 2, maxLeft));
+    const above = rect.top - detail.offsetHeight - margin;
+    const top = above >= margin ? above : rect.bottom + margin;
+    detail.style.left = `${left}px`;
+    detail.style.top = `${top}px`;
+  }
+
+  function showTimelineDetail(button, pin = false) {
+    const detail = document.querySelector("#timeline-event-detail");
+    const timelineEvent = timelineEventDetails(button);
+    activeTimelineDetailEvent = button;
+    if (pin) {
+      document.querySelectorAll("[data-timeline-event]").forEach((item) => {
+        item.classList.toggle("is-selected", item === button);
+        item.setAttribute("aria-expanded", String(item === button));
+      });
+      pinnedTimelineEvent = button;
+    }
+    detail.innerHTML = `
+      <div class="timeline-detail-head"><strong>${escapeHtml(timelineEvent.name)}</strong><code>${escapeHtml(timelineEvent.signalId)}</code></div>
+      <dl>
+        <div><dt>内容</dt><dd>${escapeHtml(timelineEvent.content)}</dd></div>
+        <div><dt>発生時間</dt><dd class="mono">${escapeHtml(timelineEvent.start)}</dd></div>
+        <div><dt>終了時間</dt><dd class="mono">${escapeHtml(timelineEvent.end)}</dd></div>
+        <div><dt>継続時間</dt><dd>${escapeHtml(timelineEvent.duration)}</dd></div>
+        ${timelineEvent.source ? `<div><dt>source</dt><dd>${escapeHtml(timelineEvent.source)}</dd></div>` : ""}
+      </dl>
+      ${pin ? '<small>クリックで固定中・Escで閉じる</small>' : ''}
+    `;
+    detail.hidden = false;
+    positionTimelineDetail(button);
+  }
+
+  function hideTimelineDetail(force = false) {
+    if (pinnedTimelineEvent && !force) return;
+    document.querySelector("#timeline-event-detail").hidden = true;
+    activeTimelineDetailEvent = null;
+    if (force) {
+      document.querySelectorAll("[data-timeline-event]").forEach((item) => {
+        item.classList.remove("is-selected");
+        item.setAttribute("aria-expanded", "false");
+      });
+      pinnedTimelineEvent = null;
+    }
+  }
+
+  function bindTimelineEvents() {
+    document.querySelectorAll("[data-timeline-event]:not([data-timeline-bound])").forEach((button) => {
+      button.dataset.timelineBound = "true";
+      button.addEventListener("mouseenter", () => {
+        if (!pinnedTimelineEvent) showTimelineDetail(button);
+      });
+      button.addEventListener("mouseleave", () => hideTimelineDetail());
+      button.addEventListener("focus", () => {
+        focusedTimelineEvent = true;
+        if (!pinnedTimelineEvent) showTimelineDetail(button);
+      });
+      button.addEventListener("blur", () => {
+        focusedTimelineEvent = false;
+        hideTimelineDetail();
+      });
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (pinnedTimelineEvent === button) {
+          hideTimelineDetail(true);
+          return;
+        }
+        showTimelineDetail(button, true);
+      });
+    });
+  }
+
+  function renderTimeline() {
+    const card = document.querySelector('[data-widget="timeline"]');
+    const timeline = document.querySelector("#timeline");
+    if (!card || !timeline) return;
+    if (liveMode && fixtures.dashboardWarning) {
+      focusedTimelineEvent = false;
+      timeline.innerHTML = `<p class="custom-widget-empty" role="status">${escapeHtml(fixtures.dashboardWarning.message)}</p>`;
+      hideTimelineDetail(true);
+      return;
+    }
+    const detail = document.querySelector("#timeline-event-detail");
+    if (shouldDeferTimelineRender({
+      pinned: Boolean(pinnedTimelineEvent),
+      focused: focusedTimelineEvent || document.activeElement?.matches("[data-timeline-event]"),
+      detailVisible: Boolean(detail && !detail.hidden)
+    })) {
+      // rolling periodの再描画がhover/focus中のbuttonを毎秒置換すると、
+      // 詳細が消え、キーボード操作中のfocusも失われる。操作が終わるまで
+      // 現在の区間DOMを保ち、mouseleave/blur/Esc後の次回更新で追従する。
+      return;
+    }
+    const periodKey = periodKeyForWidget(card.dataset.widgetPeriod || "follow");
+    const bounds = periodBounds(periodKey);
+    const axis = Array.from({ length: 5 }, (_, index) => {
+      const timestamp = bounds.startMs + (bounds.endMs - bounds.startMs) * index / 4;
+      return new Intl.DateTimeFormat("ja-JP", { timeZone: selectedTimeZone(), month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp));
+    });
+    const selectedSignals = signalIds(card.dataset.widgetChannel);
+    const rows = selectedSignals.map((signalId) => {
+      const signalName = signalDisplayName(signalId);
+      const marks = timelineMarksHtml(signalId, periodKey);
+      return `
+        <div class="timeline-row">
+          <div class="timeline-label"><code>${escapeHtml(signalId)}</code><span>${escapeHtml(signalName)}</span></div>
+          <div class="timeline-track">${marks}</div>
+        </div>
+      `;
+    }).join("");
+    timeline.innerHTML = `
+      <div class="timeline-axis"><span></span>${axis.map((label) => `<span>${escapeHtml(label)}</span>`).join("")}</div>
+      ${rows || '<p class="custom-widget-empty">表示する信号が選択されていません。</p>'}
+      <div class="timeline-legend"><span>灰色：OFF</span><span>青：ON</span><span>斜線：UNKNOWN</span></div>
+      <p class="timeline-help">色付きの箇所にマウスを合わせるか、クリックすると詳細を表示します。</p>
+    `;
+    hideTimelineDetail(true);
+    bindTimelineEvents();
+    applyTimelineZoom();
+  }
+
+  function applyTimelineZoom() {
+    const timeline = document.querySelector("#timeline");
+    const zoomLabel = document.querySelector("#timeline-zoom-label");
+    const zoomOut = document.querySelector("#timeline-zoom-out");
+    const zoomIn = document.querySelector("#timeline-zoom-in");
+    const timelineScroll = document.querySelector("#timeline-scroll");
+    if (!timeline || !zoomLabel || !zoomOut || !zoomIn || !timelineScroll) return;
+    const zoom = timelineZoomLevels[timelineZoomIndex];
+    timeline.style.width = `${zoom * 100}%`;
+    zoomLabel.textContent = `${zoom}倍`;
+    zoomOut.disabled = timelineZoomIndex === 0;
+    zoomIn.disabled = timelineZoomIndex === timelineZoomLevels.length - 1;
+    if (timelineZoomIndex === 0) timelineScroll.scrollLeft = 0;
+  }
+
+  function renderDashboardPeriod() {
+    const countCard = document.querySelector('[data-widget="cycle-count"]');
+    if (countCard && document.querySelector("#cycle-count") && document.querySelector("#count-period-label")) {
+      const countPeriodKey = periodKeyForWidget(countCard.dataset.widgetPeriod || "follow");
+      const countEvents = channelEventsInPeriod(countCard.dataset.widgetChannel, countPeriodKey);
+      const allMatchingEvents = fixtures.events.filter((event) => (
+        event.signal === countCard.dataset.widgetChannel
+        && event.kind === "edge"
+        && event.value === (countCard.dataset.widgetEdge || "ON")
+      ));
+      const mode = countCard.dataset.widgetCountMode || "period";
+      const resetHistory = fixtures.counterResets[countCard.dataset.widget] || [];
+      const lastReset = resetHistory.at(-1);
+      const count = mode === "stored_total"
+        ? allMatchingEvents.length
+        : mode === "since_reset"
+          ? (lastReset?.carriedCount || 0) + allMatchingEvents.filter((event) => event.id > (lastReset?.afterEventId || 0)).length
+          : countEvents.filter((event) => event.value === (countCard.dataset.widgetEdge || "ON")).length;
+      document.querySelector("#cycle-count").textContent = String(count);
+      countCard.querySelector(".summary-value span").textContent = countCard.dataset.widgetUnit || "回";
+      document.querySelector("#count-period-label").textContent = mode === "stored_total" ? "保存期間内累計" : mode === "since_reset" ? "リセット後" : fixtures.dashboardPeriods[countPeriodKey].label;
+      countCard.querySelector("[data-reset-counter]")?.remove();
+      countCard.querySelector("[data-reset-label]")?.remove();
+      if (lastReset) countCard.insertAdjacentHTML("beforeend", `<small data-reset-label>${escapeHtml(lastReset.label)}にリセット</small>`);
+      if (mode === "since_reset") countCard.insertAdjacentHTML("beforeend", `<button class="secondary-button small-button" data-reset-counter="${escapeHtml(countCard.dataset.widget)}" type="button">リセット</button>`);
+    }
+
+    renderOnTimeCard();
+
+    const timelineCard = document.querySelector('[data-widget="timeline"]');
+    if (timelineCard && document.querySelector("#timeline")) {
+      const timelinePeriodKey = periodKeyForWidget(timelineCard.dataset.widgetPeriod || "follow");
+      document.querySelector("#timeline").setAttribute("aria-label", `${fixtures.dashboardPeriods[timelinePeriodKey].label}の信号タイムライン`);
+      renderTimeline();
+    }
+    renderRecentEvents();
+  }
+
+  function renderOnTimeCard() {
+    const timeCard = document.querySelector('[data-widget="on-time"]');
+    if (timeCard && document.querySelector("#on-time-value") && document.querySelector("#on-time-period-label")) {
+      const timePeriodKey = periodKeyForWidget(timeCard.dataset.widgetPeriod || "follow");
+      const targetState = timeCard.dataset.widgetState || "ON";
+      const unit = timeCard.dataset.widgetTimeUnit || "human";
+      document.querySelector("#on-time-value").textContent = formatDurationForUnit(stateDurationInPeriod(timeCard.dataset.widgetChannel, timePeriodKey, targetState), unit);
+      document.querySelector("#on-time-period-label").textContent = `${targetState}・${fixtures.dashboardPeriods[timePeriodKey].label}`;
+    }
+    renderLastEventCard();
+  }
+
+  function renderLastEventCard() {
+    const lastCard = document.querySelector('[data-widget="last-alarm"]');
+    if (!lastCard || !document.querySelector("#last-alarm-value") || !document.querySelector("#last-alarm-period-label")) return;
+    const lastPeriodKey = periodKeyForWidget(lastCard.dataset.widgetPeriod || "follow");
+    const lastEdge = lastCard.dataset.widgetEdge || "ON";
+    const latest = channelEventsInPeriod(lastCard.dataset.widgetChannel, lastPeriodKey).find((event) => event.value === lastEdge);
+    const values = [];
+    if (lastCard.dataset.showAbsolute !== "false" && latest) values.push(formatLocalDateTime(eventTimeMs(latest)).slice(11, 19));
+    if (lastCard.dataset.showEventElapsed === "true" && latest) values.push(`${formatDuration(Math.max(0, demoNowMs() - eventTimeMs(latest)))}前`);
+    document.querySelector("#last-alarm-value").textContent = values.join(" / ") || "該当なし";
+    document.querySelector("#last-alarm-period-label").textContent = `${lastCard.dataset.widgetChannel}・${fixtures.dashboardPeriods[lastPeriodKey].label}`;
+  }
+
+  function renderDashboardOutputs() {
+    const container = document.querySelector("#dashboard-outputs");
+    if (!container) return;
+    container.innerHTML = fixtures.outputs.map((output) => `
+      <div class="output-card">
+        <strong>OUT${output.id}</strong>
+        <span class="value-pill value-pill--${escapeHtml(output.value.toLowerCase())}">${escapeHtml(output.value)}</span>
+        <small>${escapeHtml(output.owner)}</small>
+      </div>
+    `).join("");
+  }
+
+  function kindLabel(event) {
+    if (event.kind === "output") return "出力の記録";
+    if (event.kind === "snapshot") return "記録開始時の状態";
+    return "入力の変化";
+  }
+
+  function filteredEvents() {
+    const periodKey = document.querySelector("#log-period").value;
+    const { startMs, endMs } = periodBounds(periodKey);
+    const signal = document.querySelector("#log-signal").value;
+    const value = document.querySelector("#log-value").value;
+    const kind = document.querySelector("#log-kind").value;
+    const source = document.querySelector("#log-source").value;
+    return fixtures.events.filter((event) => (
+      eventTimeMs(event) >= startMs
+      && eventTimeMs(event) <= endMs
+      && (
+        signal === "all"
+        || (signal === "selection" && widgetLogSignals?.includes(event.signal))
+        || event.signal === signal
+      )
+      && (value === "all" || event.value === value)
+      && (kind === "all" || event.kind === kind)
+      && (source === "all" || event.source === source)
+    ));
+  }
+
+  function renderLogSignalOptions() {
+    const select = document.querySelector("#log-signal");
+    const selected = select.value || "all";
+    const inputs = fixtures.channels.map((channel) => (
+      `<option value="IN${channel.id}">${channel.name ? `${escapeHtml(channel.name)}（IN${channel.id}）` : `IN${channel.id}（名称未設定）`}</option>`
+    ));
+    const outputs = fixtures.outputs.map((output) => (
+      `<option value="OUT${output.id}">${escapeHtml(output.name || `OUT${output.id}`)}（OUT${output.id}）</option>`
+    ));
+    const selection = widgetLogSignals?.length
+      ? `<option value="selection">選択中の信号（${escapeHtml(widgetLogSignals.join("・"))}）</option>`
+      : "";
+    select.innerHTML = `<option value="all">すべての信号</option>${selection}${inputs.join("")}${outputs.join("")}`;
+    select.value = [...select.options].some((option) => option.value === selected) ? selected : "all";
+  }
+

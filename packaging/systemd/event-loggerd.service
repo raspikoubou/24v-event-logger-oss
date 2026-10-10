@@ -1,0 +1,24 @@
+[Unit]
+Description=24V Event Logger GPIO daemon
+After=local-fs.target
+
+[Service]
+Type=simple
+User=event-logger
+Group=event-logger
+# lgpioはカレントディレクトリに通知FIFOを作る。/optはroot所有で
+# daemon userが書き込めないため、専用の可変データ領域を使う。
+WorkingDirectory=/var/lib/event-logger
+EnvironmentFile=-/etc/event-logger/event-logger.env
+ExecStart=/opt/event-logger/current/packaging/run_with_private_sqlite.sh /opt/event-logger/venv/bin/event-loggerd
+Restart=always
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=15
+RuntimeDirectory=event-logger
+StateDirectory=event-logger
+StateDirectoryMode=0750
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

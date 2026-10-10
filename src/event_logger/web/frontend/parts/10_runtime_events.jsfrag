@@ -1,0 +1,107 @@
+  document.querySelector("#toggle-logging").addEventListener("click", () => {
+    if (fixtures.loggerStatus === "critical") return;
+    if (logging) {
+      openConfirmation(
+        "この記録装置の記録を停止しますか？",
+        "設備の運転は停止しません。\n\n停止中は入力信号を記録しません。\n動作確認信号・出力ルールを停止し、通常OUTをOFFにします。",
+        "記録を停止",
+        () => setLoggingState(false)
+      );
+    } else {
+      setLoggingState(true);
+    }
+  });
+  document.querySelector("#retry-config-sync").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    if (!liveMode) return;
+    button.disabled = true;
+    try {
+      await liveJson("/api/config/reload", { method: "POST" });
+      await refreshLiveState();
+      showToast("loggerdへ現在の設定を再反映しました");
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  document.querySelector("#output-tests").addEventListener("click", (event) => {
+    const button = event.target.closest(".test-button");
+    if (!button || logging || fixtures.loggerStatus === "critical") return;
+    const outputId = Number(button.dataset.output);
+    if (activeOutputTest?.outputId === outputId) {
+      finishOutputTest();
+    } else if (!activeOutputTest) {
+      startOutputTest(outputId);
+    }
+  });
+  document.querySelector("#confirm-dialog").addEventListener("close", (event) => {
+    if (event.target.returnValue === "confirm" && pendingAction) pendingAction();
+    pendingAction = null;
+  });
+
+  if (liveMode) renderPersistedWidgets(fixtures.widgets || []);
+  initializeWidgetSwitchLabels();
+  syncLiveControls();
+  renderUnsynchronizedWarnings();
+  updateOutputOwners();
+  renderLogSignalOptions();
+  renderOutputSettings();
+  renderRecentEvents();
+  syncDashboardLayout();
+  document.querySelectorAll(".period-button").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.period === currentPeriod);
+  });
+  document.querySelector("#dashboard-custom-period").hidden = currentPeriod !== "custom";
+  const savedCustomRange = fixtures.settings.dashboardCustomRange;
+  const hasSavedCustomRange = (
+    Number.isInteger(savedCustomRange?.from_ms)
+    && Number.isInteger(savedCustomRange?.to_ms)
+    && savedCustomRange.from_ms < savedCustomRange.to_ms
+  );
+  const customEndMs = hasSavedCustomRange
+    ? savedCustomRange.to_ms
+    : Math.floor(fixtures.nowMs / 60_000) * 60_000;
+  const customStartMs = hasSavedCustomRange
+    ? savedCustomRange.from_ms
+    : Math.max(0, customEndMs - 4 * 60 * 60 * 1000);
+  if (hasSavedCustomRange) {
+    fixtures.dashboardPeriods.custom.startAt = new Date(savedCustomRange.from_ms).toISOString();
+    fixtures.dashboardPeriods.custom.endAt = new Date(savedCustomRange.to_ms).toISOString();
+    fixtures.dashboardPeriods.custom.durationMs = savedCustomRange.to_ms - savedCustomRange.from_ms;
+  } else {
+    // demoの固定時計や時刻変更後でも、初期期間を現在より未来にしない。
+    fixtures.dashboardPeriods.custom.startAt = new Date(customStartMs).toISOString();
+    fixtures.dashboardPeriods.custom.endAt = new Date(customEndMs).toISOString();
+    fixtures.dashboardPeriods.custom.durationMs = customEndMs - customStartMs;
+  }
+  document.querySelector("#dashboard-custom-from").value = formatDateTimeInput(customStartMs);
+  document.querySelector("#dashboard-custom-to").value = formatDateTimeInput(customEndMs);
+  document.querySelector("#log-custom-from").value = formatDateTimeInput(customStartMs);
+  document.querySelector("#log-custom-to").value = formatDateTimeInput(customEndMs);
+  renderDashboardPeriod();
+  renderDashboardOutputs();
+  renderLogs();
+  renderChannelSettings();
+  renderHealth();
+  renderOutputTests();
+  renderSetupWizard();
+  renderClock();
+  window.setInterval(renderClock, 1000);
+  window.setInterval(() => {
+    refreshLiveState().catch((error) => showToast(error.message));
+  }, 1000);
+  }
+
+  start().catch((error) => {
+    const main = document.createElement("main");
+    main.className = "main-content";
+    const banner = document.createElement("div");
+    banner.className = "banner banner--maintenance";
+    const message = document.createElement("strong");
+    message.textContent = `画面を読み込めませんでした：${error instanceof Error ? error.message : "予期しないエラー"}`;
+    banner.append(message);
+    main.append(banner);
+    document.body.replaceChildren(main);
+  });
+})();

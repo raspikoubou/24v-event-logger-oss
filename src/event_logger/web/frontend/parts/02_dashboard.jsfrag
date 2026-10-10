@@ -1,0 +1,390 @@
+  function renderRecentEvents() {
+    const card = document.querySelector('[data-widget="recent-events"]');
+    const list = document.querySelector("#recent-events");
+    if (!card || !list) return;
+    const selectedSignals = signalIds(card.dataset.widgetChannel);
+    const periodKey = periodKeyForWidget(card.dataset.widgetPeriod || "follow");
+    const { startMs, endMs } = periodBounds(periodKey);
+    const valueFilter = card.dataset.widgetValue || "all";
+    const count = Number(card.dataset.widgetCount || 10);
+    const events = fixtures.events.filter((event) => (
+      ["edge", "output"].includes(event.kind)
+      && selectedSignals.includes(event.signal)
+      && (valueFilter === "all" || event.value === valueFilter)
+      && eventTimeMs(event) >= startMs
+      && eventTimeMs(event) <= endMs
+    )).slice(0, count);
+    list.innerHTML = events.map((event) => `
+      <div class="event-item">
+        <time class="event-time mono">${escapeHtml(formatLocalDateTime(eventTimeMs(event)).slice(11, 16))}</time>
+        <strong class="event-name">${escapeHtml(signalDisplayName(event.signal))}</strong>
+        <span class="value-pill value-pill--${escapeHtml(event.value.toLowerCase())}">${escapeHtml(event.value)}</span>
+      </div>
+    `).join("") || '<p class="custom-widget-empty">対象期間の記録はありません。</p>';
+  }
+
+  function timelinePeriodBounds() {
+    const card = document.querySelector('[data-widget="timeline"]');
+    return periodBounds(periodKeyForWidget(card.dataset.widgetPeriod || "follow"));
+  }
+
+  function formatTimelineTime(timestampMs) {
+    return formatLocalDateTime(timestampMs, true);
+  }
+
+  function formatDuration(durationMs) {
+    if (durationMs < 1000) return `${durationMs}ミリ秒`;
+    const totalSeconds = Math.round(durationMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) return `${hours}時間 ${minutes}分 ${seconds}秒`;
+    if (minutes > 0) return `${minutes}分 ${seconds}秒`;
+    return `${seconds}秒`;
+  }
+
+  function formatDurationForUnit(durationMs, unit = "human") {
+    if (unit === "minutes") return `${Math.round(durationMs / 60000)}分`;
+    if (unit === "hours_decimal") return `${(durationMs / 3600000).toFixed(2)}時間`;
+    if (unit === "hms") {
+      const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+    }
+    return formatDuration(durationMs);
+  }
+
+  function currentStateValues(channelId, onLabel, offLabel) {
+    const channel = fixtures.channels.find((item) => `IN${item.id}` === channelId);
+    const value = logging && channel?.enabled ? channel.value : "UNKNOWN";
+    const displayValue = value === "ON" ? onLabel : value === "OFF" ? offLabel : "UNKNOWN";
+    const latestEvent = fixtures.events.find((event) => event.signal === channelId);
+    const eventMs = Math.max(latestEvent ? eventTimeMs(latestEvent) : demoClockBaseMs, loggingStartedAtMs);
+    return {
+      value,
+      displayValue,
+      elapsed: value === "UNKNOWN" ? "継続時間は計測していません" : `${formatDuration(Math.max(0, demoNowMs() - eventMs))}継続`
+    };
+  }
+
+  function updateCurrentStateCard(card, config) {
+    const values = currentStateValues(config.channelId, config.onLabel, config.offLabel);
+    card.dataset.widgetType = "現在状態";
+    card.dataset.widgetChannel = config.channelId;
+    card.dataset.onLabel = config.onLabel;
+    card.dataset.offLabel = config.offLabel;
+    card.dataset.showElapsed = String(config.showElapsed);
+    card.classList.toggle("is-active-state", values.value === "ON");
+    card.classList.toggle("is-normal-state", values.value === "OFF");
+    card.querySelector("[data-widget-title]").textContent = config.title;
+    card.querySelector("strong").textContent = values.displayValue;
+    const elapsed = card.querySelector("p");
+    elapsed.textContent = values.elapsed;
+    elapsed.hidden = !config.showElapsed;
+    card.querySelector("small").textContent = config.channelId;
+  }
+
+  function currentStateCardHtml(config) {
+    const values = currentStateValues(config.channelId, config.onLabel, config.offLabel);
+    const hiddenClass = config.enabled === false ? " is-hidden-widget" : "";
+    return `
+      <article class="overview-card${hiddenClass}${values.value === "ON" ? " is-active-state" : values.value === "OFF" ? " is-normal-state" : ""}" data-widget="${escapeHtml(config.id)}" data-size="${escapeHtml(config.size)}" data-widget-type="現在状態" data-widget-channel="${escapeHtml(config.channelId)}" data-on-label="${escapeHtml(config.onLabel)}" data-off-label="${escapeHtml(config.offLabel)}" data-show-elapsed="${config.showElapsed}">
+        <div class="overview-label" data-widget-title>${escapeHtml(config.title)}</div>
+        <strong>${escapeHtml(values.displayValue)}</strong>
+        <p${config.showElapsed ? "" : " hidden"}>${escapeHtml(values.elapsed)}</p>
+        <small>${escapeHtml(config.channelId)}</small>
+      </article>
+    `;
+  }
+
+  function currentStateSettingRowHtml(config) {
+    const enabled = config.enabled !== false;
+    return `
+      <div class="widget-setting-row is-highlighted" draggable="true" data-widget-row="${escapeHtml(config.id)}" data-api-config="${escapeHtml(JSON.stringify(config.apiConfig || {}))}" data-dashboard-size="${escapeHtml(config.size)}" data-widget-type="現在状態" data-widget-channel="${escapeHtml(config.channelId)}" data-on-label="${escapeHtml(config.onLabel)}" data-off-label="${escapeHtml(config.offLabel)}" data-show-elapsed="${config.showElapsed}">
+        <span class="drag-handle" aria-hidden="true">⋮⋮</span>
+        <div><strong>${escapeHtml(config.title)}</strong><small>現在状態・${escapeHtml(config.channelId)}${config.showElapsed ? "・継続時間を表示" : ""}</small></div>
+        <label class="widget-size">表示幅<select aria-label="${escapeHtml(config.title)}の表示幅">${sizeOptionsHtml(config.size)}</select></label>
+        <div class="row-move-buttons"><button class="icon-button move-up" type="button" aria-label="${escapeHtml(config.title)}を上へ移動">↑</button><button class="icon-button move-down" type="button" aria-label="${escapeHtml(config.title)}を下へ移動">↓</button></div>
+        <div class="widget-row-actions"><button class="secondary-button small-button edit-widget" type="button">編集</button><button class="secondary-button small-button duplicate-widget" type="button">複製</button><button class="danger-text-button delete-widget" type="button">削除</button></div>
+        <button class="switch${enabled ? " is-on" : ""}" type="button" role="switch" aria-checked="${enabled}" aria-label="${escapeHtml(config.title)}を表示" data-on-label="表示中" data-off-label="非表示"><span></span></button>
+      </div>
+    `;
+  }
+
+  function sizeOptionsHtml(selectedSize) {
+    const labels = { small: "小", medium: "中", large: "大" };
+    return Object.entries(labels).map(([value, label]) => (
+      `<option value="${value}"${value === selectedSize ? " selected" : ""}>${label}</option>`
+    )).join("");
+  }
+
+  function refreshCurrentStateCards() {
+    document.querySelectorAll("#dashboard-realtime-grid [data-widget-type='現在状態']").forEach((card) => {
+      updateCurrentStateCard(card, {
+        title: card.querySelector("[data-widget-title]").textContent,
+        channelId: card.dataset.widgetChannel,
+        onLabel: card.dataset.onLabel,
+        offLabel: card.dataset.offLabel,
+        showElapsed: card.dataset.showElapsed === "true"
+      });
+    });
+  }
+
+  function periodKeyForWidget(periodSetting) {
+    return periodSetting === "follow" ? currentPeriod : periodSetting;
+  }
+
+  function periodBounds(periodKey, durationOverrideMs = 0) {
+    const period = fixtures.dashboardPeriods[periodKey];
+    const endMs = period.endAt ? Date.parse(period.endAt) : demoNowMs();
+    const durationMs = Number.isFinite(durationOverrideMs) && durationOverrideMs > 0
+      ? durationOverrideMs
+      : period.durationMs;
+    const startMs = period.startAt ? Date.parse(period.startAt) : endMs - durationMs;
+    return { startMs, endMs };
+  }
+
+  function eventTimeMs(event) {
+    return event.timestamp ? Date.parse(event.timestamp) : Date.parse(`2026-09-12T${event.time}+09:00`);
+  }
+
+  function applyCustomPeriod(fromInput, toInput) {
+    const startMs = parseLocalDateTime(fromInput.value);
+    const endMs = parseLocalDateTime(toInput.value);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+      showToast("開始日時より後の終了日時を指定してください");
+      return false;
+    }
+    fixtures.dashboardPeriods.custom.startAt = new Date(startMs).toISOString();
+    fixtures.dashboardPeriods.custom.endAt = new Date(endMs).toISOString();
+    return true;
+  }
+
+  function channelEventsInPeriod(channelId, periodKey) {
+    const { startMs, endMs } = periodBounds(periodKey);
+    return fixtures.events.filter((event) => {
+      const timeMs = eventTimeMs(event);
+      return event.signal === channelId && event.kind === "edge" && timeMs >= startMs && timeMs <= endMs;
+    });
+  }
+
+  function stateDurationInPeriod(channelId, periodKey, targetState = "ON", durationOverrideMs = 0) {
+    return timelineIntervals(channelId, periodKey, durationOverrideMs)
+      .filter((interval) => interval.state === targetState)
+      .reduce((total, interval) => total + interval.endMs - interval.startMs, 0);
+  }
+
+  function timelineIntervals(channelId, periodKey, durationOverrideMs = 0) {
+    const bounds = periodBounds(periodKey, durationOverrideMs);
+    const observedEndMs = Math.max(bounds.startMs, Math.min(bounds.endMs, loggingStoppedAtMs || demoNowMs()));
+    if (bounds.endMs <= bounds.startMs) return [];
+    const isOutput = channelId.startsWith("OUT");
+    const events = fixtures.events
+      .filter((event) => event.signal === channelId && (isOutput ? event.kind === "output" : ["edge", "snapshot"].includes(event.kind)) && eventTimeMs(event) <= observedEndMs)
+      .sort((left, right) => eventTimeMs(left) - eventTimeMs(right));
+    let state = "UNKNOWN";
+    let source = "";
+    let cursorMs = bounds.startMs;
+    const intervals = [];
+    events.forEach((event) => {
+      const timeMs = eventTimeMs(event);
+      if (timeMs <= bounds.startMs) {
+        state = event.value;
+        source = event.source || "";
+        return;
+      }
+      intervals.push({ state, source, startMs: cursorMs, endMs: timeMs });
+      state = event.value;
+      source = event.source || "";
+      cursorMs = timeMs;
+    });
+    intervals.push({ state, source, startMs: cursorMs, endMs: observedEndMs });
+    if (observedEndMs < bounds.endMs) intervals.push({ state: "UNKNOWN", source: "", startMs: observedEndMs, endMs: bounds.endMs });
+    let result = intervals.filter((interval) => interval.endMs > interval.startMs);
+    unknownIntervals.forEach((gap) => {
+      const gapStart = Math.max(bounds.startMs, gap.startMs);
+      const gapEnd = Math.min(bounds.endMs, gap.endMs || demoNowMs());
+      if (gapEnd <= gapStart) return;
+      const next = [];
+      result.forEach((interval) => {
+        if (interval.endMs <= gapStart || interval.startMs >= gapEnd) {
+          next.push(interval);
+          return;
+        }
+        if (interval.startMs < gapStart) next.push({ ...interval, endMs: gapStart });
+        next.push({ state: "UNKNOWN", source: "", startMs: Math.max(interval.startMs, gapStart), endMs: Math.min(interval.endMs, gapEnd) });
+        if (interval.endMs > gapEnd) next.push({ ...interval, startMs: gapEnd });
+      });
+      result = next;
+    });
+    return result;
+  }
+
+  function timelineMarkClass(classPrefix, unknown, widthPercent) {
+    // 長い期間では短い区間の幅が0px相当になり、hover/clickできなくなる。
+    // 1%未満は時間幅を誇張せず、詳細を開ける固定マーカーで示す。
+    const isNarrow = widthPercent < 1;
+    if (unknown) {
+      return `${classPrefix}-${isNarrow ? "unknown-marker" : "unknown"}`;
+    }
+    return `${classPrefix}-${isNarrow ? "marker" : "segment"}`;
+  }
+
+  function timelineMarksHtml(
+    channelId,
+    periodKey,
+    classPrefix = "timeline",
+    durationOverrideMs = 0,
+    domainIntervals = null
+  ) {
+    const bounds = periodBounds(periodKey, durationOverrideMs);
+    const durationMs = bounds.endMs - bounds.startMs;
+    const name = signalDisplayName(channelId);
+    const intervals = Array.isArray(domainIntervals)
+      ? domainIntervals.map((interval) => ({
+        state: interval.state,
+        source: interval.source || "",
+        startMs: Number(interval.start_ms),
+        endMs: Number(interval.end_ms)
+      }))
+      : timelineIntervals(channelId, periodKey, durationOverrideMs);
+    return intervals.filter((interval) => interval.state !== "OFF").map((interval) => {
+      const start = Math.max(0, (interval.startMs - bounds.startMs) / durationMs * 100);
+      const end = Math.min(100, (interval.endMs - bounds.startMs) / durationMs * 100);
+      const unknown = interval.state === "UNKNOWN";
+      const stateLabel = unknown ? "UNKNOWN区間" : "ON状態";
+      const widthPercent = Math.max(0, end - start);
+      const markClass = timelineMarkClass(classPrefix, unknown, widthPercent);
+      const markerStyle = widthPercent < 1
+        ? `left:${start}%;transform:translateX(-50%);`
+        : `left:${start}%;width:${widthPercent}%;`;
+      return `<button class="${markClass}" data-timeline-event data-kind="segment" data-state="${interval.state}" data-signal-id="${escapeHtml(channelId)}" data-name="${escapeHtml(name)}" data-source="${escapeHtml(interval.source)}" data-period="${escapeHtml(periodKey)}" data-start="${start}" data-end="${end}" data-start-ms="${interval.startMs}" data-end-ms="${interval.endMs}" type="button" aria-describedby="timeline-event-detail" aria-expanded="false" aria-label="${escapeHtml(name)} ${stateLabel}の詳細" style="${markerStyle}"></button>`;
+    }).join("");
+  }
+
+  function miniTimelineHtml(channelId, periodKey, durationOverrideMs = 0, dashboardValue = null) {
+    const domainIntervals = dashboardValue?.channels?.find((item) => item.signal === channelId)?.intervals;
+    const marks = timelineMarksHtml(
+      channelId,
+      periodKey,
+      "custom-mini",
+      durationOverrideMs,
+      domainIntervals
+    );
+    return `<div class="custom-mini-timeline"><code>${escapeHtml(channelId)}</code><div class="custom-mini-scroll"><div class="custom-mini-track" data-mini-timeline-track>${marks}</div></div></div>`;
+  }
+
+  function historyWidgetBodyHtml(config) {
+    if (liveMode && fixtures.dashboardWarning) {
+      return `<p class="custom-widget-empty" role="status">${escapeHtml(fixtures.dashboardWarning.message)}</p>`;
+    }
+    const periodKey = periodKeyForWidget(config.period);
+    const periodLabel = fixtures.dashboardPeriods[periodKey].label;
+    const bounds = periodBounds(periodKey, config.durationMs || 0);
+    const selectedSignals = signalIds(config.channelId);
+    const dashboardValue = liveMode
+      ? fixtures.dashboardValues?.find((item) => item.widget_id === config.id)
+      : null;
+    const periodEvents = fixtures.events.filter((event) => (
+      selectedSignals.includes(event.signal)
+      && event.kind === "edge"
+      && eventTimeMs(event) >= bounds.startMs
+      && eventTimeMs(event) <= bounds.endMs
+    ));
+    if (config.type === "イベント回数") {
+      const matchingEvents = fixtures.events.filter((event) => (
+        event.signal === config.channelId
+        && event.kind === "edge"
+        && event.value === (config.edge || "ON")
+      ));
+      const mode = config.countMode || "period";
+      const resetHistory = fixtures.counterResets[config.id] || [];
+      const lastReset = resetHistory.at(-1);
+      const count = liveMode && Number.isInteger(dashboardValue?.value)
+        ? dashboardValue.value
+        : mode === "stored_total"
+        ? matchingEvents.length
+        : mode === "since_reset"
+          ? lastReset
+            ? (lastReset.carriedCount || 0) + matchingEvents.filter((event) => event.id > (lastReset.afterEventId || 0)).length
+            : 0
+          : periodEvents.filter((event) => event.value === (config.edge || "ON")).length;
+      const modeLabel = mode === "stored_total" ? "保存期間内累計" : mode === "since_reset" ? "リセット後" : periodLabel;
+      const resetButton = mode === "since_reset" ? `<button class="secondary-button small-button" data-reset-counter="${escapeHtml(config.id)}" type="button">リセット</button>` : "";
+      const resetLabel = liveMode && dashboardValue?.reset_at
+        ? `<small>${escapeHtml(dashboardValue.reset_at)}にリセット</small>`
+        : !liveMode && lastReset
+          ? `<small>${escapeHtml(lastReset.label)}にリセット</small>`
+          : "";
+      return `<div class="custom-widget-value"><strong>${count}</strong><span>${escapeHtml(config.unit || "回")}</span></div><small>${escapeHtml(config.channelId)}・${escapeHtml(modeLabel)}</small>${resetLabel}${resetButton}`;
+    }
+    if (config.type === "ON/OFF時間") {
+      const state = config.state || "ON";
+      const duration = liveMode && Number.isInteger(dashboardValue?.duration_ms)
+        ? dashboardValue.duration_ms
+        : stateDurationInPeriod(config.channelId, periodKey, state, config.durationMs || 0);
+      return `<div class="custom-widget-value"><strong>${escapeHtml(formatDurationForUnit(duration, config.timeUnit))}</strong></div><small>${escapeHtml(config.channelId)}・${escapeHtml(periodLabel)}・${state}</small>`;
+    }
+    if (config.type === "最終イベント") {
+      const latest = liveMode
+        ? Number.isInteger(dashboardValue?.timestamp_ms)
+          ? dashboardValue.timestamp_ms
+          : null
+        : periodEvents.find((event) => event.value === (config.edge || "ON"));
+      if (latest === null || latest === undefined) return `<div class="custom-widget-value"><strong>該当なし</strong></div><small>${escapeHtml(config.channelId)}・${escapeHtml(periodLabel)}</small>`;
+      const latestMs = typeof latest === "number" ? latest : eventTimeMs(latest);
+      const values = [];
+      if (config.showAbsolute !== false) values.push(escapeHtml(formatLocalDateTime(latestMs).slice(11, 19)));
+      const elapsedMs = liveMode && Number.isInteger(dashboardValue?.elapsed_ms)
+        ? dashboardValue.elapsed_ms
+        : Math.max(0, demoNowMs() - latestMs);
+      if (config.showEventElapsed) values.push(escapeHtml(`${formatDuration(elapsedMs)}前`));
+      return `<div class="custom-widget-value"><strong>${values.join(" / ") || "--"}</strong></div><small>${escapeHtml(config.channelId)}・${escapeHtml(periodLabel)}</small>`;
+    }
+    if (config.type === "経過時間") {
+      let elapsedMs = null;
+      if (liveMode && dashboardValue) {
+        // UNKNOWN区間や実際のsession境界を扱うDomain計算を表示側で再実装しない。
+        if (Number.isInteger(dashboardValue.elapsed_ms)) {
+          elapsedMs = dashboardValue.elapsed_ms;
+        }
+      } else if (config.source === "event") {
+        const latest = periodEvents.find((event) => event.value === (config.edge || "ON"));
+        if (latest) elapsedMs = Math.max(0, demoNowMs() - eventTimeMs(latest));
+      } else {
+        const latestStateEvent = fixtures.events
+          .filter((event) => event.signal === config.channelId && ["edge", "snapshot"].includes(event.kind))
+          .sort((left, right) => eventTimeMs(left) - eventTimeMs(right))
+          .at(-1);
+        const currentChannel = fixtures.channels.find((channel) => `IN${channel.id}` === config.channelId);
+        const targetState = config.state || "ON";
+        if (currentChannel?.value === targetState && latestStateEvent?.value === targetState) {
+          elapsedMs = Math.max(0, demoNowMs() - eventTimeMs(latestStateEvent));
+        }
+      }
+      const elapsed = Number.isInteger(elapsedMs) ? formatDuration(elapsedMs) : "該当なし";
+      return `<div class="custom-widget-value"><strong>${escapeHtml(elapsed)}</strong></div><small>${escapeHtml(config.channelId)}・${escapeHtml(periodLabel)}</small>`;
+    }
+    if (config.type === "タイムライン") {
+      return `<div class="mini-timeline-toolbar"><span>${escapeHtml(periodLabel)}</span><div role="group" aria-label="タイムラインの拡大縮小"><button class="secondary-button small-button" data-mini-zoom="out" type="button">−</button><output data-mini-zoom-label>1倍</output><button class="secondary-button small-button" data-mini-zoom="in" type="button">＋</button></div></div>${selectedSignals.map((channelId) => miniTimelineHtml(channelId, periodKey, config.durationMs || 0, dashboardValue)).join("")}`;
+    }
+    const valueFilter = config.value || "all";
+    const eventListItems = liveMode && Array.isArray(dashboardValue?.events)
+      ? dashboardValue.events.map((event) => ({
+        ...event,
+        timestamp: new Date(event.timestamp_ms).toISOString()
+      }))
+      : fixtures.events.filter((event) => (
+        selectedSignals.includes(event.signal)
+        && ["edge", "output"].includes(event.kind)
+        && eventTimeMs(event) >= bounds.startMs
+        && eventTimeMs(event) < bounds.endMs
+      ));
+    const items = eventListItems.filter((event) => valueFilter === "all" || event.value === valueFilter).slice(0, config.count || 10).map((event) => `
+      <div class="event-item"><time class="event-time mono">${escapeHtml(formatLocalDateTime(eventTimeMs(event)).slice(11, 16))}</time><strong class="event-name">${escapeHtml(signalDisplayName(event.signal))}</strong><span class="value-pill value-pill--${event.value.toLowerCase()}">${event.value}</span></div>
+    `).join("");
+    return `<div class="event-list">${items || '<p class="custom-widget-empty">対象期間の記録はありません。</p>'}</div><small>${escapeHtml(config.channelId)}・${escapeHtml(periodLabel)}</small>`;
+  }
+

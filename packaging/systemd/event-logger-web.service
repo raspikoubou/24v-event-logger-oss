@@ -1,0 +1,20 @@
+[Unit]
+Description=24V Event Logger Web UI
+After=network.target event-loggerd.service
+
+[Service]
+Type=simple
+User=event-logger
+Group=event-logger
+WorkingDirectory=/opt/event-logger
+EnvironmentFile=-/etc/event-logger/event-logger.env
+# gthreadの各要求は専用SQLite connectionを持ち、stream完了後にcloseする。
+ExecStart=/opt/event-logger/current/packaging/run_with_private_sqlite.sh /opt/event-logger/venv/bin/gunicorn --workers 1 --worker-class gthread --threads 4 --timeout 60 --bind 0.0.0.0:80 "event_logger.web.app:create_production_app()"
+Restart=on-failure
+RestartSec=2
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

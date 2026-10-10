@@ -1,0 +1,12 @@
+[Unit]
+Description=24V Event Logger database maintenance
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=event-logger
+Group=event-logger
+WorkingDirectory=/opt/event-logger
+EnvironmentFile=-/etc/event-logger/event-logger.env
+ExecStart=/opt/event-logger/current/packaging/run_with_private_sqlite.sh /opt/event-logger/venv/bin/event-logger-maintenance
+NoNewPrivileges=true

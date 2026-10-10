@@ -1,0 +1,344 @@
+  function runApp(fixtures) {
+  let currentPeriod = fixtures.settings.dashboardPeriod || "8h";
+  let dashboardCustomRangeDraft = null;
+  let logging = fixtures.loggerStatus === "logging";
+  let pendingAction = null;
+  let editingWidgetRow = null;
+  let addingWidgetGroup = "realtime";
+  let widgetSettingsDirty = false;
+  let nextDashboardRefreshAtMs = 0;
+  let currentWidgetStep = 1;
+  let timelineZoomIndex = 0;
+  let pinnedTimelineEvent = null;
+  let focusedTimelineEvent = false;
+  let activeTimelineDetailEvent = null;
+  let draggedWidgetRow = null;
+  let draggedWidgetOrigin = null;
+  let dragWasDropped = false;
+  let toastTimer = null;
+  let activeView = "dashboard";
+  let logPage = 1;
+  let logPageEvents = [];
+  let logTotalCount = 0;
+  let logHasNext = false;
+  let logPageLoaded = false;
+  let logPageLoading = false;
+  let logRequestId = 0;
+  let logSearchRange = null;
+  let nextLogRefreshAtMs = 0;
+  let activeOutputTest = liveMode && fixtures.outputTestChannel
+    ? { outputId: fixtures.outputTestChannel, timerId: null }
+    : null;
+  let editingOutputRuleId = null;
+  let widgetLogSignals = null;
+  let loggingStoppedAtMs = null;
+  let loggingStartedAtMs = fixtures.nowMs;
+  const unknownIntervals = [];
+  const timelineZoomLevels = [1, 1.5, 2];
+  const demoClockBaseMs = fixtures.nowMs;
+  const demoClockStartedAtMs = performance.now();
+  const widgetTypeHelp = {
+    "現在状態": "指定入力の現在値を表示します。",
+    "イベント回数": "指定イベントの回数を表示します。",
+    "ON/OFF時間": "指定期間のON時間またはOFF時間を合計します。",
+    "最終イベント": "最後に指定イベントが発生した時刻を表示します。",
+    "経過時間": "指定状態またはイベントを起点に、現在までの経過時間を表示します。",
+    "タイムライン": "IN/OUTの状態履歴を時間軸で表示します。",
+    "イベント一覧": "ダッシュボード内に簡易ログを表示します。"
+  };
+
+  function demoNowMs() {
+    return demoClockBaseMs + performance.now() - demoClockStartedAtMs;
+  }
+
+  const refreshLiveState = createRefreshCoordinator(refreshLiveStateOnce);
+
+  async function refreshLiveStateOnce(forceDashboard = false) {
+    const nowMs = Date.now();
+    const customRangeForRefresh = (
+      dashboardCustomRangeDraft || fixtures.settings.dashboardCustomRange
+    );
+    const includeDashboard = shouldRefreshDashboard({
+      currentPeriod,
+      customRange: customRangeForRefresh,
+      liveMode,
+      forceDashboard,
+      dashboardLoaded: Array.isArray(fixtures.dashboardValues) || Boolean(fixtures.dashboardWarning),
+      nextRefreshAtMs: nextDashboardRefreshAtMs,
+      nowMs
+    });
+    if (includeDashboard) nextDashboardRefreshAtMs = nowMs + 5_000;
+    const next = await loadLiveFixtures(
+      currentPeriod,
+      includeDashboard,
+      customRangeForRefresh,
+      activeView !== "logs"
+    );
+    fixtures.nowMs = next.nowMs;
+    fixtures.channels = next.channels;
+    fixtures.outputs = next.outputs;
+    fixtures.settings = next.settings;
+    if (currentPeriod === "custom" && dashboardCustomRangeDraft) {
+      // 「適用」前の入力値は画面内だけのdraftとして使う。
+      // statusの保存済み値で上書きすると、次のpollが不正なcustom queryへ戻る。
+      fixtures.settings.dashboardCustomRange = dashboardCustomRangeDraft;
+    }
+    fixtures.outputRules = next.outputRules;
+    fixtures.outputTestChannel = next.outputTestChannel;
+    if (Array.isArray(next.events)) fixtures.events = next.events;
+    fixtures.health = next.health;
+    fixtures.loggerStatus = next.loggerStatus;
+    fixtures.unsynchronizedCount = next.unsynchronizedCount;
+    fixtures.writeLatency = next.writeLatency;
+    fixtures.configurationSync = next.configurationSync;
+    fixtures.storage = next.storage;
+    fixtures.storageError = next.storageError;
+    fixtures.dashboardWarning = next.dashboardWarning || null;
+    if (Array.isArray(next.dashboardValues)) {
+      fixtures.dashboardValues = next.dashboardValues;
+      const bounds = next.dashboardPeriods[currentPeriod];
+      if (bounds) fixtures.dashboardPeriods[currentPeriod] = bounds;
+    }
+    if (next.dashboardWarning) nextDashboardRefreshAtMs = Date.now() + 30_000;
+    if (liveMode) {
+      if (next.outputTestChannel === null) {
+        if (activeOutputTest?.timerId) window.clearTimeout(activeOutputTest.timerId);
+        activeOutputTest = null;
+      } else if (activeOutputTest?.outputId !== next.outputTestChannel) {
+        if (activeOutputTest?.timerId) window.clearTimeout(activeOutputTest.timerId);
+        activeOutputTest = { outputId: next.outputTestChannel, timerId: null };
+      }
+    }
+    logging = next.loggerStatus === "logging";
+    syncLiveControls();
+    document.querySelector("#page-title").textContent = next.settings.deviceName;
+    renderUnsynchronizedWarnings();
+    updateOutputOwners();
+    const widgetDialogOpen = document.querySelector("#widget-dialog").open;
+    const nextWidgets = next.widgets || [];
+    if (
+      liveMode
+      && !widgetSettingsDirty
+      && !widgetDialogOpen
+      && JSON.stringify(fixtures.widgets || []) !== JSON.stringify(nextWidgets)
+    ) {
+      fixtures.widgets = nextWidgets;
+      renderPersistedWidgets(nextWidgets);
+    }
+    renderDataViews();
+    if (
+      shouldRefreshLogPage({
+        activeView,
+        liveMode,
+        logPageLoading,
+        periodKey: document.querySelector("#log-period").value,
+        rangeEndMs: periodBounds(document.querySelector("#log-period").value).endMs,
+        nextRefreshAtMs: nextLogRefreshAtMs,
+        nowMs: Date.now()
+      })
+    ) {
+      if (logPage === 1 && document.querySelector("#log-period").value !== "custom") {
+        logSearchRange = null;
+      }
+      await loadLiveLogPage();
+    }
+    if (!document.querySelector("#channel-settings")?.contains(document.activeElement)) {
+      renderChannelSettings();
+    }
+    renderOutputSettings(true);
+    renderHealth();
+    renderOutputTests();
+    refreshCurrentStateCards();
+  }
+
+  function syncLiveControls() {
+    const critical = fixtures.loggerStatus === "critical";
+    const configurationBlocked = Boolean(fixtures.configurationSync?.outOfSync);
+    const loggerStateKnown = ["logging", "maintenance", "critical"].includes(fixtures.loggerStatus);
+    const badge = document.querySelector("#logging-badge");
+    const toggle = document.querySelector("#toggle-logging");
+    const state = document.querySelector("#maintenance-state");
+    const banner = document.querySelector("#maintenance-banner");
+    badge.classList.toggle("is-stopped", !logging);
+    badge.classList.toggle("is-critical", critical);
+    badge.querySelector("span:last-child").textContent = logging
+      ? "記録中"
+      : critical ? "Critical" : loggerStateKnown ? "記録停止中" : "状態不明";
+    toggle.disabled = critical || !loggerStateKnown || (configurationBlocked && !logging);
+    toggle.textContent = logging
+      ? "記録を停止して出力テストへ"
+      : critical ? "Critical状態：再起動が必要"
+        : !loggerStateKnown ? "loggerd状態を確認できません"
+          : configurationBlocked ? "設定確認まで再開できません" : "記録を再開";
+    toggle.classList.toggle("danger-button", logging);
+    toggle.classList.toggle(
+      "primary-button",
+      !logging && !critical && loggerStateKnown && !configurationBlocked
+    );
+    state.innerHTML = logging
+      ? `<span class="status-dot status-dot--ok"></span><div><strong>記録中</strong><small>入力記録・動作確認信号・出力ルールが動作中</small></div>`
+      : critical
+        ? `<span class="status-dot status-dot--critical"></span><div><strong>異常停止（Critical）</strong><small>入力記録が停止しています。OUT状態は診断欄と実機で確認してください。loggerdを再起動するまで記録を再開できません。</small></div>`
+        : !loggerStateKnown
+          ? `<span class="status-dot status-dot--critical"></span><div><strong>loggerd状態不明</strong><small>通信できないため、入力記録とOUT状態を確認できません。実機のOUT状態を確認してください。</small></div>`
+          : `<span class="status-dot status-dot--stopped"></span><div><strong>記録停止中（メンテナンス）</strong><small>${configurationBlocked && !fixtures.configurationSync?.stopped ? "入力記録とOUT状態を確認できません。実機のOUT状態を確認してください。" : "入力は記録されません。通常OUTはOFFです。設備の運転は停止していません。"}</small></div>`;
+    banner.classList.toggle("banner--critical", critical);
+    banner.classList.toggle("banner--warning", !loggerStateKnown);
+    banner.querySelector(".banner-icon").textContent = critical ? "×" : "!";
+    banner.querySelector("div strong").textContent = critical
+      ? "異常停止（Critical）：loggerdの再起動が必要です"
+      : !loggerStateKnown ? "loggerdと通信できません"
+        : "メンテナンス中：入力は記録されていません";
+    banner.hidden = logging && loggerStateKnown;
+  }
+
+  function renderUnsynchronizedWarnings() {
+    const count = fixtures.unsynchronizedCount;
+    const latencyWarning = Boolean(fixtures.writeLatency?.warning);
+    const configurationWarning = Boolean(fixtures.configurationSync?.outOfSync);
+    const storageWarning = storageWarningFor(fixtures.storage, fixtures.storageError);
+    const warningVisibility = warningVisibilityFor({
+      count,
+      latencyWarning,
+      configurationWarning,
+      storageVisible: storageWarning.visible
+    });
+    const { syncVisible, visible } = warningVisibility;
+    const banner = document.querySelector(".banner--warning");
+    const storageBanner = document.querySelector("#storage-warning-banner");
+    const detail = document.querySelector("#unsynchronized-warning");
+    const latencyDetail = document.querySelector("#write-latency-warning");
+    const configurationDetail = document.querySelector("#configuration-sync-warning");
+    const storageDetail = document.querySelector("#storage-warning-detail");
+    const retryConfiguration = document.querySelector("#retry-config-sync");
+    const pill = document.querySelector("#diagnostic-warning-count");
+    const warningCount = Number(count > 0) + Number(latencyWarning)
+      + Number(configurationWarning) + Number(storageWarning.visible);
+    banner.hidden = !syncVisible;
+    storageBanner.hidden = !storageWarning.visible;
+    storageBanner.classList.toggle("banner--critical", storageWarning.severity === "critical");
+    storageBanner.querySelector(".banner-icon").textContent = storageWarning.severity === "critical" ? "×" : "!";
+    storageBanner.querySelector("strong").textContent = storageWarning.title;
+    storageBanner.querySelector("#storage-warning-message").textContent = storageWarning.visible
+      ? storageWarningMessage(storageWarning)
+      : "";
+    detail.hidden = count === 0;
+    latencyDetail.hidden = !latencyWarning;
+    configurationDetail.hidden = !configurationWarning;
+    storageDetail.hidden = !storageWarning.visible;
+    storageDetail.classList.toggle("diagnostic-warning--critical", storageWarning.severity === "critical");
+    storageDetail.querySelector("strong").textContent = storageWarning.title;
+    storageDetail.querySelector("span").textContent = storageWarning.visible
+      ? storageWarningMessage(storageWarning)
+      : "";
+    retryConfiguration.hidden = !configurationWarning || !liveMode;
+    pill.hidden = !visible;
+    pill.classList.toggle("critical", storageWarning.severity === "critical");
+    pill.classList.toggle("warning", storageWarning.severity !== "critical");
+    pill.textContent = `確認事項 ${warningCount}件`;
+    if (!syncVisible) return;
+    const title = configurationWarning
+      ? "loggerdの設定反映を確認してください"
+      : latencyWarning ? "ログ保存に遅延があります" : `同期前の記録が${count}件あります`;
+    banner.querySelector("strong").textContent = title;
+    if (count > 0) {
+      const clockTitle = `同期前の記録が${count}件あります`;
+      detail.querySelector("strong").textContent = clockTitle;
+      detail.querySelector("span").textContent = `現在の時刻は同期済みのため、時刻設定は不要です。同期前の${count}件だけ、発生時刻が正確でない可能性があります。必要な記録の場合は、ログ画面で時刻が「要確認」の行を確認してください。`;
+    }
+    if (latencyWarning) {
+      latencyDetail.querySelector("span").textContent = `直近5分に500ms以上の保存が${fixtures.writeLatency.delayed_count_5m}回（最大${fixtures.writeLatency.max_delay_ms_5m}ms）、未保存の最長滞留${fixtures.writeLatency.oldest_pending_ms}ms。入力頻度とSDカードの状態を確認してください。`;
+    }
+    if (configurationWarning) {
+      configurationDetail.querySelector("span").textContent = fixtures.configurationSync.message;
+    }
+  }
+
+  function selectedTimeZone() {
+    return fixtures.settings.timezone || "Asia/Tokyo";
+  }
+
+  const {
+    timeZoneOffset,
+    parseLocalDateTime,
+    dateTimeParts,
+    formatLocalDateTime,
+    formatDateTimeInput
+  } = window.EventLoggerTimeFormat.createTimeFormatter(selectedTimeZone);
+
+  fixtures.events.forEach((event, index) => {
+    event.id ||= fixtures.events.length - index;
+  });
+
+  function signalDisplayName(signalId) {
+    const match = /^(IN|OUT)(\d+)$/.exec(signalId);
+    if (!match) return signalId;
+    const collection = match[1] === "IN" ? fixtures.channels : fixtures.outputs;
+    const item = collection.find((entry) => entry.id === Number(match[2]));
+    return item?.name || signalId;
+  }
+
+  const { signalIds, channelLabel, escapeHtml } = window.EventLoggerViewFormat;
+
+  function switchIsOn(button) {
+    return button.classList.contains("is-on");
+  }
+
+  function setSwitchState(button, enabled) {
+    button.classList.toggle("is-on", enabled);
+    button.setAttribute("aria-checked", String(enabled));
+  }
+
+  function boolControlValue(button) {
+    return switchIsOn(button);
+  }
+
+  function initializeWidgetSwitchLabels() {
+    document.querySelectorAll("#widget-settings-list .switch").forEach((button) => {
+      button.dataset.onLabel ||= "表示中";
+      button.dataset.offLabel ||= "非表示";
+    });
+  }
+
+  function showToast(message) {
+    const toast = document.querySelector("#toast");
+    toast.textContent = message;
+    toast.classList.add("is-visible");
+    window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => toast.classList.remove("is-visible"), 2400);
+  }
+
+  function switchView(viewName) {
+    activeView = viewName;
+    document.querySelectorAll(".view").forEach((view) => {
+      view.classList.toggle("is-active", view.id === `view-${viewName}`);
+    });
+    document.querySelectorAll("[data-view]").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.view === viewName);
+    });
+    if (viewName === "logs") {
+      if (liveMode) loadLiveLogPage().catch((error) => showToast(error.message));
+      else renderLogs();
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function renderClock() {
+    const nowMs = demoNowMs();
+    const demoNow = new Date(nowMs);
+    const clockText = new Intl.DateTimeFormat("ja-JP", {
+      timeZone: selectedTimeZone(),
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false
+    }).format(demoNow);
+    document.querySelector("#system-clock").textContent = clockText;
+    const diagnosticClock = document.querySelector("#diagnostic-clock");
+    if (diagnosticClock) diagnosticClock.textContent = formatLocalDateTime(nowMs).slice(0, -6);
+    refreshCurrentStateCards();
+    document.querySelectorAll('[data-custom-history-widget][data-widget-type="経過時間"], [data-custom-history-widget][data-widget-type="最終イベント"], [data-custom-history-widget][data-widget-type="ON/OFF時間"]').forEach(renderHistoryWidgetCard);
+    renderOnTimeCard();
+    renderLastEventCard();
+  }
+
