@@ -26,4 +26,4 @@
 
 ソフトウェアはMIT Licenseです。[LICENSE](LICENSE)を参照してください。HATの商品保証とは別に、ソフトウェアの個別サポートは提供していません。
 
-バージョン0.1.6は配布準備中です。配布時にはGitHub Releasesからインストール用アーカイブを取得する方式を予定しています。
+バージョン0.1.6を公開しました。インストール用アーカイブは[GitHub Releases](https://github.com/raspikoubou/24v-event-logger-oss/releases/tag/v0.1.6)から取得できます。導入手順は[インストール説明書](docs/インストール説明書.md)を参照してください。
