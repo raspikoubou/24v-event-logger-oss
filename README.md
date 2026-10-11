@@ -16,7 +16,7 @@
 1. [概要説明書](docs/概要説明書.md) — 製品の用途・構成・使用条件
 2. [インストール説明書](docs/インストール説明書.md) — 導入と初回設定
 3. [取扱説明書](docs/取扱説明書.md) — 画面操作・設定・保守
-4. [リリースノート](docs/リリースノート_0.1.6.md) — 0.1.6の内容と確認事項
+4. [リリースノート（0.1.6）](docs/リリースノート_0.1.6.md) — 過去リリースの個別記録。最新の変更点は[Releases](https://github.com/raspikoubou/24v-event-logger-oss/releases/latest)を参照してください。
 
 ## 使用上の注意
 
@@ -26,4 +26,4 @@
 
 ソフトウェアはMIT Licenseです。[LICENSE](LICENSE)を参照してください。HATの商品保証とは別に、ソフトウェアの個別サポートは提供していません。
 
-バージョン0.1.6を公開しました。インストール用アーカイブは[GitHub Releases](https://github.com/raspikoubou/24v-event-logger-oss/releases/tag/v0.1.6)から取得できます。導入手順は[インストール説明書](docs/インストール説明書.md)を参照してください。
+最新版のインストール用アーカイブと照合用`SHA256SUMS`は[GitHub Releases](https://github.com/raspikoubou/24v-event-logger-oss/releases/latest)から取得できます。導入手順は[インストール説明書](docs/インストール説明書.md)を参照してください。
