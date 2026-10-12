@@ -226,8 +226,7 @@
   const {
     formatBytes,
     storageWarningFor,
-    storageWarningMessage,
-    warningVisibilityFor
+    storageWarningMessage
   } = window.EventLoggerStoragePolicy;
 
   async function start() {
@@ -435,33 +434,22 @@
     const latencyAttention = fixtures.writeLatency?.severity === "attention";
     const configurationWarning = Boolean(fixtures.configurationSync?.outOfSync);
     const storageWarning = storageWarningFor(fixtures.storage, fixtures.storageError);
-    const warningVisibility = warningVisibilityFor({
-      count,
-      latencyWarning,
-      configurationWarning,
-      storageVisible: storageWarning.visible
-    });
-    const { syncVisible, visible } = warningVisibility;
-    const banner = document.querySelector(".banner--warning");
-    const storageBanner = document.querySelector("#storage-warning-banner");
+    const diagnostics = activeView === "diagnostics";
+    const notices = document.querySelector("#system-notices");
     const detail = document.querySelector("#unsynchronized-warning");
     const latencyDetail = document.querySelector("#write-latency-warning");
     const configurationDetail = document.querySelector("#configuration-sync-warning");
     const storageDetail = document.querySelector("#storage-warning-detail");
     const retryConfiguration = document.querySelector("#retry-config-sync");
-    const pill = document.querySelector("#diagnostic-warning-count");
-    const warningCount = Number(count > 0) + Number(latencyWarning)
-      + Number(configurationWarning) + Number(storageWarning.visible);
-    banner.hidden = !syncVisible;
-    storageBanner.hidden = !storageWarning.visible;
-    storageBanner.classList.toggle("banner--critical", storageWarning.severity === "critical");
-    storageBanner.querySelector(".banner-icon").textContent = storageWarning.severity === "critical" ? "×" : "!";
-    storageBanner.querySelector("strong").textContent = storageWarning.title;
-    storageBanner.querySelector("#storage-warning-message").textContent = storageWarning.visible
-      ? storageWarningMessage(storageWarning)
-      : "";
+    // 同じ注意をバナーと本文に二重表示せず、全画面共通のタイトル上へ集約する。
+    notices.hidden = !(count > 0 || latencyWarning || configurationWarning
+      || storageWarning.visible || (diagnostics && latencyAttention));
+    document.querySelector("#notice-details-link").hidden = notices.hidden || diagnostics;
+    [detail, latencyDetail, configurationDetail, storageDetail].forEach((notice) => {
+      notice.querySelector("span").hidden = !diagnostics;
+    });
     detail.hidden = count === 0;
-    latencyDetail.hidden = !latencyWarning && !latencyAttention;
+    latencyDetail.hidden = !latencyWarning && !(diagnostics && latencyAttention);
     latencyDetail.querySelector("strong").textContent = latencyWarning
       ? "警告：ログ保存の状態を確認してください" : "注意：一時的なログ保存の遅延";
     latencyDetail.classList.toggle("diagnostic-warning--attention", latencyAttention);
@@ -475,16 +463,7 @@
     storageDetail.querySelector("span").textContent = storageWarning.visible
       ? storageWarningMessage(storageWarning)
       : "";
-    retryConfiguration.hidden = !configurationWarning || !liveMode;
-    pill.hidden = !visible;
-    pill.classList.toggle("critical", storageWarning.severity === "critical");
-    pill.classList.toggle("warning", storageWarning.severity !== "critical");
-    pill.textContent = `確認事項 ${warningCount}件`;
-    if (!syncVisible) return;
-    const title = configurationWarning
-      ? "loggerdの設定反映を確認してください"
-      : latencyWarning ? "ログ保存の状態を確認してください" : `同期前の記録が${count}件あります`;
-    banner.querySelector("strong").textContent = title;
+    retryConfiguration.hidden = !diagnostics || !configurationWarning || !liveMode;
     if (count > 0) {
       const clockTitle = `同期前の記録が${count}件あります`;
       detail.querySelector("strong").textContent = clockTitle;
@@ -551,6 +530,7 @@
 
   function switchView(viewName) {
     activeView = viewName;
+    renderUnsynchronizedWarnings();
     document.querySelectorAll(".view").forEach((view) => {
       view.classList.toggle("is-active", view.id === `view-${viewName}`);
     });

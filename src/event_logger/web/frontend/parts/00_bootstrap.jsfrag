@@ -226,8 +226,7 @@
   const {
     formatBytes,
     storageWarningFor,
-    storageWarningMessage,
-    warningVisibilityFor
+    storageWarningMessage
   } = window.EventLoggerStoragePolicy;
 
   async function start() {
