@@ -63,13 +63,17 @@
     );
     const selectedPeriod = period || status.dashboard_period || "8h";
     const selectedCustomRange = customRange || status.dashboard_custom_range;
+    let dashboardReceivedAtMs = null;
     const [widgets, rules, setup, logs, dashboard] = await Promise.all([
       liveJson("/api/widgets"),
       liveJson("/api/output-rules"),
       liveJson("/api/setup"),
       includeEvents ? liveJson("/api/logs?limit=500") : Promise.resolve(null),
       includeDashboard
-        ? liveJson(dashboardApiUrl(selectedPeriod, selectedCustomRange))
+        ? liveJson(dashboardApiUrl(selectedPeriod, selectedCustomRange)).then((data) => {
+          dashboardReceivedAtMs = performance.now();
+          return data;
+        })
         : Promise.resolve(null)
     ]);
     const nowMs = Number(status.clock?.utc_ms || Date.now());
@@ -170,6 +174,7 @@
       counterResets: {},
       widgets: widgets.items || [],
       dashboardValues: dashboard?.items || null,
+      dashboardReceivedAtMs,
       dashboardWarning: dashboard?.warning || null,
       storage: status.storage || null,
       storageError: Boolean(status.storage_error),

@@ -37,6 +37,7 @@
     liveMode,
     forceDashboard,
     dashboardLoaded,
+    hasCurrentStateWidgets = false,
     nextRefreshAtMs,
     nowMs
   }) {
@@ -50,10 +51,11 @@
     const closedCustomRange = currentPeriod === "custom"
       && Number.isInteger(customRange?.to_ms)
       && customRange.to_ms <= nowMs;
+    // 集計期間が過去でも現在状態の継続時間は通常の取得間隔で更新する。
     return liveMode && (
       forceDashboard
       || !dashboardLoaded
-      || (!closedCustomRange && nowMs >= nextRefreshAtMs)
+      || ((!closedCustomRange || hasCurrentStateWidgets) && nowMs >= nextRefreshAtMs)
     );
   }
 
