@@ -173,6 +173,10 @@
           <section class="panel io-panel"><div class="panel-head"><div><h2>現在の入出力</h2></div><span class="updated-time">1秒ごとに更新</span></div><div class="io-grid" id="io-grid"></div></section>
           <section class="panel maintenance-panel"><div class="panel-head"><div><h2>記録停止・出力テスト</h2></div></div><p class="safety-note">設備は停止しません</p><div class="maintenance-state" id="maintenance-state"><span class="status-dot status-dot--ok"></span><div><strong>記録中</strong><small>入力記録・動作確認信号・出力ルールが動作中</small></div></div><button class="danger-button" id="toggle-logging" type="button">記録を停止して出力テストへ</button><div class="output-tests" id="output-tests" aria-label="出力テスト"></div></section>
         </div>
+        <section class="panel" aria-labelledby="restart-heading">
+          <div class="panel-head"><div><h2 id="restart-heading">本体の再起動</h2><p>動作がおかしいときや、本体設定を反映したいときに使用します。</p></div><button class="danger-button" id="restart-system" type="button">本体を再起動</button></div>
+          <p id="restart-status" role="status" aria-live="polite">再起動中は記録と出力が一時停止し、画面との接続が切れます。設備は停止しません。</p>
+        </section>
         <section class="panel update-panel" id="update-panel" aria-labelledby="update-heading">
           <div class="panel-head">
             <div><h2 id="update-heading">ソフトウェア更新</h2><p>更新確認はボタンを押したときだけ行います。適用は別途確認してから開始します。</p></div>
@@ -189,6 +193,7 @@
       </section>
     </main>
 
+    <dialog id="restart-dialog" aria-labelledby="restart-dialog-title"><form method="dialog"><h2 id="restart-dialog-title">Raspberry Pi本体を再起動しますか？</h2><p>記録と出力が一時停止し、画面との接続が切れます。記録できない区間はUNKNOWNになります。設備は停止しません。<br>記録中の場合は起動後に記録を再開します。記録停止中の場合は停止状態を維持します。<br>更新処理中は再起動できません。</p><div class="dialog-actions"><button class="secondary-button" value="cancel">キャンセル</button><button class="danger-button" value="confirm">再起動する</button></div></form></dialog>
     <aside class="timeline-detail" id="timeline-event-detail" role="tooltip" hidden></aside>
     <dialog id="confirm-dialog"><form method="dialog"><div class="dialog-icon" aria-hidden="true">!</div><h2 id="dialog-title">確認</h2><p id="dialog-message"></p><div class="dialog-actions"><button class="secondary-button" value="cancel">キャンセル</button><button class="danger-button" id="dialog-confirm" value="confirm">停止する</button></div></form></dialog>
     <dialog id="widget-dialog">
@@ -252,6 +257,7 @@
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script>window.EVENT_LOGGER_LIVE = true; window.EVENT_LOGGER_DEMO = {{ 'true' if demo else 'false' }};</script>
+    <script src="{{ url_for('static', filename='restart_panel.js') }}" defer></script>
     <script src="{{ url_for('static', filename='update_panel.js') }}" defer></script>
     <script src="{{ url_for('static', filename='widget_config.js') }}" defer></script>
     <script src="{{ url_for('static', filename='refresh_policy.js') }}" defer></script>

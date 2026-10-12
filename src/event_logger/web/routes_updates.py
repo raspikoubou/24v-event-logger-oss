@@ -10,6 +10,7 @@ from event_logger.maintenance.update import (
     download_and_verify,
     is_newer_version,
     launch_updater,
+    request_reboot,
 )
 
 
@@ -23,6 +24,24 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
         _read_update_status,
     )
 
+    @app.post("/api/system/reboot")
+    def reboot_system() -> Response:
+        """確認後の本体再起動を、root権限のないWebから管理agentへ依頼する。"""
+        from flask import request
+
+        # 固定操作に任意引数を付けられると誤解させない。CSRF・共有passwordは
+        # 他の変更endpointと同じbefore_request境界で検証済み。
+        if request.get_data():
+            return _error("INVALID_REQUEST", "再起動要求に引数は指定できません。", 400)
+        if demo:
+            return _ok({"started": False, "demo": True})
+        try:
+            request_reboot(str(app.config.get("UPDATE_SOCKET_PATH", "")))
+        except UpdateError as error:
+            return _error("REBOOT_FAILED", str(error), 503)
+        response = _ok({"started": True, "demo": False})
+        response.status_code = 202
+        return response
 
     @app.get("/api/update")
     def update_info() -> Response:
@@ -101,5 +120,3 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
         )
         response.status_code = 202
         return response
-
-

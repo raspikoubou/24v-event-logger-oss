@@ -327,6 +327,27 @@ def _request_update_agent(
         )
 
 
+def request_reboot(socket_path: str | os.PathLike[str]) -> None:
+    """管理agentへ本体再起動だけを依頼し、任意コマンドは渡さない。"""
+    if not str(socket_path):
+        raise UpdateError("再起動サービスが設定されていません。")
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(10.0)
+            connection.connect(str(socket_path))
+            connection.sendall(b'{"action":"reboot"}\n')
+            response = _read_agent_response(connection)
+    except OSError as error:
+        raise UpdateError("再起動サービスへ接続できませんでした。") from error
+    if not isinstance(response, dict) or response.get("ok") is not True:
+        message = response.get("message") if isinstance(response, dict) else None
+        raise UpdateError(
+            str(message)
+            if isinstance(message, str)
+            else "再起動を開始できませんでした。"
+        )
+
+
 def _read_agent_response(connection: socket.socket) -> object:
     """update-agentのnewline JSONをサイズ制限付きで読む。"""
     buffer = bytearray()

@@ -17,6 +17,8 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+_APPLY_LOCK = Path("/run/lock/event-logger-apply.lock")
+
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 _VERSION_PATTERN = re.compile(r"[A-Za-z0-9_.-]+")
@@ -93,6 +95,12 @@ class UpdateAgent:
         staging: Path | None = None
         try:
             request = _read_request(connection)
+            # 再起動は配布元未設定でも使える固定操作。Webからcommandや
+            # systemd unit名を渡せる汎用実行口にはしない。
+            if isinstance(request, dict) and request.get("action") == "reboot":
+                if request != {"action": "reboot"}:
+                    raise ValueError("再起動要求に余分な項目があります。")
+                return self._schedule_reboot()
             archive, _checksum, version = self._validate_request(request)
             self._validate_helper()
             if self._process is not None and self._process.poll() is None:
@@ -128,6 +136,38 @@ class UpdateAgent:
             if staging is not None:
                 shutil.rmtree(staging, ignore_errors=True)
             return {"ok": False, "message": str(error)}
+
+    def _schedule_reboot(self) -> dict[str, object]:
+        """更新と排他し、応答を返した後にsystemdへ通常の本体再起動を依頼する。"""
+        if self._process is not None and self._process.poll() is None:
+            raise ValueError("更新中は再起動できません。完了までお待ちください。")
+        try:
+            _APPLY_LOCK.mkdir()
+        except FileExistsError as error:
+            raise ValueError("更新または再起動の処理中です。") from error
+        try:
+            # 通常のrebootはloggerdの終了処理を通す。forceや電源断を使わず、
+            # Webへの応答猶予を設ける。agent自身のcgroupとは別unitで実行する。
+            # 起動失敗・reboot要求の終了時にも共有lockを残さない。
+            subprocess.run(
+                [
+                    "/usr/bin/systemd-run",
+                    "--unit=event-logger-reboot",
+                    "--on-active=3s",
+                    "--timer-property=AccuracySec=1s",
+                    "--property=Type=exec",
+                    "--property=ExecStopPost=/usr/bin/rmdir " + str(_APPLY_LOCK),
+                    "/usr/bin/systemctl",
+                    "reboot",
+                ],
+                check=True,
+                capture_output=True,
+                timeout=10.0,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            _APPLY_LOCK.rmdir()
+            raise ValueError("本体の再起動を予約できませんでした。") from error
+        return {"ok": True, "started": True}
 
     def _validate_request(self, request: object) -> tuple[Path, Path, str]:
         """asset path、checksum path、versionの固定境界を検証する。"""
