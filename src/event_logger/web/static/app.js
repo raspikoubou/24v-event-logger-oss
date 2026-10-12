@@ -211,7 +211,7 @@
         {
           label: "ログ保存遅延（直近5分）",
           value: status.daemon?.write_latency
-            ? `${Number(status.daemon.write_latency.delayed_count_5m || 0)}回 · 最大${Number(status.daemon.write_latency.max_delay_ms_5m || 0)}ms · 最長滞留${Number(status.daemon.write_latency.oldest_pending_ms || 0)}ms · 未保存${Number(status.daemon.pending_event_count || 0)}件`
+            ? `${Number(status.daemon.write_latency.delayed_count_5m || 0)}回 · 最大${formatMilliseconds(status.daemon.write_latency.max_delay_ms_5m || 0)}ms · 最長滞留${formatMilliseconds(status.daemon.write_latency.oldest_pending_ms || 0)}ms · 未保存${Number(status.daemon.pending_event_count || 0)}件`
             : "--",
           state: status.daemon?.write_latency?.warning ? "warning" : "ok"
         },
@@ -484,7 +484,7 @@
       detail.querySelector("span").textContent = `現在の時刻は同期済みのため、時刻設定は不要です。同期前の${count}件だけ、発生時刻が正確でない可能性があります。必要な記録の場合は、ログ画面で時刻が「要確認」の行を確認してください。`;
     }
     if (latencyWarning) {
-      latencyDetail.querySelector("span").textContent = `直近5分に500ms以上の保存が${fixtures.writeLatency.delayed_count_5m}回（最大${fixtures.writeLatency.max_delay_ms_5m}ms）、未保存の最長滞留${fixtures.writeLatency.oldest_pending_ms}ms。入力頻度とSDカードの状態を確認してください。`;
+      latencyDetail.querySelector("span").textContent = `直近5分に500ms以上の保存が${fixtures.writeLatency.delayed_count_5m}回（最大${formatMilliseconds(fixtures.writeLatency.max_delay_ms_5m)}ms）、未保存の最長滞留${formatMilliseconds(fixtures.writeLatency.oldest_pending_ms)}ms。入力頻度とSDカードの状態を確認してください。`;
     }
     if (configurationWarning) {
       configurationDetail.querySelector("span").textContent = fixtures.configurationSync.message;
@@ -613,8 +613,13 @@
     return formatLocalDateTime(timestampMs, true);
   }
 
+  // 表示だけを丸め、記録時刻や集計値の精度は変更しない。
+  function formatMilliseconds(value) {
+    return Number(value).toFixed(1);
+  }
+
   function formatDuration(durationMs) {
-    if (durationMs < 1000) return `${durationMs}ミリ秒`;
+    if (durationMs < 1000) return `${formatMilliseconds(durationMs)}ミリ秒`;
     const totalSeconds = Math.round(durationMs / 1000);
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
