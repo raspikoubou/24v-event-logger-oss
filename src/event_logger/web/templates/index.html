@@ -187,6 +187,7 @@
       </section>
     </main>
 
+    <dialog id="update-dialog" aria-labelledby="update-dialog-title"><form method="dialog"><h2 id="update-dialog-title">ソフトウェアを更新しますか？</h2><p id="update-dialog-message"></p><div class="dialog-actions"><button class="secondary-button" value="cancel">キャンセル</button><button class="primary-button" value="confirm">更新を開始</button></div></form></dialog>
     <dialog id="restart-dialog" aria-labelledby="restart-dialog-title"><form method="dialog"><h2 id="restart-dialog-title">Raspberry Pi本体を再起動しますか？</h2><p>記録と出力が一時停止し、画面との接続が切れます。記録できない区間はUNKNOWNになります。<br>記録中の場合は起動後に記録を再開します。記録停止中の場合は停止状態を維持します。<br>更新処理中は再起動できません。</p><div class="dialog-actions"><button class="secondary-button" value="cancel">キャンセル</button><button class="danger-button" value="confirm">再起動する</button></div></form></dialog>
     <aside class="timeline-detail" id="timeline-event-detail" role="tooltip" hidden></aside>
     <dialog id="confirm-dialog"><form method="dialog"><div class="dialog-icon" aria-hidden="true">!</div><h2 id="dialog-title">確認</h2><p id="dialog-message"></p><div class="dialog-actions"><button class="secondary-button" value="cancel">キャンセル</button><button class="danger-button" id="dialog-confirm" value="confirm">停止する</button></div></form></dialog>
