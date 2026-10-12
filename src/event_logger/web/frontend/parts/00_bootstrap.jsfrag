@@ -211,9 +211,9 @@
         {
           label: "ログ保存遅延（直近5分）",
           value: status.daemon?.write_latency
-            ? `${Number(status.daemon.write_latency.delayed_count_5m || 0)}回 · 最大${formatMilliseconds(status.daemon.write_latency.max_delay_ms_5m || 0)}ms · 最長滞留${formatMilliseconds(status.daemon.write_latency.oldest_pending_ms || 0)}ms · 未保存${Number(status.daemon.pending_event_count || 0)}件`
+            ? `${status.daemon.write_latency.warning ? "警告" : status.daemon.write_latency.severity === "attention" ? "注意" : "正常"} · ${Number(status.daemon.write_latency.delayed_count_5m || 0)}回 · 最大${Number(status.daemon.write_latency.max_delay_ms_5m || 0).toFixed(1)}ms · 最長滞留${Number(status.daemon.write_latency.oldest_pending_ms || 0).toFixed(1)}ms · 未保存${Number(status.daemon.pending_event_count || 0)}件`
             : "--",
-          state: status.daemon?.write_latency?.warning ? "warning" : "ok"
+          state: status.daemon?.write_latency?.warning ? "warning" : status.daemon?.write_latency?.severity === "attention" ? "attention" : "ok"
         },
         { id: "diagnostic-clock", label: "システム時刻", value: "--", state: "ok" },
         { label: "NTP同期状態", value: status.clock?.synchronized ? "同期済み" : "未同期", state: status.clock?.synchronized ? "ok" : "warning" },

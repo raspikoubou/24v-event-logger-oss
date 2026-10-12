@@ -27,3 +27,5 @@
 ソフトウェアはMIT Licenseです。[LICENSE](LICENSE)を参照してください。HATの商品保証とは別に、ソフトウェアの個別サポートは提供していません。
 
 最新版のインストール用アーカイブと照合用`SHA256SUMS`は[GitHub Releases](https://github.com/raspikoubou/24v-event-logger-oss/releases/latest)から取得できます。導入手順は[インストール説明書](docs/インストール説明書.md)を参照してください。
+
+開発者向け：[保存状態の診断設計](docs/保存状態の診断設計.md) / [リリースノート作成手順](docs/開発者向けリリース手順.md)。今後のリリース作業では作成手順と本文検査を必須とします。

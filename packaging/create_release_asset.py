@@ -30,6 +30,9 @@ EXCLUDED_FILE_NAMES = frozenset(
         "check_public_tree.py",
         "public_files.json",
         "build_frontend.cjs",
+        "check_release_notes.py",
+        "test_write_diagnostics.py",
+        "test_write_diagnostics.cjs",
     }
 )
 FORBIDDEN_FILE_NAMES = frozenset({".env", "event-logger.env"})

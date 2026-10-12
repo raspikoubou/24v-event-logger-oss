@@ -660,7 +660,9 @@ class LoggerDaemon:
                 "last_commit_ms": write_latency.last_commit_ms,
                 "in_progress_ms": write_latency.in_progress_ms,
                 "oldest_pending_ms": oldest_pending_ms,
-                "warning": write_latency.warning or oldest_pending_ms >= 5_000,
+                "warning": write_latency.warning,
+                "severity": write_latency.severity,
+                "queue_capacity": self._event_queue.capacity,
             },
             "inputs": {
                 str(channel_id): int(value)
