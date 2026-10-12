@@ -54,3 +54,6 @@ SDバックアップ/
 !/.github/workflows/
 /.github/workflows/*
 !/.github/workflows/public-scope.yml
+
+# リリース文の必須公開ルール
+!/.github/RELEASE_POLICY.md
