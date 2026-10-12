@@ -32,8 +32,13 @@
     return formatLocalDateTime(timestampMs, true);
   }
 
+  // 表示だけを丸め、記録時刻や集計値の精度は変更しない。
+  function formatMilliseconds(value) {
+    return Number(value).toFixed(1);
+  }
+
   function formatDuration(durationMs) {
-    if (durationMs < 1000) return `${durationMs}ミリ秒`;
+    if (durationMs < 1000) return `${formatMilliseconds(durationMs)}ミリ秒`;
     const totalSeconds = Math.round(durationMs / 1000);
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
