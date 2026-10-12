@@ -12,11 +12,15 @@
     applyRelease,
     confirmApply,
     onChange = () => {},
+    readStatus = null,
+    now = () => Date.now(),
   }) {
     const state = {
       checking: false,
       confirming: false,
       applying: false,
+      processing: false,
+      targetVersion: null,
       configured: false,
       available: false,
       currentVersion: "未確認",
@@ -25,6 +29,9 @@
       notes: "",
       message: "更新確認はまだ実行していません。",
     };
+
+    let statusRequestRunning = false;
+    let watchStartedAt = null;
 
     function snapshot() {
       return { ...state };
@@ -36,7 +43,7 @@
     }
 
     async function check() {
-      if (state.checking || state.confirming || state.applying) return snapshot();
+      if (state.checking || state.confirming || state.applying || state.processing) return snapshot();
       updateState({
         checking: true,
         available: false,
@@ -102,7 +109,7 @@
     }
 
     async function apply() {
-      if (!state.available || state.checking || state.confirming || state.applying) {
+      if (!state.available || state.checking || state.confirming || state.applying || state.processing) {
         return snapshot();
       }
       updateState({ confirming: true, message: "適用前の確認を待っています。" });
@@ -127,23 +134,31 @@
       updateState({
         confirming: false,
         applying: true,
+        processing: true,
+        targetVersion: state.latestVersion,
+        status: { status: "started", version: state.latestVersion },
         available: false,
         message: "更新を依頼しています。処理中は画面の再読み込みを避けてください。",
       });
+      watchStartedAt = now();
       try {
         const result = await applyRelease();
         if (!result || result.started !== true) {
           throw new Error("更新処理を開始できませんでした。");
         }
         updateState({
-          status: result.status && typeof result.status === "object"
-            ? result.status
-            : { status: "started", version: result.target_version },
-          message: `${result.target_version || state.latestVersion} の更新を開始しました。完了後に画面を再読み込みしてください。`,
+          // POST応答のstatusは前回の更新記録の場合がある。今回の対象で監視する。
+          targetVersion: result.target_version || state.latestVersion,
+          status: { status: "started", version: result.target_version || state.latestVersion },
+          message: "処理中：更新しています。完了まで電源を切らないでください。",
         });
       } catch (error) {
         updateState({
-          message: `更新を開始できませんでした。再確認してから操作してください。${error instanceof Error ? ` ${error.message}` : ""}`,
+          processing: error?.requestRejected !== true,
+          status: { status: error?.requestRejected === true ? "failed" : "started", version: state.targetVersion },
+          message: error?.requestRejected === true
+            ? `失敗：更新を開始できませんでした。${error.message}`
+            : "処理中：更新依頼の応答を確認できません。実際の状態を確認しています。",
         });
       } finally {
         updateState({ applying: false });
@@ -151,14 +166,62 @@
       return snapshot();
     }
 
-    return { check, apply, getState: snapshot };
+    async function monitor() {
+      if (!readStatus || statusRequestRunning || state.applying) return snapshot();
+      statusRequestRunning = true;
+      try {
+        const result = await readStatus();
+        if (!result || typeof result.current_version !== "string") {
+          throw new Error("更新状態の応答を確認できません。");
+        }
+        updateState({ currentVersion: result.current_version });
+        const status = result.status;
+        // 更新開始直後に前回のcompleted記録が返っても、今回の完了と誤認しない。
+        if (state.processing && (!status || status.version !== state.targetVersion)) {
+          updateState({ message: "処理中：更新処理の状態を確認しています。" });
+        } else if (status?.status === "started") {
+          if (watchStartedAt === null) watchStartedAt = now();
+          updateState({ processing: true, available: false, targetVersion: status.version, status,
+            message: "処理中：更新しています。完了まで電源を切らないでください。" });
+        } else if (status?.status === "completed") {
+          updateState({ processing: false, status, message:
+            `完了：${status.version || result.current_version} の更新が完了しました。画面を再読み込みしてください。` });
+          watchStartedAt = null;
+        } else if (status?.status === "failed" || status?.status === "rollback_failed") {
+          updateState({ processing: false, available: false, status, message:
+            status.status === "rollback_failed"
+              ? "失敗：更新後の復旧にも失敗しました。再適用せず、記録状態とエラーを確認してください。"
+              : "失敗：更新に失敗し、元の状態へ戻しました。現在のVersionと記録状態を確認してください。" });
+          watchStartedAt = null;
+        } else if (!state.processing) {
+          updateState({ status: null });
+        }
+      } catch (error) {
+        if (state.processing) {
+          // Web停止中の通信失敗は更新失敗ではない。再接続して実際の結果を待つ。
+          updateState({ message: "処理中：一時的に接続できません。再接続を待っています。" });
+        } else {
+          updateState({ message: "更新状態を確認できません。接続を確認してください。" });
+        }
+      } finally {
+        statusRequestRunning = false;
+      }
+      if (state.processing && watchStartedAt !== null && now() - watchStartedAt > 10 * 60 * 1000) {
+        // 通信断から成功・失敗を推測しない。長時間結果が取れない場合は明示的に未確認にする。
+        updateState({ processing: false, available: false, status: { status: "unknown" },
+          message: "更新結果を確認できません。成功・失敗は未確認です。再適用せず、接続と記録状態を確認してください。" });
+      }
+      return snapshot();
+    }
+
+    return { check, apply, monitor, getState: snapshot };
   }
 
   function formatUpdateStatus(status) {
     if (!status) return "更新状態の記録はありません。";
-    const values = [status.status, status.version, status.message, status.updated_at]
-      .filter((value) => typeof value === "string" && value.length > 0);
-    return values.length ? values.join(" — ") : "更新状態の形式を確認できません。";
+    const label = { started: "処理中", completed: "完了", failed: "失敗",
+      rollback_failed: "失敗（復旧にも失敗）", unknown: "結果未確認" }[status.status] || "状態未確認";
+    return status.version ? `${label} — ${status.version}` : label;
   }
 
   function mount(documentRef, windowRef) {
@@ -177,9 +240,13 @@
     if (Object.values(elements).some((element) => !element)) return null;
 
     function render(state) {
-      elements.check.disabled = state.checking || state.confirming || state.applying;
+      const progress = documentRef.getElementById("update-progress");
+      const processing = state.processing || state.applying;
+      if (panel.dataset) panel.dataset.updateProcessing = String(processing);
+      if (progress) progress.hidden = !processing;
+      elements.check.disabled = state.checking || state.confirming || processing;
       elements.check.textContent = state.checking ? "確認中…" : "更新を確認";
-      elements.apply.disabled = !state.available || state.checking || state.confirming || state.applying;
+      elements.apply.disabled = !state.available || state.checking || state.confirming || processing;
       elements.apply.textContent = state.applying ? "依頼中…" : "更新を適用";
       elements.current.textContent = state.currentVersion;
       elements.latest.textContent = state.latestVersion;
@@ -203,13 +270,14 @@
     }
 
     const csrfToken = documentRef.querySelector('meta[name="csrf-token"]')?.content || "";
-    async function requestUpdate(method) {
+    async function requestUpdate(method, path = "/api/update") {
       const headers = { Accept: "application/json" };
       if (method !== "GET" && csrfToken) headers["X-CSRF-Token"] = csrfToken;
-      const response = await windowRef.fetch("/api/update", {
+      const response = await windowRef.fetch(path, {
         method,
         headers,
         credentials: "same-origin",
+        cache: "no-store",
       });
       let payload;
       try {
@@ -218,7 +286,9 @@
         throw new Error("サーバー応答を読み取れませんでした。");
       }
       if (!response.ok || payload.ok === false) {
-        throw new Error(payload.error?.message || "サーバーとの通信に失敗しました。");
+        const error = new Error(payload.error?.message || "サーバーとの通信に失敗しました。");
+        error.requestRejected = true;
+        throw error;
       }
       return payload.data;
     }
@@ -232,10 +302,18 @@
         + "適用前にDB backupを取得し、失敗時は旧版へ戻します。続けますか？",
       ),
       onChange: render,
+      readStatus: () => requestUpdate("GET", "/api/update/status"),
     });
     elements.check.addEventListener("click", () => controller.check());
     elements.apply.addEventListener("click", () => controller.apply());
     render(controller.getState());
+    // GitHubの更新確認とは別に、ローカルの処理結果だけを自動で確認する。
+    controller.monitor();
+    if (typeof windowRef.setInterval === "function") {
+      windowRef.setInterval(() => {
+        if (controller.getState().processing) controller.monitor();
+      }, 3000);
+    }
     return controller;
   }
 
