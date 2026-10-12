@@ -1,4 +1,5 @@
 [
+  ".github/RELEASE_POLICY.md",
   ".github/workflows/public-scope.yml",
   ".gitignore",
   "LICENSE",
