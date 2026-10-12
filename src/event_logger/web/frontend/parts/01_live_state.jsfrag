@@ -64,6 +64,7 @@
       liveMode,
       forceDashboard,
       dashboardLoaded: Array.isArray(fixtures.dashboardValues) || Boolean(fixtures.dashboardWarning),
+      hasCurrentStateWidgets: fixtures.widgets?.some((widget) => widget.type === "current_state" && widget.enabled !== false),
       nextRefreshAtMs: nextDashboardRefreshAtMs,
       nowMs
     });
@@ -96,6 +97,7 @@
     fixtures.dashboardWarning = next.dashboardWarning || null;
     if (Array.isArray(next.dashboardValues)) {
       fixtures.dashboardValues = next.dashboardValues;
+      fixtures.dashboardReceivedAtMs = next.dashboardReceivedAtMs;
       const bounds = next.dashboardPeriods[currentPeriod];
       if (bounds) fixtures.dashboardPeriods[currentPeriod] = bounds;
     }

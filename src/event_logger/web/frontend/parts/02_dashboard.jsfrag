@@ -61,8 +61,24 @@
     return formatDuration(durationMs);
   }
 
-  function currentStateValues(channelId, onLabel, offLabel) {
+  function currentStateValues(channelId, onLabel, offLabel, widgetId) {
     const channel = fixtures.channels.find((item) => `IN${item.id}` === channelId);
+    if (liveMode) {
+      const dashboardValue = fixtures.dashboardValues?.find((item) => item.widget_id === widgetId);
+      // 状態と継続時間は同じAPI snapshotを使い、画面起動時刻や直近ログを起点にしない。
+      const value = logging && channel?.enabled && channel.value !== "UNKNOWN"
+        ? dashboardValue?.state || "UNKNOWN"
+        : "UNKNOWN";
+      // API取得の合間だけ単調時計で表示を進め、次のsnapshotで基準を置き換える。
+      const elapsedMs = value !== "UNKNOWN" && Number.isInteger(dashboardValue?.elapsed_ms)
+        ? dashboardValue.elapsed_ms + Math.max(0, performance.now() - fixtures.dashboardReceivedAtMs)
+        : null;
+      return {
+        value,
+        displayValue: value === "ON" ? onLabel : value === "OFF" ? offLabel : "UNKNOWN",
+        elapsed: elapsedMs === null ? "継続時間は計測していません" : `${formatDuration(elapsedMs)}継続`
+      };
+    }
     const value = logging && channel?.enabled ? channel.value : "UNKNOWN";
     const displayValue = value === "ON" ? onLabel : value === "OFF" ? offLabel : "UNKNOWN";
     const latestEvent = fixtures.events.find((event) => event.signal === channelId);
@@ -75,7 +91,7 @@
   }
 
   function updateCurrentStateCard(card, config) {
-    const values = currentStateValues(config.channelId, config.onLabel, config.offLabel);
+    const values = currentStateValues(config.channelId, config.onLabel, config.offLabel, config.id);
     card.dataset.widgetType = "現在状態";
     card.dataset.widgetChannel = config.channelId;
     card.dataset.onLabel = config.onLabel;
@@ -92,7 +108,7 @@
   }
 
   function currentStateCardHtml(config) {
-    const values = currentStateValues(config.channelId, config.onLabel, config.offLabel);
+    const values = currentStateValues(config.channelId, config.onLabel, config.offLabel, config.id);
     const hiddenClass = config.enabled === false ? " is-hidden-widget" : "";
     return `
       <article class="overview-card${hiddenClass}${values.value === "ON" ? " is-active-state" : values.value === "OFF" ? " is-normal-state" : ""}" data-widget="${escapeHtml(config.id)}" data-size="${escapeHtml(config.size)}" data-widget-type="現在状態" data-widget-channel="${escapeHtml(config.channelId)}" data-on-label="${escapeHtml(config.onLabel)}" data-off-label="${escapeHtml(config.offLabel)}" data-show-elapsed="${config.showElapsed}">
@@ -128,6 +144,7 @@
   function refreshCurrentStateCards() {
     document.querySelectorAll("#dashboard-realtime-grid [data-widget-type='現在状態']").forEach((card) => {
       updateCurrentStateCard(card, {
+        id: card.dataset.widget,
         title: card.querySelector("[data-widget-title]").textContent,
         channelId: card.dataset.widgetChannel,
         onLabel: card.dataset.onLabel,
