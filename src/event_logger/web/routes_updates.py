@@ -43,6 +43,18 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
         response.status_code = 202
         return response
 
+    @app.get("/api/update/status")
+    def update_status() -> Response:
+        """ローカルの更新結果だけを返す。定期確認ではGitHubへ通信しない。"""
+        response = _ok(
+            {
+                "current_version": str(app.config["APP_VERSION"]),
+                "status": _read_update_status(app.config.get("UPDATE_STATUS_FILE")),
+            }
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     @app.get("/api/update")
     def update_info() -> Response:
         """GitHub Releasesの安定版情報を確認する。"""

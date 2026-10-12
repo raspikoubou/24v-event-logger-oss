@@ -89,7 +89,12 @@
   renderClock();
   window.setInterval(renderClock, 1000);
   window.setInterval(() => {
-    refreshLiveState().catch((error) => showToast(error.message));
+    refreshLiveState().catch((error) => {
+      // 更新中はWebサービスが一時停止する。切断を更新失敗のtoastにしない。
+      if (document.querySelector("#update-panel")?.dataset.updateProcessing !== "true") {
+        showToast(error.message);
+      }
+    });
   }, 1000);
   }
 

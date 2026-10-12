@@ -584,3 +584,6 @@ dialog .checkbox-label input { width: 18px; min-height: 18px; margin: 0; }
 .health-value.attention::before { background: #647787; }
 
 #notice-details-link { display: block; margin: 0 0 20px auto; }
+
+#update-progress { display: block; width: 100%; margin: 12px 0; }
+#update-progress[hidden] { display: none; }
