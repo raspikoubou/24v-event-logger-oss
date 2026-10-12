@@ -144,13 +144,19 @@
         <section class="panel settings-section" id="input-settings"><div class="panel-head"><div><h2>入力信号</h2><p>記録するIN信号、名称、信号確定待ち時間を設定します。短いパルスを記録する場合は、待ち時間を小さくしてください。</p></div></div><div class="channel-settings" id="channel-settings"></div></section>
         <section class="panel settings-section" id="output-settings">
           <div class="panel-head"><div><h2>出力動作</h2><p>OUT信号をどの条件で動かすかを設定します。ダッシュボードの表示対象はここでは変更しません。</p></div></div>
-          <div class="heartbeat-settings">
-            <div class="heartbeat-copy"><strong>動作確認信号（Heartbeat）</strong><small>正常に記録できていることを、外部機器へ周期信号で知らせます。</small></div>
-            <div class="settings-field"><span class="field-label">使用</span><button class="switch" id="heartbeat-enabled" type="button" role="switch" aria-checked="false" aria-label="Heartbeatを使用" data-on-label="有効" data-off-label="無効"><span></span></button></div>
-            <label>出力先<select id="heartbeat-output"></select></label>
-            <label>切替間隔<input id="heartbeat-interval" type="number" min="1" max="60" step="1" inputmode="numeric"><small>1〜60秒</small></label>
-          </div>
-          <div class="rule-table"><div class="rule-table-head"><span>条件ルール</span><button class="secondary-button" type="button" id="add-output-rule">条件ルールを追加</button></div><div id="output-rule-list"></div></div>
+          <section class="output-function" aria-labelledby="heartbeat-heading">
+            <div class="output-function-head"><h3 id="heartbeat-heading">動作確認信号（Heartbeat）</h3></div>
+            <div class="heartbeat-settings">
+              <div class="heartbeat-copy"><small>正常に記録できていることを、外部機器へ周期信号で知らせます。</small></div>
+              <div class="settings-field"><span class="field-label">使用</span><button class="switch" id="heartbeat-enabled" type="button" role="switch" aria-checked="false" aria-label="Heartbeatを使用" data-on-label="有効" data-off-label="無効"><span></span></button></div>
+              <label>出力先<select id="heartbeat-output"></select></label>
+              <label>切替間隔<input id="heartbeat-interval" type="number" min="1" max="60" step="1" inputmode="numeric"><small>1〜60秒</small></label>
+            </div>
+          </section>
+          <section class="output-function" aria-labelledby="output-rules-heading">
+            <div class="output-function-head"><h3 id="output-rules-heading">条件ルール</h3><button class="secondary-button" type="button" id="add-output-rule">条件ルールを追加</button></div>
+            <div id="output-rule-list"></div>
+          </section>
         </section>
         <section class="panel compact-panel settings-section" id="system-settings"><div class="panel-head"><div><h2>本体・データ</h2><p>本体情報、時刻、アクセス保護、記録の保存期間を設定します。</p></div></div><div class="system-settings-grid"><label>設備名<input id="device-name" maxlength="40"></label><label>ホスト名<input id="hostname" maxlength="63"><small>変更は再起動後に反映されます。</small></label><label>タイムゾーン<select id="timezone"><option value="Asia/Tokyo">Asia/Tokyo</option><option value="UTC">UTC</option></select></label><div class="settings-field"><span class="field-label">パスワード保護</span><button class="switch" id="password-protection" type="button" role="switch" aria-checked="false" aria-label="パスワード保護" data-on-label="有効" data-off-label="無効"><span></span></button></div><label id="shared-password-field" hidden>共有パスワード<input id="shared-password" type="text" spellcheck="false" autocapitalize="none" autocomplete="new-password"></label><label>記録を残す期間<select id="retention-days"><option value="365">365日</option><option value="180">180日</option><option value="90">90日</option><option value="30">30日</option><option value="730">730日</option><option value="1825">1825日</option><option value="">無期限</option></select></label></div><p class="help-text">DBがSD総容量の40%に達した場合、または空き容量が20%未満になった場合は、古い記録から容量保護を実行します。</p></section>
         <div class="settings-save-bar"><span>設定を変えたら保存してください。</span><button class="primary-button" id="save-settings" type="button">変更を保存</button></div>
@@ -217,6 +223,7 @@
     <dialog id="output-rule-dialog">
       <form method="dialog">
         <h2 id="output-rule-dialog-title">条件ルールを追加</h2>
+        <p class="help-text">条件を満たすと出力がONになり、条件を満たさなくなるとOFFになります。</p>
         <label>ルール名<input id="rule-name" maxlength="40"></label>
         <label>条件<select id="rule-condition"><option value="state_duration">指定状態が続いたら</option><option value="event_absence">指定イベントが発生しなかったら</option></select></label>
         <label>入力信号<select id="rule-channel"></select></label>
