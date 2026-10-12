@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "event-logger"
-version = "0.1.6"
+version = "1.0.0"
 description = "Local 24V event logger for the Raspberry Pi 24V I/O HAT"
 requires-python = ">=3.13,<3.14"
 license = {file = "LICENSE"}
