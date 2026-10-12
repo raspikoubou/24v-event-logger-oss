@@ -195,6 +195,7 @@
   function renderUnsynchronizedWarnings() {
     const count = fixtures.unsynchronizedCount;
     const latencyWarning = Boolean(fixtures.writeLatency?.warning);
+    const latencyAttention = fixtures.writeLatency?.severity === "attention";
     const configurationWarning = Boolean(fixtures.configurationSync?.outOfSync);
     const storageWarning = storageWarningFor(fixtures.storage, fixtures.storageError);
     const warningVisibility = warningVisibilityFor({
@@ -223,7 +224,13 @@
       ? storageWarningMessage(storageWarning)
       : "";
     detail.hidden = count === 0;
-    latencyDetail.hidden = !latencyWarning;
+    latencyDetail.hidden = !latencyWarning && !latencyAttention;
+    latencyDetail.querySelector("strong").textContent = latencyWarning
+      ? "警告：ログ保存の状態を確認してください" : "注意：一時的なログ保存の遅延";
+    latencyDetail.classList.toggle("diagnostic-warning--attention", latencyAttention);
+    if (latencyWarning || latencyAttention) {
+      latencyDetail.querySelector("span").textContent = `直近5分に500ms以上の保存が${fixtures.writeLatency.delayed_count_5m}回（最大${formatMilliseconds(fixtures.writeLatency.max_delay_ms_5m)}ms）、未保存の最長滞留${formatMilliseconds(fixtures.writeLatency.oldest_pending_ms)}ms。${latencyWarning ? "未保存の記録が失われるおそれがあります。入力頻度とストレージの状態を確認してください。" : "保存遅延のみでは記録の欠損を意味しません。未保存の記録は電源断で失われる可能性があります。"}`;
+    }
     configurationDetail.hidden = !configurationWarning;
     storageDetail.hidden = !storageWarning.visible;
     storageDetail.classList.toggle("diagnostic-warning--critical", storageWarning.severity === "critical");
@@ -239,15 +246,12 @@
     if (!syncVisible) return;
     const title = configurationWarning
       ? "loggerdの設定反映を確認してください"
-      : latencyWarning ? "ログ保存に遅延があります" : `同期前の記録が${count}件あります`;
+      : latencyWarning ? "ログ保存の状態を確認してください" : `同期前の記録が${count}件あります`;
     banner.querySelector("strong").textContent = title;
     if (count > 0) {
       const clockTitle = `同期前の記録が${count}件あります`;
       detail.querySelector("strong").textContent = clockTitle;
       detail.querySelector("span").textContent = `現在の時刻は同期済みのため、時刻設定は不要です。同期前の${count}件だけ、発生時刻が正確でない可能性があります。必要な記録の場合は、ログ画面で時刻が「要確認」の行を確認してください。`;
-    }
-    if (latencyWarning) {
-      latencyDetail.querySelector("span").textContent = `直近5分に500ms以上の保存が${fixtures.writeLatency.delayed_count_5m}回（最大${formatMilliseconds(fixtures.writeLatency.max_delay_ms_5m)}ms）、未保存の最長滞留${formatMilliseconds(fixtures.writeLatency.oldest_pending_ms)}ms。入力頻度とSDカードの状態を確認してください。`;
     }
     if (configurationWarning) {
       configurationDetail.querySelector("span").textContent = fixtures.configurationSync.message;

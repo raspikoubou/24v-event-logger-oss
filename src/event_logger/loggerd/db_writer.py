@@ -31,7 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 _SLOW_COMMIT_NS = 250_000_000
 _WRITE_DELAY_NS = 500_000_000
 _WRITE_DELAY_WINDOW_NS = 300_000_000_000
-_WRITE_DELAY_WARNING_COUNT = 3
+_WARNING_RECOVERY_NS = 10_000_000_000
 # 通常時にflushを待たせず、既に溜まったqueueだけをまとめる上限。
 _MAX_EVENT_BATCH_SIZE = 32
 
@@ -45,6 +45,7 @@ class WriteLatencySnapshot:
     last_commit_ms: int | None
     in_progress_ms: int
     warning: bool
+    severity: str
 
 
 class WriteLatencyMonitor:
@@ -54,6 +55,8 @@ class WriteLatencyMonitor:
         """イベント時刻ではなくmonotonic時計で監視窓を管理する。"""
         self._delays: deque[tuple[int, int]] = deque()
         self._last_commit_ms: int | None = None
+        self._warning = False
+        self._healthy_since_ns: int | None = None
 
     def record(self, *, completed_ns: int, elapsed_ns: int) -> None:
         """500ms以上のcommitを記録し、古い測定値を破棄する。"""
@@ -62,19 +65,60 @@ class WriteLatencyMonitor:
         if elapsed_ns >= _WRITE_DELAY_NS:
             self._delays.append((completed_ns, elapsed_ns))
 
-    def snapshot(self, *, now_ns: int, in_progress_ms: int = 0) -> WriteLatencySnapshot:
-        """反復遅延か5秒以上の未完了commitを警告として返す。"""
+    def snapshot(
+        self,
+        *,
+        now_ns: int,
+        in_progress_ms: int = 0,
+        oldest_pending_ms: int = 0,
+        pending_count: int = 0,
+        capacity: int = 10_000,
+        failed: bool = False,
+    ) -> WriteLatencySnapshot:
+        """未保存の危険度を判定し、回復10秒で警告を解除する。"""
         self._expire(now_ns)
+        # 5秒は正常負荷の最大保存追従時間。容量80%では残り20%を
+        # 回復余地として残す。commit回数だけでは欠損とは判断しない。
+        unhealthy = (
+            failed
+            or in_progress_ms >= 5_000
+            or oldest_pending_ms >= 5_000
+            or pending_count * 5 >= capacity * 4
+        )
+        recovered = (
+            not failed
+            and in_progress_ms < 1_000
+            and oldest_pending_ms < 1_000
+            and pending_count * 2 < capacity
+        )
+        if unhealthy:
+            self._warning = True
+            self._healthy_since_ns = None
+        elif self._warning:
+            if not recovered:
+                self._healthy_since_ns = None
+            elif self._healthy_since_ns is None:
+                self._healthy_since_ns = now_ns
+            elif now_ns - self._healthy_since_ns >= _WARNING_RECOVERY_NS:
+                self._warning = False
+                self._healthy_since_ns = None
+        severity = (
+            "warning"
+            if self._warning
+            else (
+                "attention"
+                if self._delays or in_progress_ms >= 500 or oldest_pending_ms >= 500
+                else "normal"
+            )
+        )
         return WriteLatencySnapshot(
             delayed_count=len(self._delays),
             max_delay_ms=max((delay for _, delay in self._delays), default=0)
             // 1_000_000,
             last_commit_ms=self._last_commit_ms,
             in_progress_ms=in_progress_ms,
-            warning=(
-                len(self._delays) >= _WRITE_DELAY_WARNING_COUNT
-                or in_progress_ms >= 5_000
-            ),
+            warning=self._warning,
+            severity=severity,
         )
 
     def _expire(self, now_ns: int) -> None:
@@ -213,7 +257,12 @@ class BackgroundEventWriter:
                 else (now_ns - self._commit_started_ns) // 1_000_000
             )
             return self._latency_monitor.snapshot(
-                now_ns=now_ns, in_progress_ms=in_progress_ms
+                now_ns=now_ns,
+                in_progress_ms=in_progress_ms,
+                oldest_pending_ms=self._event_queue.oldest_pending_ms(),
+                pending_count=len(self._event_queue),
+                capacity=self._event_queue.capacity,
+                failed=self._failure is not None,
             )
 
     def start(self) -> None:

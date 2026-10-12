@@ -58,6 +58,11 @@ class EventQueue:
         self._in_flight_at_ns: deque[int] = deque()
         self._condition = Condition()
 
+    @property
+    def capacity(self) -> int:
+        """commit中を含む未保存eventの保持上限を返す。"""
+        return self._maxsize
+
     def put(self, event: PendingDatabaseEvent) -> None:
         """eventを待たずにQueueへ入れる。
 

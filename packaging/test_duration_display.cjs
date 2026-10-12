@@ -32,10 +32,10 @@ for (const [value, expected] of [
 assert.equal(context.duration(1000), "1秒");
 assert.equal(context.duration(61000), "1分 1秒");
 assert.equal(context.state("IN1", "ON", "OFF").elapsed, "886.2ミリ秒継続");
-// 診断の2種類のms表示も同じ表示関数を利用する。
+// 初期API変換は外側のscopeで丸め、診断詳細はrunApp内の表示関数を使う。
 for (const expression of [
-  "formatMilliseconds(status.daemon.write_latency.max_delay_ms_5m || 0)",
-  "formatMilliseconds(status.daemon.write_latency.oldest_pending_ms || 0)",
+  "Number(status.daemon.write_latency.max_delay_ms_5m || 0).toFixed(1)",
+  "Number(status.daemon.write_latency.oldest_pending_ms || 0).toFixed(1)",
   "formatMilliseconds(fixtures.writeLatency.max_delay_ms_5m)",
   "formatMilliseconds(fixtures.writeLatency.oldest_pending_ms)",
 ]) assert(source.includes(expression));

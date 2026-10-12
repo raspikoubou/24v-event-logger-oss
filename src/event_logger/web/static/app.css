@@ -576,3 +576,7 @@ dialog .checkbox-label input { width: 18px; min-height: 18px; margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; }
 }
+
+.diagnostic-warning--attention { border-color: var(--border); border-left-color: var(--border-dark); background: var(--surface-alt); }
+.diagnostic-warning--attention strong, .diagnostic-warning--attention span, .health-value.attention { color: var(--text); }
+.health-value.attention::before { background: #647787; }
