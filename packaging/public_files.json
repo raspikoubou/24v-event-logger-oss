@@ -147,6 +147,7 @@
   "src/event_logger/web/static/fixtures.js",
   "src/event_logger/web/static/query_policy.js",
   "src/event_logger/web/static/refresh_policy.js",
+  "src/event_logger/web/static/restart_panel.js",
   "src/event_logger/web/static/retention_policy.js",
   "src/event_logger/web/static/storage_policy.js",
   "src/event_logger/web/static/time_format.js",
