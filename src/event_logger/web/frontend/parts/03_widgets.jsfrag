@@ -21,6 +21,8 @@
         return;
       }
     }
+    // 定期更新でDOMを作り直しても、全信号の共通表示位置を維持する。
+    const scrollLeft = card.querySelector("[data-mini-timeline-scroll]")?.scrollLeft || 0;
     card.querySelector("[data-history-widget-body]").innerHTML = historyWidgetBodyHtml({
       id: card.dataset.widget,
       type: card.dataset.widgetType,
@@ -39,6 +41,8 @@
       showEventElapsed: card.dataset.showEventElapsed === "true"
     });
     applyMiniTimelineZoom(card);
+    const scroll = card.querySelector("[data-mini-timeline-scroll]");
+    if (scroll) scroll.scrollLeft = scrollLeft;
     bindTimelineEvents();
   }
 
@@ -48,9 +52,9 @@
     const index = Math.max(0, Math.min(timelineZoomLevels.length - 1, Number(card.dataset.miniZoomIndex || 0)));
     card.dataset.miniZoomIndex = String(index);
     const zoom = timelineZoomLevels[index];
-    card.querySelectorAll("[data-mini-timeline-track]").forEach((track) => {
-      track.style.width = `${zoom * 100}%`;
-    });
+    // 行別の幅やスクロールを持たせず、全信号を同じ時間軸で拡大する。
+    card.querySelector("[data-mini-timeline-content]").style.width = `${zoom * 100}%`;
+    if (index === 0) card.querySelector("[data-mini-timeline-scroll]").scrollLeft = 0;
     label.textContent = `${zoom}倍`;
     card.querySelector('[data-mini-zoom="out"]').disabled = index === 0;
     card.querySelector('[data-mini-zoom="in"]').disabled = index === timelineZoomLevels.length - 1;

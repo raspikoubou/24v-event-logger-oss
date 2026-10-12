@@ -278,7 +278,7 @@
       durationOverrideMs,
       domainIntervals
     );
-    return `<div class="custom-mini-timeline"><code>${escapeHtml(channelId)}</code><div class="custom-mini-scroll"><div class="custom-mini-track" data-mini-timeline-track>${marks}</div></div></div>`;
+    return `<div class="custom-mini-timeline"><div class="custom-mini-track" data-mini-timeline-track>${marks}</div></div>`;
   }
 
   function historyWidgetBodyHtml(config) {
@@ -373,7 +373,7 @@
       return `<div class="custom-widget-value"><strong>${escapeHtml(elapsed)}</strong></div><small>${escapeHtml(config.channelId)}・${escapeHtml(periodLabel)}</small>`;
     }
     if (config.type === "タイムライン") {
-      return `<div class="mini-timeline-toolbar"><span>${escapeHtml(periodLabel)}</span><div role="group" aria-label="タイムラインの拡大縮小"><button class="secondary-button small-button" data-mini-zoom="out" type="button">−</button><output data-mini-zoom-label>1倍</output><button class="secondary-button small-button" data-mini-zoom="in" type="button">＋</button></div></div>${selectedSignals.map((channelId) => miniTimelineHtml(channelId, periodKey, config.durationMs || 0, dashboardValue)).join("")}`;
+      return `<div class="mini-timeline-toolbar"><span>${escapeHtml(periodLabel)}</span><div role="group" aria-label="タイムラインの拡大縮小"><button class="secondary-button small-button" data-mini-zoom="out" type="button">−</button><output data-mini-zoom-label>1倍</output><button class="secondary-button small-button" data-mini-zoom="in" type="button">＋</button></div></div><div class="custom-mini-layout"><div class="custom-mini-labels">${selectedSignals.map((channelId) => `<div class="custom-mini-label"><code>${escapeHtml(channelId)}</code></div>`).join("")}</div><div class="custom-mini-scroll" data-mini-timeline-scroll tabindex="0" role="region" aria-label="全信号共通のタイムライン横スクロール"><div data-mini-timeline-content>${selectedSignals.map((channelId) => miniTimelineHtml(channelId, periodKey, config.durationMs || 0, dashboardValue)).join("")}</div></div></div>`;
     }
     const valueFilter = config.value || "all";
     const eventListItems = liveMode && Array.isArray(dashboardValue?.events)

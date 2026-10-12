@@ -45,6 +45,7 @@
   "packaging/systemd/event-logger.env.example",
   "packaging/systemd/event-loggerd.service",
   "packaging/test_duration_display.cjs",
+  "packaging/test_timeline_scroll.cjs",
   "packaging/uninstall.sh",
   "packaging/update.sh",
   "pyproject.toml",
