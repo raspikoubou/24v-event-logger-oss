@@ -224,6 +224,30 @@
     return status.version ? `${label} — ${status.version}` : label;
   }
 
+  function createLegacyAwareStatusReader({ readLocal, readLegacy, isProcessing, now = () => Date.now() }) {
+    let unavailableSince = null;
+    let legacyRead = false;
+    return async function readStatus() {
+      try {
+        const result = await readLocal();
+        unavailableSince = null;
+        legacyRead = false;
+        return result;
+      } catch (error) {
+        if (error?.httpStatus !== 404 || !isProcessing()) throw error;
+        if (unavailableSince === null) unavailableSince = now();
+        // 配布済み旧版はローカル状態APIを持たない。新Web起動直後のhealth
+        // 確認を待ってから、既存endpointで結果を一度だけ確認する。
+        // 旧endpointはGitHubにも通信するため、定期取得へ切り替えない。
+        if (!legacyRead && now() - unavailableSince >= 20_000) {
+          legacyRead = true;
+          return readLegacy();
+        }
+        throw error;
+      }
+    };
+  }
+
   function mount(documentRef, windowRef) {
     const panel = documentRef.getElementById("update-panel");
     if (!panel) return null;
@@ -283,11 +307,15 @@
       try {
         payload = await response.json();
       } catch {
-        throw new Error("サーバー応答を読み取れませんでした。");
+        const error = new Error("サーバー応答を読み取れませんでした。");
+        error.httpStatus = response.status;
+        error.requestRejected = !response.ok;
+        throw error;
       }
       if (!response.ok || payload.ok === false) {
         const error = new Error(payload.error?.message || "サーバーとの通信に失敗しました。");
         error.requestRejected = true;
+        error.httpStatus = response.status;
         throw error;
       }
       return payload.data;
@@ -296,13 +324,27 @@
     const controller = createUpdatePanelController({
       checkRelease: () => requestUpdate("GET"),
       applyRelease: () => requestUpdate("POST"),
-      confirmApply: ({ currentVersion, targetVersion }) => windowRef.confirm(
-        `設備イベントロガーを ${currentVersion} から ${targetVersion} へ更新します。\n\n`
-        + "更新中は関連serviceが停止し、記録されない区間はUNKNOWNになります。"
-        + "適用前にDB backupを取得し、失敗時は旧版へ戻します。続けますか？",
-      ),
+      confirmApply: ({ currentVersion, targetVersion }) => {
+        const message = `設備イベントロガーを ${currentVersion} から ${targetVersion} へ更新します。\n\n`
+          + "更新中は記録が一時停止し、その区間はUNKNOWNになります。"
+          + "更新前にDBバックアップを取得し、失敗時は旧版への復帰を試みます。";
+        const dialog = documentRef.getElementById("update-dialog");
+        const text = documentRef.getElementById("update-dialog-message");
+        if (!dialog || !text) return windowRef.confirm(message);
+        text.textContent = message;
+        dialog.returnValue = "";
+        return new Promise((resolve) => {
+          dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });
+          dialog.showModal();
+        });
+      },
       onChange: render,
-      readStatus: () => requestUpdate("GET", "/api/update/status"),
+      readStatus: () => readStatus(),
+    });
+    const readStatus = createLegacyAwareStatusReader({
+      readLocal: () => requestUpdate("GET", "/api/update/status"),
+      readLegacy: () => requestUpdate("GET"),
+      isProcessing: () => controller.getState().processing,
     });
     elements.check.addEventListener("click", () => controller.check());
     elements.apply.addEventListener("click", () => controller.apply());
@@ -317,5 +359,5 @@
     return controller;
   }
 
-  return { createUpdatePanelController, formatUpdateStatus, mount };
+  return { createUpdatePanelController, createLegacyAwareStatusReader, formatUpdateStatus, mount };
 });
