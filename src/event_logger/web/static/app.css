@@ -357,7 +357,7 @@ td:first-child { font-family: "SFMono-Regular", Consolas, monospace; font-size: 
 .diagnostic-summary strong { color: #075d31; }
 .diagnostic-summary span { color: #365d47; }
 .diagnostic-warning { display: flex; gap: 16px; margin-bottom: 14px; padding: 16px; border: 1px solid #d6ad55; border-left: 6px solid #d28700; border-radius: var(--radius); background: var(--amber-bg); }
-.diagnostic-warning[hidden], .health-pill[hidden] { display: none; }
+#system-notices[hidden], #system-notices [hidden], .diagnostic-warning[hidden], .health-pill[hidden] { display: none; }
 .diagnostic-warning strong { color: #714600; }
 .diagnostic-warning span { color: #6e572d; }
 .diagnostic-warning--critical { border-color: var(--red); border-left-color: var(--red); background: var(--red-bg); }
@@ -582,3 +582,5 @@ dialog .checkbox-label input { width: 18px; min-height: 18px; margin: 0; }
 .diagnostic-warning--attention { border-color: var(--border); border-left-color: var(--border-dark); background: var(--surface-alt); }
 .diagnostic-warning--attention strong, .diagnostic-warning--attention span, .health-value.attention { color: var(--text); }
 .health-value.attention::before { background: #647787; }
+
+#notice-details-link { display: block; margin: 0 0 20px auto; }

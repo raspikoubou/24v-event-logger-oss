@@ -33,15 +33,12 @@
         <div><strong>メンテナンス中：入力は記録されていません</strong></div>
         <button class="text-button" data-view-link="diagnostics" type="button">診断を開く</button>
       </div>
-      <div class="banner banner--warning" role="status" hidden>
-        <span class="banner-icon" aria-hidden="true">!</span>
-        <div><strong></strong></div>
-        <button class="text-button" data-view-link="diagnostics" type="button">対応方法を見る</button>
-      </div>
-      <div class="banner banner--storage" id="storage-warning-banner" role="alert" hidden>
-        <span class="banner-icon" aria-hidden="true">!</span>
-        <div><strong></strong><span id="storage-warning-message"></span></div>
-        <button class="text-button" data-view-link="diagnostics" type="button">診断を開く</button>
+      <div id="system-notices" aria-label="注意・確認事項" hidden>
+        <div class="diagnostic-warning" id="unsynchronized-warning" hidden role="status"><strong></strong><span></span></div>
+        <div class="diagnostic-warning" id="write-latency-warning" hidden role="status"><strong>ログ保存に遅延があります</strong><span></span></div>
+        <div class="diagnostic-warning" id="configuration-sync-warning" hidden role="status"><strong>loggerdの設定反映を確認してください</strong><span></span><button class="secondary-button" id="retry-config-sync" type="button" hidden>設定を再読込</button></div>
+        <div class="diagnostic-warning" id="storage-warning-detail" hidden role="alert"><strong></strong><span></span></div>
+        <button class="text-button" id="notice-details-link" data-view-link="diagnostics" type="button" hidden>対応方法を見る</button>
       </div>
 
       <section class="view is-active" id="view-dashboard" aria-labelledby="dashboard-heading">
@@ -163,11 +160,7 @@
       </section>
 
       <section class="view" id="view-diagnostics" aria-labelledby="diagnostics-heading">
-        <div class="page-heading"><div><h1 id="diagnostics-heading">点検・診断</h1></div><span class="health-pill warning" id="diagnostic-warning-count" hidden>確認事項 1件</span></div>
-        <div class="diagnostic-warning" id="unsynchronized-warning" hidden><strong></strong><span></span></div>
-        <div class="diagnostic-warning" id="write-latency-warning" hidden><strong>ログ保存に遅延があります</strong><span></span></div>
-        <div class="diagnostic-warning" id="configuration-sync-warning" hidden><strong>loggerdの設定反映を確認してください</strong><span></span><button class="secondary-button" id="retry-config-sync" type="button" hidden>設定を再読込</button></div>
-        <div class="diagnostic-warning" id="storage-warning-detail" hidden><strong></strong><span></span></div>
+        <div class="page-heading"><div><h1 id="diagnostics-heading">点検・診断</h1></div></div>
         <div class="diagnostic-grid">
           <section class="panel health-overview"><div class="panel-head"><div><h2>システム状態</h2></div></div><div class="health-items" id="health-items"></div></section>
           <section class="panel io-panel"><div class="panel-head"><div><h2>現在の入出力</h2></div><span class="updated-time">1秒ごとに更新</span></div><div class="io-grid" id="io-grid"></div></section>
