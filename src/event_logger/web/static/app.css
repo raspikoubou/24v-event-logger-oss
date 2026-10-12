@@ -163,9 +163,11 @@ button { color: inherit; }
 .custom-widget-value strong { font-size: 1.65rem; font-variant-numeric: tabular-nums; }
 .custom-widget-value span { color: var(--muted); font-weight: 700; }
 .custom-widget-empty { margin: 0; color: var(--muted); }
-.custom-mini-timeline { display: grid; grid-template-columns: 46px 1fr; align-items: center; gap: 8px; min-height: 44px; }
-.custom-mini-scroll { overflow-x: auto; }
-.custom-mini-track { position: relative; min-width: 100%; height: 20px; border: 1px solid #c4ccd2; background: #edf0f2; }
+.custom-mini-layout { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; }
+.custom-mini-label, .custom-mini-timeline { display: flex; align-items: center; height: 44px; }
+.custom-mini-scroll { min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; }
+.custom-mini-scroll:focus-visible { outline: 3px solid rgba(7, 94, 168, 0.25); outline-offset: 3px; }
+.custom-mini-track { position: relative; width: 100%; min-width: 0; overflow: hidden; height: 20px; border: 1px solid #c4ccd2; background: #edf0f2; }
 .mini-timeline-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; color: var(--muted); font-size: 0.8rem; }
 .mini-timeline-toolbar > div { display: flex; align-items: center; gap: 7px; }
 .mini-timeline-toolbar output { min-width: 34px; text-align: center; font-weight: 800; }

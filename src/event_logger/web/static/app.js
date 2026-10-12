@@ -859,7 +859,7 @@
       durationOverrideMs,
       domainIntervals
     );
-    return `<div class="custom-mini-timeline"><code>${escapeHtml(channelId)}</code><div class="custom-mini-scroll"><div class="custom-mini-track" data-mini-timeline-track>${marks}</div></div></div>`;
+    return `<div class="custom-mini-timeline"><div class="custom-mini-track" data-mini-timeline-track>${marks}</div></div>`;
   }
 
   function historyWidgetBodyHtml(config) {
@@ -954,7 +954,7 @@
       return `<div class="custom-widget-value"><strong>${escapeHtml(elapsed)}</strong></div><small>${escapeHtml(config.channelId)}・${escapeHtml(periodLabel)}</small>`;
     }
     if (config.type === "タイムライン") {
-      return `<div class="mini-timeline-toolbar"><span>${escapeHtml(periodLabel)}</span><div role="group" aria-label="タイムラインの拡大縮小"><button class="secondary-button small-button" data-mini-zoom="out" type="button">−</button><output data-mini-zoom-label>1倍</output><button class="secondary-button small-button" data-mini-zoom="in" type="button">＋</button></div></div>${selectedSignals.map((channelId) => miniTimelineHtml(channelId, periodKey, config.durationMs || 0, dashboardValue)).join("")}`;
+      return `<div class="mini-timeline-toolbar"><span>${escapeHtml(periodLabel)}</span><div role="group" aria-label="タイムラインの拡大縮小"><button class="secondary-button small-button" data-mini-zoom="out" type="button">−</button><output data-mini-zoom-label>1倍</output><button class="secondary-button small-button" data-mini-zoom="in" type="button">＋</button></div></div><div class="custom-mini-layout"><div class="custom-mini-labels">${selectedSignals.map((channelId) => `<div class="custom-mini-label"><code>${escapeHtml(channelId)}</code></div>`).join("")}</div><div class="custom-mini-scroll" data-mini-timeline-scroll tabindex="0" role="region" aria-label="全信号共通のタイムライン横スクロール"><div data-mini-timeline-content>${selectedSignals.map((channelId) => miniTimelineHtml(channelId, periodKey, config.durationMs || 0, dashboardValue)).join("")}</div></div></div>`;
     }
     const valueFilter = config.value || "all";
     const eventListItems = liveMode && Array.isArray(dashboardValue?.events)
@@ -997,6 +997,8 @@
         return;
       }
     }
+    // 定期更新でDOMを作り直しても、全信号の共通表示位置を維持する。
+    const scrollLeft = card.querySelector("[data-mini-timeline-scroll]")?.scrollLeft || 0;
     card.querySelector("[data-history-widget-body]").innerHTML = historyWidgetBodyHtml({
       id: card.dataset.widget,
       type: card.dataset.widgetType,
@@ -1015,6 +1017,8 @@
       showEventElapsed: card.dataset.showEventElapsed === "true"
     });
     applyMiniTimelineZoom(card);
+    const scroll = card.querySelector("[data-mini-timeline-scroll]");
+    if (scroll) scroll.scrollLeft = scrollLeft;
     bindTimelineEvents();
   }
 
@@ -1024,9 +1028,9 @@
     const index = Math.max(0, Math.min(timelineZoomLevels.length - 1, Number(card.dataset.miniZoomIndex || 0)));
     card.dataset.miniZoomIndex = String(index);
     const zoom = timelineZoomLevels[index];
-    card.querySelectorAll("[data-mini-timeline-track]").forEach((track) => {
-      track.style.width = `${zoom * 100}%`;
-    });
+    // 行別の幅やスクロールを持たせず、全信号を同じ時間軸で拡大する。
+    card.querySelector("[data-mini-timeline-content]").style.width = `${zoom * 100}%`;
+    if (index === 0) card.querySelector("[data-mini-timeline-scroll]").scrollLeft = 0;
     label.textContent = `${zoom}倍`;
     card.querySelector('[data-mini-zoom="out"]').disabled = index === 0;
     card.querySelector('[data-mini-zoom="in"]').disabled = index === timelineZoomLevels.length - 1;
