@@ -590,7 +590,7 @@ def _read_update_status(path_value: object) -> dict[str, object] | None:
     return {
         key: value
         for key, value in payload.items()
-        if key in {"status", "version", "message", "updated_at"}
+        if key in {"status", "version", "message", "updated_at", "attempt_id"}
     }
 
 

@@ -22,6 +22,11 @@
       if (csrf) requestOptions.headers["X-CSRF-Token"] = csrf;
     }
     const response = await fetch(path, requestOptions);
+    if (response.status === 401) {
+      // 他端末からのpassword変更でも、古い画面で操作を続けず再認証へ進む。
+      window.location.assign("/login");
+      throw new Error("ログインし直してください。");
+    }
     const payload = await response.json();
     if (!response.ok || payload.ok === false) {
       throw new Error(payload.error?.message || "サーバーとの通信に失敗しました");
@@ -2706,6 +2711,8 @@
           method: "POST",
           body: JSON.stringify({ retention_days: retentionDaysFromSelectValue(document.querySelector("#retention-days").value) })
         });
+        // 認証変更で旧Cookieが失効するため、保留中の表示設定を先に保存する。
+        await saveWidgetSettings();
         await liveJson("/api/settings/system", {
           method: "POST",
           body: JSON.stringify({
@@ -2716,7 +2723,6 @@
             password: document.querySelector("#shared-password").value || null
           })
         });
-        await saveWidgetSettings();
         await refreshLiveState();
         showToast("設定を保存しました");
       } catch (error) {

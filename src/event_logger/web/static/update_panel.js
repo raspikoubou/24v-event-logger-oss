@@ -21,6 +21,7 @@
       applying: false,
       processing: false,
       targetVersion: null,
+      targetAttemptId: null,
       configured: false,
       available: false,
       currentVersion: "未確認",
@@ -32,6 +33,13 @@
 
     let statusRequestRunning = false;
     let watchStartedAt = null;
+    let previousStatusKey = null;
+
+    function statusKey(status) {
+      if (!status) return null;
+      return JSON.stringify([status.attempt_id, status.status, status.version,
+        status.message, status.updated_at]);
+    }
 
     function snapshot() {
       return { ...state };
@@ -131,11 +139,13 @@
         return snapshot();
       }
 
+      previousStatusKey = statusKey(state.status);
       updateState({
         confirming: false,
         applying: true,
         processing: true,
         targetVersion: state.latestVersion,
+        targetAttemptId: null,
         status: { status: "started", version: state.latestVersion },
         available: false,
         message: "更新を依頼しています。処理中は画面の再読み込みを避けてください。",
@@ -146,9 +156,13 @@
         if (!result || result.started !== true) {
           throw new Error("更新処理を開始できませんでした。");
         }
+        if (Object.prototype.hasOwnProperty.call(result, "previous_status")) {
+          previousStatusKey = statusKey(result.previous_status);
+        }
         updateState({
           // POST応答のstatusは前回の更新記録の場合がある。今回の対象で監視する。
           targetVersion: result.target_version || state.latestVersion,
+          targetAttemptId: typeof result.attempt_id === "string" ? result.attempt_id : null,
           status: { status: "started", version: result.target_version || state.latestVersion },
           message: "処理中：更新しています。完了まで電源を切らないでください。",
         });
@@ -176,8 +190,14 @@
         }
         updateState({ currentVersion: result.current_version });
         const status = result.status;
-        // 更新開始直後に前回のcompleted記録が返っても、今回の完了と誤認しない。
-        if (state.processing && (!status || status.version !== state.targetVersion)) {
+        const previousOrOtherAttempt = state.targetAttemptId !== null
+          ? status?.attempt_id !== state.targetAttemptId
+          : statusKey(status) === previousStatusKey;
+        // 同じ版への再試行でも、依頼前の成功・失敗を今回の結果にしない。
+        // 旧更新器にattempt_idがない場合は記録全体を比較し、区別できない
+        // 結果を成功・失敗と推測せず、既存の未確認timeoutまで監視する。
+        if (state.processing && (!status || status.version !== state.targetVersion
+          || previousOrOtherAttempt)) {
           updateState({ message: "処理中：更新処理の状態を確認しています。" });
         } else if (status?.status === "started") {
           if (watchStartedAt === null) watchStartedAt = now();

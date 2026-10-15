@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import socket
 import subprocess
 import tempfile
@@ -207,21 +208,23 @@ def launch_updater(
     checksum_path: str | os.PathLike[str],
     version: str,
     socket_path: str | os.PathLike[str] | None = None,
-) -> None:
+) -> str | None:
     """固定pathのupdaterだけを引数分離で起動する。
 
     通常のWeb service userはroot権限を持たないため、productionではrootで
     常駐するupdate-agentのUnix socketへ依頼する。socket未指定時だけ、root
     からの開発・保守実行としてhelperを直接起動する。
+
+    Returns:
+        今回の処理ID。IDを返さない旧agentの場合だけNone。
     """
     if socket_path is not None:
-        _request_update_agent(
+        return _request_update_agent(
             socket_path,
             archive_path=archive_path,
             checksum_path=checksum_path,
             version=version,
         )
-        return
     helper = Path(helper_path)
     if not helper.is_file() or not os.access(helper, os.X_OK):
         raise UpdateError("configured update helper is not executable")
@@ -230,6 +233,7 @@ def launch_updater(
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", version):
         raise UpdateError("release version is invalid")
     try:
+        attempt_id = secrets.token_hex(16)
         subprocess.Popen(
             [
                 str(helper),
@@ -245,9 +249,11 @@ def launch_updater(
             stderr=subprocess.DEVNULL,
             start_new_session=True,
             close_fds=True,
+            env={**os.environ, "EVENT_LOGGER_UPDATE_ATTEMPT_ID": attempt_id},
         )
     except (OSError, ValueError) as error:
         raise UpdateError(f"update helper could not be started: {error}") from error
+    return attempt_id
 
 
 def _download(url: str, destination: Path, timeout: float, *, max_bytes: int) -> None:
@@ -291,7 +297,7 @@ def _request_update_agent(
     archive_path: str | os.PathLike[str],
     checksum_path: str | os.PathLike[str],
     version: str,
-) -> None:
+) -> str | None:
     """root update-agentへ固定schemaの依頼を送る。"""
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", version):
         raise UpdateError("release version is invalid")
@@ -325,6 +331,9 @@ def _request_update_agent(
             if isinstance(message, str)
             else "update-agent rejected request"
         )
+    # 旧agentはIDを返さない。更新自体を拒否せず画面側の旧形式判定へ渡す。
+    attempt_id = response.get("attempt_id")
+    return attempt_id if isinstance(attempt_id, str) else None
 
 
 def request_reboot(socket_path: str | os.PathLike[str]) -> None:

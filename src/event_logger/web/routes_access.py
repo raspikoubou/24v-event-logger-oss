@@ -59,9 +59,9 @@ def _register_auth_routes(app: Flask, auth: SharedPasswordAuth) -> None:
         """認証とPOST CSRFをroute実行前に適用する。"""
         if (
             request.path != "/login"
-            and auth.enabled
-            and not session.get("authenticated", False)
+            and not auth.accepts_session(session.get("auth_generation"))
         ):
+            session.clear()
             if request.path.startswith("/api/"):
                 return _error("AUTH_REQUIRED", "login is required", 401)
             return redirect("/login")
@@ -96,7 +96,8 @@ def _register_auth_routes(app: Flask, auth: SharedPasswordAuth) -> None:
         if not auth.enabled:
             return redirect("/")
         password = request.form.get("password", "")
-        if not auth.verify(password):
+        generation = auth.authenticate(password)
+        if generation is None:
             return (
                 render_template(
                     "login.html",
@@ -107,6 +108,7 @@ def _register_auth_routes(app: Flask, auth: SharedPasswordAuth) -> None:
             )
         session.clear()
         session["authenticated"] = True
+        session["auth_generation"] = generation
         _ensure_csrf_token()
         return redirect("/")
 

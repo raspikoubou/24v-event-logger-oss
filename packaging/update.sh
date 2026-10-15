@@ -13,6 +13,8 @@ SERVICE_USER="event-logger"
 ARCHIVE=""
 CHECKSUM_FILE=""
 VERSION=""
+# 同じ版・同じ秒の再試行も区別する。各更新プロセス内では同じIDを使う。
+UPDATE_ATTEMPT_ID="${EVENT_LOGGER_UPDATE_ATTEMPT_ID:-$(date -u +%Y%m%dT%H%M%S)-$$}"
 SOURCE_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 write_status() {
@@ -22,8 +24,9 @@ write_status() {
   directory="$(dirname -- "$UPDATE_STATUS_FILE")"
   mkdir -p -- "$directory"
   local temporary="$UPDATE_STATUS_FILE.tmp.$$"
-  printf '{"status":"%s","version":"%s","message":"%s","updated_at":"%s"}\n' \
-    "$state" "$VERSION" "$message" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$temporary"
+  printf '{"status":"%s","version":"%s","message":"%s","updated_at":"%s","attempt_id":"%s"}\n' \
+    "$state" "$VERSION" "$message" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$UPDATE_ATTEMPT_ID" >"$temporary"
   chown "$SERVICE_USER:$SERVICE_USER" "$temporary"
   chmod 0640 "$temporary"
   mv -f -- "$temporary" "$UPDATE_STATUS_FILE"

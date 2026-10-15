@@ -109,7 +109,10 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
                 release,
                 work_dir=str(app.config["UPDATE_WORK_DIR"]),
             )
-            launch_updater(
+            # agentへ依頼する直前の記録を返し、確認画面を開いた後に更新された
+            # 前回結果も、同じ版への再試行の結果として誤認させない。
+            previous_status = _read_update_status(app.config.get("UPDATE_STATUS_FILE"))
+            attempt_id = launch_updater(
                 helper_path=str(app.config["UPDATE_HELPER"]),
                 archive_path=archive_path,
                 checksum_path=checksum_path,
@@ -127,6 +130,8 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
                 "started": True,
                 "current_version": current,
                 "target_version": release.version,
+                "previous_status": previous_status,
+                "attempt_id": attempt_id,
                 "status": _read_update_status(app.config.get("UPDATE_STATUS_FILE")),
             }
         )
