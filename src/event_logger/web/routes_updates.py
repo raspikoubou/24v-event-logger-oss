@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 from flask import Flask, request
 
@@ -12,6 +13,7 @@ from event_logger.maintenance.update import (
     ReleaseInfo,
     UpdateError,
     UpdateOutcomeUnknown,
+    discard_update_download,
     download_and_verify,
     is_newer_version,
     launch_updater,
@@ -129,6 +131,8 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
                 "更新内容を確認し直してから適用してください。",
                 409,
             )
+        archive_path: Path | None = None
+        checksum_path: Path | None = None
         try:
             release = GitHubReleaseClient(repository).latest()
             if (
@@ -180,6 +184,8 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
             response.status_code = 202
             return response
         except (UpdateError, ValueError, OSError) as error:
+            if archive_path is not None and checksum_path is not None:
+                discard_update_download(archive_path, checksum_path)
             return _error("UPDATE_NOT_STARTED", str(error), 502)
         response = _ok(
             {

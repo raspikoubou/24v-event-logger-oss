@@ -7,14 +7,17 @@ FlaskのHTTP route登録を持たず、WebContextの依存先を通じて制御�
 from __future__ import annotations
 
 import logging
+import secrets
 import threading
+import time
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol, cast
 
 from flask import Flask
 
 from event_logger.common.configuration import configuration_fingerprint
-from event_logger.common.models import ChannelConfig
+from event_logger.common.models import ChannelConfig, CounterReset
+from event_logger.domain.widgets import Widget
 from event_logger.loggerd.ipc import (
     ControlCommand,
     ControlRequest,
@@ -311,3 +314,66 @@ def _restore_heartbeat(context: WebContext, value: Mapping[str, object]) -> None
     )
 
 
+def _save_counter_reset(
+    context: WebContext, widget_id: str, *, widget: Widget | None = None
+) -> CounterReset:
+    """確定入力と同じFIFOのresetを依頼し、制御loopを止めず完了を待つ。"""
+    if context.demo or (
+        context.database_path == ":memory:" and context.control_client is None
+    ):
+        # 固定fixtureと接続ごと独立するmemory DBには別processのwriterがない。
+        # GPIO/IPCを要求せず、ファイルDBの本番経路だけをFIFOへ同期する。
+        if widget is None:
+            return context.counter_resets.create(
+                widget_id=widget_id, reset_at_ms=context.clock.now_utc_ms()
+            )
+        context.widgets.update_with_counter_reset(
+            widget, reset_at_ms=context.clock.now_utc_ms()
+        )
+        result = context.counter_resets.latest(widget_id)
+        if result is None:
+            raise RuntimeError("counter reset was not saved")
+        return result
+    if context.control_client is None:
+        raise ConnectionError("loggerd counter reset is unavailable")
+    command = ControlRequest(
+        ControlCommand.RESET_COUNTER,
+        request_id=secrets.token_hex(16),
+        widget_id=widget_id,
+        widget=widget,
+    )
+    deadline = time.monotonic() + 30.0
+    pause = threading.Event()
+    while True:
+        try:
+            result_data = context.control_client.request(command)
+        except TimeoutError:
+            # 送信後の応答消失でも、同じIDなら新しい基準を二重作成しない。
+            result_data = {"pending": True}
+        if result_data.get("pending") is False:
+            raw = result_data.get("reset")
+            if not isinstance(raw, Mapping) or raw.get("widget_id") != widget_id:
+                raise IpcProtocolError("counter reset response is invalid")
+            values = [
+                raw.get(key)
+                for key in ("id", "reset_at_ms", "after_event_id", "carried_count")
+            ]
+            if any(
+                isinstance(value, bool) or not isinstance(value, int)
+                for value in values
+            ):
+                raise IpcProtocolError("counter reset values are invalid")
+            return CounterReset(
+                id=cast(int, values[0]),
+                widget_id=widget_id,
+                reset_at_ms=cast(int, values[1]),
+                after_event_id=cast(int, values[2]),
+                carried_count=cast(int, values[3]),
+            )
+        if result_data.get("pending") is not True:
+            raise IpcProtocolError("counter reset status is invalid")
+        if time.monotonic() >= deadline:
+            raise TimeoutError(
+                "リセット結果を確認できません。表示値を確認してください。"
+            )
+        pause.wait(0.025)

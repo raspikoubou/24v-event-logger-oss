@@ -15,6 +15,7 @@ from event_logger.loggerd.db_writer import EventWriter, EventWriterPort
 from event_logger.loggerd.event_queue import (
     EventQueue,
     EventQueueFull,
+    PendingCounterReset,
     PendingInputEvent,
 )
 from event_logger.loggerd.outputs import OutputManager
@@ -210,6 +211,14 @@ class LoggerService:
                 confirmed_count += 1
             return confirmed_count
 
+    def enqueue_counter_reset(self, pending: PendingCounterReset) -> None:
+        """確定入力と同じ排他境界でresetをFIFOへ投入する。"""
+        with self._lock:
+            if self.status is LoggerStatus.CRITICAL:
+                raise RuntimeError("counter reset is unavailable in critical state")
+            pending.reset_at_ms = self._clock.now_utc_ms()
+            self._event_queue.put(pending)
+
     def _enqueue_confirmed(
         self,
         channel_id: int,
@@ -263,7 +272,7 @@ class LoggerService:
                 self.status = LoggerStatus.CRITICAL
             raise
 
-    def stop(self) -> None:
+    def stop(self, *, on_quiesced: Callable[[], None] | None = None) -> None:
         """Queueを保存し、正常終了できたsessionへ終了時刻を記録する。"""
         with self._lock:
             if self.status is LoggerStatus.STOPPED:
@@ -301,8 +310,14 @@ class LoggerService:
             # lock外で行う。SD遅延中もGPIO callbackは即時returnできる。
             self.status = LoggerStatus.MAINTENANCE
         try:
-            if self._output_manager is not None:
-                self._output_manager.shutdown_off()
+            try:
+                if self._output_manager is not None:
+                    self._output_manager.shutdown_off()
+            finally:
+                # 永続pauseは入力受付停止・全OUTのOFF試行後、queueの保存待ち前。
+                # callback内で失敗を保持すれば、flag異常でも現在の停止を完了できる。
+                if on_quiesced is not None:
+                    on_quiesced()
             self._event_writer.wait_until_drained()
             if session_id is not None:
                 self._session_repository.end(
@@ -332,14 +347,16 @@ class LoggerService:
             _LOGGER.exception("failed to shut down outputs in critical state")
             return
 
-    def enter_maintenance(self) -> None:
+    def enter_maintenance(
+        self, *, on_quiesced: Callable[[], None] | None = None
+    ) -> None:
         """監視を停止し、Web出力テスト可能な状態へ移行する。"""
         with self._lock:
             if self.status is not LoggerStatus.LOGGING:
                 raise RuntimeError(
                     f"cannot enter maintenance from status {self.status}"
                 )
-        self.stop()
+        self.stop(on_quiesced=on_quiesced)
         with self._lock:
             self.status = LoggerStatus.MAINTENANCE
 

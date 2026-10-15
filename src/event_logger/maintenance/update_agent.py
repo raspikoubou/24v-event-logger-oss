@@ -135,7 +135,12 @@ class UpdateAgent:
                 args=(process, staging_path),
                 daemon=True,
             ).start()
-            return {"ok": True, "started": True, "attempt_id": attempt_id}
+            return {
+                "ok": True,
+                "started": True,
+                "attempt_id": attempt_id,
+                "assets_staged": True,
+            }
         except (OSError, ValueError) as error:
             if staging is not None:
                 shutil.rmtree(staging, ignore_errors=True)

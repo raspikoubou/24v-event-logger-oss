@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -28,6 +29,8 @@ class UpdateOutcomeUnknown(UpdateError):
 
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 """Webから受け取るRelease archiveの上限。"""
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,6 +279,29 @@ def launch_updater(
     return attempt_id
 
 
+def discard_update_download(archive_path: Path, checksum_path: Path) -> bool:
+    """当該downloadの2ファイルだけを回収する。実行中helperの元fileには使わない。"""
+    staging = archive_path.parent
+    if (
+        checksum_path.parent != staging
+        or not staging.name.startswith("release-")
+        or staging.is_symlink()
+        or checksum_path.name != "SHA256SUMS"
+        or not archive_path.name.startswith("event-logger-")
+        or not archive_path.name.endswith(".tar.zst")
+    ):
+        return False
+    try:
+        archive_path.unlink(missing_ok=True)
+        checksum_path.unlink(missing_ok=True)
+        staging.rmdir()
+    except OSError:
+        # 起動成功を回収失敗に読み替えない。対象外のfileは削除しない。
+        _LOGGER.warning("could not remove update download staging", exc_info=True)
+        return False
+    return True
+
+
 def _download(url: str, destination: Path, timeout: float, *, max_bytes: int) -> None:
     """HTTPS assetを上限付きstreamとして保存する。"""
     request = Request(
@@ -364,6 +390,10 @@ def _request_update_agent(
             if isinstance(message, str)
             else "update-agent rejected request"
         )
+    if response.get("assets_staged") is True:
+        # 新agentがroot-owned copyを確保したと明示した場合だけ回収する。
+        # 旧agent・応答消失・直接helper起動は、元fileをまだ読む可能性がある。
+        discard_update_download(Path(archive_path), Path(checksum_path))
     # 旧agentはIDを返さない。更新自体を拒否せず画面側の旧形式判定へ渡す。
     attempt_id = response.get("attempt_id")
     return attempt_id if isinstance(attempt_id, str) else None
@@ -476,6 +506,7 @@ __all__ = [
     "ReleaseInfo",
     "UpdateError",
     "download_and_verify",
+    "discard_update_download",
     "is_newer_version",
     "launch_updater",
     "validate_update_candidate",

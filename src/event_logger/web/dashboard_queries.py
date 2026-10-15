@@ -6,7 +6,7 @@ HTTPルートと独立し、DBへのquery範囲を表示項目に応じて制限
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from event_logger.common.models import CounterReset, InputEvent, OutputEvent
 from event_logger.domain.widgets import (
@@ -41,6 +41,7 @@ def _dashboard_events(
     """
     channel_ranges: dict[int, tuple[int, int]] = {}
     lookup_ranges: dict[int, tuple[int, int]] = {}
+    events_by_id: dict[int, InputEvent] = {}
     for widget in widgets:
         if widget.widget_type is WidgetType.EVENT_COUNT:
             # 全カウント方式をRepositoryのCOUNTで集計する。reset/storedも
@@ -49,14 +50,40 @@ def _dashboard_events(
         time_range = widget_ranges.get(widget.id)
         if time_range is None or time_range[0] >= time_range[1]:
             continue
+        input_channels = _widget_input_channels(widget)
+        if widget.widget_type is WidgetType.EVENT_LIST:
+            # IN/OUTそれぞれ最新N件だけ取得すれば、統合後の最新N件を保てる。
+            # 先に全期間を展開してからsliceすると、表示件数制限が働かない。
+            if input_channels:
+                for event in context.events.list_between(
+                    start_ms=time_range[0],
+                    end_ms=time_range[1],
+                    channel_ids=sorted(input_channels),
+                    limit=cast(int, widget.config.get("limit", 10)),
+                    descending=True,
+                ):
+                    events_by_id[event.id] = event
+            continue
+        if widget.widget_type is WidgetType.LAST_EVENT:
+            # 複数widgetの期間をまとめると、短い方の最新edgeが消え得る。
+            # 各期間へ限定して検索し、NTP逆行時も期間内の最大IDを維持する。
+            for channel_id in input_channels:
+                last_event = context.events.last_edge_between(
+                    channel_id=channel_id,
+                    value=0 if widget.config.get("edge") == "falling" else 1,
+                    start_ms=time_range[0],
+                    end_ms=time_range[1],
+                )
+                if last_event is not None:
+                    events_by_id[last_event.id] = last_event
+            continue
         for channel_id in _widget_input_channels(widget):
             _merge_channel_range(lookup_ranges, channel_id, time_range)
-            if widget.widget_type is not WidgetType.CURRENT_STATE:
+            if widget.widget_type in {WidgetType.ON_OFF_DURATION, WidgetType.TIMELINE}:
                 # 現在状態はdaemonの確定値を使う。旧daemon/testのfallbackにも
                 # 以下の直前値・最新edge・session末尾だけを渡し、全履歴は読まない。
                 _merge_channel_range(channel_ranges, channel_id, time_range)
 
-    events_by_id: dict[int, InputEvent] = {}
     if channel_ranges:
         # 同じ期間のchannelをまとめて読み、長い固定期間widgetが別channelの
         # 短いdashboard windowまで広げないよう期間ごとにqueryを分ける。
@@ -212,12 +239,29 @@ def _dashboard_output_events(
 ) -> list[OutputEvent]:
     """DashboardのOUT widgetごとに必要な期間履歴だけを取得する。"""
     output_ranges: dict[int, tuple[int, int]] = {}
+    events_by_id: dict[int, OutputEvent] = {}
     for widget in widgets:
         time_range = widget_ranges.get(widget.id)
         raw_signals = widget.config.get("signals")
         if time_range is None or time_range[0] >= time_range[1]:
             continue
         if not isinstance(raw_signals, list):
+            continue
+        output_channels = [
+            int(signal[3:])
+            for signal in raw_signals
+            if isinstance(signal, str) and signal.upper().startswith("OUT")
+        ]
+        if widget.widget_type is WidgetType.EVENT_LIST:
+            if output_channels:
+                for event in context.output_events.list_between(
+                    start_ms=time_range[0],
+                    end_ms=time_range[1],
+                    output_channels=output_channels,
+                    limit=cast(int, widget.config.get("limit", 10)),
+                    descending=True,
+                ):
+                    events_by_id[event.id] = event
             continue
         for raw_signal in raw_signals:
             if isinstance(raw_signal, str) and raw_signal.upper().startswith("OUT"):
@@ -228,9 +272,8 @@ def _dashboard_output_events(
                 if 1 <= channel_id <= 6:
                     _merge_channel_range(output_ranges, channel_id, time_range)
     if not output_ranges:
-        return []
+        return sorted(events_by_id.values(), key=lambda event: event.id)
     repository = context.output_events
-    events_by_id: dict[int, OutputEvent] = {}
     channels_by_range: dict[tuple[int, int], list[int]] = {}
     for channel_id, time_range in sorted(output_ranges.items()):
         channels_by_range.setdefault(time_range, []).append(channel_id)
