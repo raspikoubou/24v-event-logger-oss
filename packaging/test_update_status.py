@@ -9,9 +9,57 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from event_logger.maintenance.update import ReleaseAsset, ReleaseInfo, launch_updater
+from event_logger.maintenance.update import (
+    ReleaseAsset,
+    ReleaseInfo,
+    UpdateError,
+    UpdateOutcomeUnknown,
+    launch_updater,
+)
 from event_logger.maintenance.update_agent import UpdateAgent
 from event_logger.web.app import create_app
+
+
+@pytest.mark.parametrize(
+    "failure", [TimeoutError("lost ack"), UpdateError("bad reply")]
+)
+def test_sent_update_with_lost_reply_has_unknown_outcome(
+    failure: Exception, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """接続後に応答が失われても、未起動として再適用させない。"""
+    connection = MagicMock()
+    monkeypatch.setattr("event_logger.maintenance.update.socket.socket", connection)
+    monkeypatch.setattr(
+        "event_logger.maintenance.update._read_agent_response",
+        Mock(side_effect=failure),
+    )
+    with pytest.raises(UpdateOutcomeUnknown):
+        launch_updater(
+            helper_path="unused",
+            archive_path="unused",
+            checksum_path="unused",
+            version="1.0.2",
+            socket_path="unused",
+        )
+    connection.return_value.__enter__.return_value.sendall.assert_called_once()
+
+
+def test_unconnected_update_is_not_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """agentへ接続できない場合は、起動結果不明と区別する。"""
+    socket_factory = MagicMock()
+    connection = socket_factory.return_value.__enter__.return_value
+    connection.connect.side_effect = FileNotFoundError("agent unavailable")
+    monkeypatch.setattr("event_logger.maintenance.update.socket.socket", socket_factory)
+    with pytest.raises(UpdateError) as captured:
+        launch_updater(
+            helper_path="unused",
+            archive_path="unused",
+            checksum_path="unused",
+            version="1.0.2",
+            socket_path="unused",
+        )
+    assert not isinstance(captured.value, UpdateOutcomeUnknown)
+    connection.sendall.assert_not_called()
 
 
 def test_update_response_preserves_pre_launch_status(
@@ -58,7 +106,15 @@ def test_update_response_preserves_pre_launch_status(
     )
     client = app.test_client()
     token = client.get("/api/auth/csrf").get_json()["data"]["token"]
-    response = client.post("/api/update", headers={"X-CSRF-Token": token})
+    confirmed = client.get("/api/update").get_json()["data"]
+    response = client.post(
+        "/api/update",
+        headers={"X-CSRF-Token": token},
+        json={
+            "expected_version": confirmed["latest_version"],
+            "release_token": confirmed["release_token"],
+        },
+    )
     assert response.status_code == 202
     data = response.get_json()["data"]
     assert data["previous_status"] == previous

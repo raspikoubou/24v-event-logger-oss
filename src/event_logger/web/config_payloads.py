@@ -24,6 +24,8 @@ def _json_int(value: object, field_name: str) -> int:
     """JSON payloadの整数を検証する。boolを整数として受理しない。"""
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{field_name} must be an integer")
+    if not -(2**63) <= value < 2**63:
+        raise ValueError(f"{field_name} is outside the supported integer range")
     return value
 
 
@@ -224,5 +226,3 @@ def _widget_payload(widget: Widget) -> dict[str, Any]:
         "enabled": widget.enabled,
         "updated_at_ms": widget.updated_at_ms,
     }
-
-

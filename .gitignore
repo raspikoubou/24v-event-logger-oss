@@ -36,13 +36,12 @@ SDバックアップ/
 !/packaging/
 !/docs/
 
-# docsは公開可能な説明書・開発手順・説明画像だけを追跡する
+# docsは説明書・説明画像だけを追跡する
 /docs/*
 !/docs/概要説明書.md
 !/docs/インストール説明書.md
 !/docs/取扱説明書.md
 !/docs/保存状態の診断設計.md
-!/docs/開発者向けリリース手順.md
 !/docs/リリースノート_*.md
 !/docs/images/
 /docs/images/*

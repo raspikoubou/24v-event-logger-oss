@@ -22,6 +22,10 @@ class UpdateError(RuntimeError):
     """Release確認・asset検証・updater起動に失敗した。"""
 
 
+class UpdateOutcomeUnknown(UpdateError):
+    """管理agentへ送信した依頼の起動結果を確定できない。"""
+
+
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 """Webから受け取るRelease archiveの上限。"""
 
@@ -33,6 +37,7 @@ class ReleaseAsset:
     name: str
     url: str
     size: int
+    api_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,12 +98,22 @@ class GitHubReleaseClient:
             name = raw_asset.get("name")
             download_url = raw_asset.get("browser_download_url")
             size = raw_asset.get("size", 0)
+            asset_id = raw_asset.get("id")
             if (
                 isinstance(name, str)
                 and isinstance(download_url, str)
                 and isinstance(size, int)
+                and type(asset_id) is int
+                and asset_id > 0
             ):
-                assets[name] = ReleaseAsset(name, download_url, size)
+                # browser_download_urlは同名再アップロード後も同じになり得る。
+                # 不変のasset IDからAPI URLを組み立て、確認したファイルだけを
+                # 取得する。GitHub由来の任意URLをそのまま信用しない。
+                api_url = (
+                    f"https://api.github.com/repos/{self._repository}"
+                    f"/releases/assets/{asset_id}"
+                )
+                assets[name] = ReleaseAsset(name, download_url, size, api_url)
         version = _normalize_version(tag)
         archive = assets.get(f"event-logger-{version}.tar.zst")
         checksums = assets.get("SHA256SUMS")
@@ -181,9 +196,14 @@ def download_and_verify(
             if release.archive.size > 0
             else MAX_ARCHIVE_BYTES
         )
-        _download(release.archive.url, archive_path, timeout, max_bytes=archive_limit)
         _download(
-            release.checksums.url,
+            release.archive.api_url or release.archive.url,
+            archive_path,
+            timeout,
+            max_bytes=archive_limit,
+        )
+        _download(
+            release.checksums.api_url or release.checksums.url,
             checksum_path,
             timeout,
             max_bytes=16 * 1024 * 1024,
@@ -258,7 +278,13 @@ def launch_updater(
 
 def _download(url: str, destination: Path, timeout: float, *, max_bytes: int) -> None:
     """HTTPS assetを上限付きstreamとして保存する。"""
-    request = Request(url, headers={"User-Agent": "event-logger-updater"})
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "event-logger-updater",
+            "Accept": "application/octet-stream",
+        },
+    )
     try:
         with (
             urlopen(request, timeout=timeout) as response,
@@ -318,12 +344,19 @@ def _request_update_agent(
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
             connection.settimeout(30.0)
             connection.connect(str(socket_path))
-            connection.sendall(payload)
-            response = _read_agent_response(connection)
+            try:
+                connection.sendall(payload)
+                response = _read_agent_response(connection)
+            except (OSError, UpdateError) as error:
+                # 接続後は、返答だけを失ってhelperが起動している場合がある。
+                # 未起動と断定せず、Webに状態監視を継続させる。
+                raise UpdateOutcomeUnknown(
+                    "更新依頼の応答を確認できません。実際の更新状態を確認します。"
+                ) from error
     except (OSError, TimeoutError) as error:
         raise UpdateError(f"update-agent is unavailable: {error}") from error
     if not isinstance(response, dict):
-        raise UpdateError("update-agent returned an invalid response")
+        raise UpdateOutcomeUnknown("update-agent returned an invalid response")
     if response.get("ok") is not True:
         message = response.get("message")
         raise UpdateError(

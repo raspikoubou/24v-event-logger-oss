@@ -15,6 +15,9 @@ def test_regression_tools_are_not_distributed() -> None:
     assert "packaging/test_update_monitor.cjs" not in names
     assert "packaging/test_update_status.py" not in names
     assert "packaging/test_release_asset.py" not in names
+    root = Path(__file__).resolve().parents[1]
+    for path in (root / "packaging").glob("test_*"):
+        assert path.relative_to(root).as_posix() not in names
     assert "packaging/install.sh" in names
     assert "packaging/update.sh" in names
 

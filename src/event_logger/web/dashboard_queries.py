@@ -41,12 +41,9 @@ def _dashboard_events(
     """
     channel_ranges: dict[int, tuple[int, int]] = {}
     for widget in widgets:
-        if (
-            widget.widget_type is WidgetType.EVENT_COUNT
-            and widget.config.get("count_mode", "period") == "period"
-        ):
-            # period型回数はRepositoryのCOUNTで集計するため、全event行を
-            # Pythonへ展開して長い固定期間が他widgetの取得範囲を広げない。
+        if widget.widget_type is WidgetType.EVENT_COUNT:
+            # 全カウント方式をRepositoryのCOUNTで集計する。reset/storedも
+            # 履歴行は不要で、長期期間の選択によるメモリ消費を増やさない。
             continue
         time_range = widget_ranges.get(widget.id)
         if time_range is None or time_range[0] >= time_range[1]:
@@ -404,5 +401,3 @@ def _stored_widget_count(context: WebContext, widget: Widget) -> int:
     edge = widget.config.get("edge", "rising")
     value = 1 if edge == "rising" else 0
     return context.events.count_edges(channel_id=channel_id, value=value)
-
-

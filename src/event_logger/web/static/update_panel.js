@@ -13,7 +13,7 @@
     confirmApply,
     onChange = () => {},
     readStatus = null,
-    now = () => Date.now(),
+    now = () => typeof performance === "object" ? performance.now() : Date.now(),
   }) {
     const state = {
       checking: false,
@@ -26,12 +26,14 @@
       available: false,
       currentVersion: "未確認",
       latestVersion: "未確認",
+      releaseToken: null,
       status: null,
       notes: "",
       message: "更新確認はまだ実行していません。",
     };
 
     let statusRequestRunning = false;
+    let statusRequestEpoch = 0;
     let watchStartedAt = null;
     let previousStatusKey = null;
 
@@ -57,6 +59,7 @@
         available: false,
         latestVersion: "確認中…",
         notes: "",
+        releaseToken: null,
         message: "安定版Releaseを確認しています。",
       });
       try {
@@ -98,6 +101,7 @@
           available,
           currentVersion: release.current_version,
           latestVersion: release.latest_version,
+          releaseToken: typeof release.release_token === "string" ? release.release_token : null,
           status: updateStatus,
           notes: typeof release.notes === "string" ? release.notes : "",
           message,
@@ -140,6 +144,9 @@
       }
 
       previousStatusKey = statusKey(state.status);
+      // 起動前に走っていた状態取得が、今回の依頼後へ遅れて反映されないようにする。
+      statusRequestEpoch += 1;
+      statusRequestRunning = false;
       updateState({
         confirming: false,
         applying: true,
@@ -152,8 +159,10 @@
       });
       watchStartedAt = now();
       try {
-        const result = await applyRelease();
-        if (!result || result.started !== true) {
+        const result = await applyRelease({
+          expected_version: state.latestVersion, release_token: state.releaseToken,
+        });
+        if (!result || (result.started !== true && result.outcome_unknown !== true)) {
           throw new Error("更新処理を開始できませんでした。");
         }
         if (Object.prototype.hasOwnProperty.call(result, "previous_status")) {
@@ -164,7 +173,9 @@
           targetVersion: result.target_version || state.latestVersion,
           targetAttemptId: typeof result.attempt_id === "string" ? result.attempt_id : null,
           status: { status: "started", version: result.target_version || state.latestVersion },
-          message: "処理中：更新しています。完了まで電源を切らないでください。",
+          message: result.outcome_unknown === true
+            ? "処理中：更新依頼の応答を確認できません。実際の状態を確認しています。"
+            : "処理中：更新しています。完了まで電源を切らないでください。",
         });
       } catch (error) {
         updateState({
@@ -180,11 +191,25 @@
       return snapshot();
     }
 
+    function expireWatch() {
+      if (!state.processing || watchStartedAt === null || now() - watchStartedAt <= 10 * 60 * 1000) return false;
+      statusRequestEpoch += 1;
+      statusRequestRunning = false;
+      watchStartedAt = null;
+      updateState({ processing: false, available: false, status: { status: "unknown" },
+        message: "更新結果を確認できません。成功・失敗は未確認です。再適用せず、接続と記録状態を確認してください。" });
+      return true;
+    }
+
     async function monitor() {
+      // 状態取得が応答しない場合も、次回の定期確認で監視期限を判定する。
+      if (expireWatch()) return snapshot();
       if (!readStatus || statusRequestRunning || state.applying) return snapshot();
       statusRequestRunning = true;
+      const requestEpoch = statusRequestEpoch;
       try {
         const result = await readStatus();
+        if (requestEpoch !== statusRequestEpoch || expireWatch()) return snapshot();
         if (!result || typeof result.current_version !== "string") {
           throw new Error("更新状態の応答を確認できません。");
         }
@@ -217,6 +242,7 @@
           updateState({ status: null });
         }
       } catch (error) {
+        if (requestEpoch !== statusRequestEpoch || expireWatch()) return snapshot();
         if (state.processing) {
           // Web停止中の通信失敗は更新失敗ではない。再接続して実際の結果を待つ。
           updateState({ message: "処理中：一時的に接続できません。再接続を待っています。" });
@@ -224,13 +250,9 @@
           updateState({ message: "更新状態を確認できません。接続を確認してください。" });
         }
       } finally {
-        statusRequestRunning = false;
+        if (requestEpoch === statusRequestEpoch) statusRequestRunning = false;
       }
-      if (state.processing && watchStartedAt !== null && now() - watchStartedAt > 10 * 60 * 1000) {
-        // 通信断から成功・失敗を推測しない。長時間結果が取れない場合は明示的に未確認にする。
-        updateState({ processing: false, available: false, status: { status: "unknown" },
-          message: "更新結果を確認できません。成功・失敗は未確認です。再適用せず、接続と記録状態を確認してください。" });
-      }
+      expireWatch();
       return snapshot();
     }
 
@@ -314,27 +336,37 @@
     }
 
     const csrfToken = documentRef.querySelector('meta[name="csrf-token"]')?.content || "";
-    async function requestUpdate(method, path = "/api/update") {
+    async function requestUpdate(method, path = "/api/update", body = null) {
       const headers = { Accept: "application/json" };
       if (method !== "GET" && csrfToken) headers["X-CSRF-Token"] = csrfToken;
-      const response = await windowRef.fetch(path, {
-        method,
-        headers,
-        credentials: "same-origin",
-        cache: "no-store",
-      });
+      if (body !== null) headers["Content-Type"] = "application/json";
+      const abort = typeof windowRef.AbortController === "function"
+        ? new windowRef.AbortController() : null;
+      const timer = abort && typeof windowRef.setTimeout === "function"
+        ? windowRef.setTimeout(() => abort.abort(), method === "POST" ? 60_000 : 15_000) : null;
+      let response;
       let payload;
       try {
+        response = await windowRef.fetch(path, {
+          method, headers, credentials: "same-origin", cache: "no-store",
+          ...(body !== null ? { body: JSON.stringify(body) } : {}),
+          ...(abort ? { signal: abort.signal } : {}),
+        });
         payload = await response.json();
-      } catch {
-        const error = new Error("サーバー応答を読み取れませんでした。");
-        error.httpStatus = response.status;
-        error.requestRejected = !response.ok;
+      } catch (cause) {
+        const error = new Error("サーバー応答を確認できませんでした。");
+        error.httpStatus = response?.status;
+        error.requestRejected = response?.status >= 400 && response?.status < 500;
         throw error;
+      } finally {
+        if (timer !== null) windowRef.clearTimeout(timer);
       }
       if (!response.ok || payload.ok === false) {
         const error = new Error(payload.error?.message || "サーバーとの通信に失敗しました。");
-        error.requestRejected = true;
+        // gateway等の5xxは、処理の応答だけを失った可能性を残す。
+        error.requestRejected = (response.status >= 400 && response.status < 500)
+          || payload.error?.code === "UPDATE_NOT_STARTED"
+          || payload.error?.code === "UPDATE_UNAVAILABLE";
         error.httpStatus = response.status;
         throw error;
       }
@@ -343,7 +375,7 @@
 
     const controller = createUpdatePanelController({
       checkRelease: () => requestUpdate("GET"),
-      applyRelease: () => requestUpdate("POST"),
+      applyRelease: (body) => requestUpdate("POST", "/api/update", body),
       confirmApply: ({ currentVersion, targetVersion }) => {
         const message = `設備イベントロガーを ${currentVersion} から ${targetVersion} へ更新します。\n\n`
           + "更新中は記録が一時停止し、その区間はUNKNOWNになります。"

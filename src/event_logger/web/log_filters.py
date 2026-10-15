@@ -52,6 +52,13 @@ def _parse_log_filters(clock: Clock, timezone_name: str) -> dict[str, Any]:
         )
     if start_ms >= end_ms:
         raise ValueError("from_ms must be before to_ms")
+    # SQL bindingだけでなく、JSON/CSVのtimezone付き日時へ変換できる範囲も
+    # 検索前に検証する。stream開始後の例外では正常な400応答へ戻せない。
+    for timestamp_ms in (start_ms, end_ms):
+        try:
+            _format_local_input(timestamp_ms, timezone_name)
+        except (ValueError, OverflowError, OSError) as error:
+            raise ValueError("date/time is outside the supported range") from error
     channel_value = request.args.get("channel_id")
     signals: list[str] | None = None
     if channel_value:
@@ -163,8 +170,9 @@ def _query_int(name: str, default: int) -> int:
     if value is None:
         return default
     try:
-        return int(value)
+        parsed = int(value)
     except ValueError as error:
         raise ValueError(f"{name} must be an integer") from error
-
-
+    if not -(2**63) <= parsed < 2**63:
+        raise ValueError(f"{name} is outside the supported integer range")
+    return parsed

@@ -54,7 +54,7 @@ def generate_csv(
             [
                 format_timestamp(event.ts_utc_ms, timezone_name),
                 signal,
-                name,
+                _csv_text(name),
                 "ON" if event.value else "OFF",
                 event.kind,
                 event.source.value if event.source is not None else "",
@@ -71,6 +71,17 @@ def generate_csv(
         yield output.getvalue()
 
 
+def _csv_text(value: str) -> str:
+    """表計算ソフトが利用者の名称を式として扱わないよう文字列にする。"""
+    # 引用符で囲むだけでは式解釈を防げない。制御文字や空白の後に式開始文字が
+    # ある場合も対象にし、生ログ・保存済み名称そのものは変更しない。
+    inspected = value.lstrip()
+    if inspected.startswith(("=", "+", "-", "@")) or value.startswith(
+        ("\t", "\r", "\n")
+    ):
+        return "'" + value
+    return value
+
 
 def _output_name(event: LogRecord, rule_names: Mapping[int, str]) -> str:
     """初期版でDBに保存するOUT用途名を返す。"""
@@ -85,5 +96,3 @@ def _output_name(event: LogRecord, rule_names: Mapping[int, str]) -> str:
     if event.source is OutputSource.RULE and event.channel_id in rule_names:
         return rule_names[event.channel_id]
     return names[event.source]
-
-

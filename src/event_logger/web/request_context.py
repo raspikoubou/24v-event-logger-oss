@@ -10,6 +10,7 @@ import sqlite3
 from collections.abc import Callable, Iterable, Iterator
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from threading import RLock
 from typing import TYPE_CHECKING, Any
 
 from event_logger.adapters.clock import Clock
@@ -57,6 +58,32 @@ class WebContext:
 _REQUEST_WEB_CONTEXT: ContextVar[WebContext | None] = ContextVar(
     "event_logger_request_web_context", default=None
 )
+
+
+class _ConfigurationRequestMiddleware:
+    """設定の保存・daemon反映・復元を、認証確認前から要求単位で直列化する。"""
+
+    def __init__(self, application: Callable[..., Iterable[bytes]]) -> None:
+        """製品の単一Gunicorn worker内で、設定と共有認証の整合性を守る。"""
+        self._application = application
+        self._lock = RLock()
+
+    def __call__(
+        self, environ: dict[str, Any], start_response: Callable[..., Any]
+    ) -> Iterable[bytes]:
+        """読取りは並行させ、変更要求の認証・保存・反映確認を分離しない。"""
+        if environ.get("REQUEST_METHOD") in {"GET", "HEAD", "OPTIONS"} or (
+            environ.get("PATH_INFO") in {"/api/update", "/api/system/reboot"}
+        ):
+            # 更新の外部downloadは長時間になり得る。管理agent側の専用lockに
+            # 任せ、記録停止など通常の変更要求をdownload待ちへ巻き込まない。
+            return self._application(environ, start_response)
+        # Repositoryのtransactionだけでは、commit後のIPC失敗による旧値復元が
+        # 別要求の成功を消す。認証もlock取得後に実行し、待機中に失効したCookie
+        # で設定を上書きしない。JSON変更応答はroute内で確定し、streamはGETのみ。
+        # lock順序はこのlock → request DB → SharedPasswordAuth内部lockとする。
+        with self._lock:
+            return self._application(environ, start_response)
 
 
 class _RequestScopedWebContext:
@@ -178,5 +205,3 @@ def _create_web_context(
         control_client=control_client,
         storage_monitor=StorageMonitor(),
     )
-
-
