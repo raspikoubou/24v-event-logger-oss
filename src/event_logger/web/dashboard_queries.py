@@ -40,6 +40,7 @@ def _dashboard_events(
     使い、DBへ退避した場合もsessionごとの最後のeventだけを読む。
     """
     channel_ranges: dict[int, tuple[int, int]] = {}
+    lookup_ranges: dict[int, tuple[int, int]] = {}
     for widget in widgets:
         if widget.widget_type is WidgetType.EVENT_COUNT:
             # 全カウント方式をRepositoryのCOUNTで集計する。reset/storedも
@@ -49,7 +50,11 @@ def _dashboard_events(
         if time_range is None or time_range[0] >= time_range[1]:
             continue
         for channel_id in _widget_input_channels(widget):
-            _merge_channel_range(channel_ranges, channel_id, time_range)
+            _merge_channel_range(lookup_ranges, channel_id, time_range)
+            if widget.widget_type is not WidgetType.CURRENT_STATE:
+                # 現在状態はdaemonの確定値を使う。旧daemon/testのfallbackにも
+                # 以下の直前値・最新edge・session末尾だけを渡し、全履歴は読まない。
+                _merge_channel_range(channel_ranges, channel_id, time_range)
 
     events_by_id: dict[int, InputEvent] = {}
     if channel_ranges:
@@ -67,7 +72,7 @@ def _dashboard_events(
             for event in candidates:
                 events_by_id[event.id] = event
 
-    for channel_id, (start_ms, end_ms) in sorted(channel_ranges.items()):
+    for channel_id, (start_ms, end_ms) in sorted(lookup_ranges.items()):
         previous = context.events.last_before(
             channel_id=channel_id,
             before_ms=start_ms,
@@ -191,10 +196,10 @@ def _dashboard_reset_counts(
         ):
             continue
         edge_value = 1 if widget.config.get("edge", "rising") == "rising" else 0
-        counts[widget.id] = reset.carried_count + context.events.count_edges(
+        counts[widget.id] = context.counter_resets.count_total(
+            reset_id=reset.id,
             channel_id=channel_id,
             value=edge_value,
-            after_event_id=reset.after_event_id,
         )
     return counts
 

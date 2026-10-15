@@ -135,6 +135,10 @@ class LoggerDaemon:
             output_manager=self._outputs,
             confirmed_input_callback=self._rule_runner.observe,
         )
+        # 開始時の再読とcallbackの順序だけを保護する。開始処理ではGPIO読取りや
+        # snapshotのDB保存をこのlockの外で行い、追加の待機区間を作らない。
+        self._input_callback_lock = threading.RLock()
+        self._input_sequences: dict[int, int] = {}
         self._apply_heartbeat_settings()
         heartbeat_enabled, heartbeat_channel, heartbeat_interval = (
             self._heartbeat_settings()
@@ -399,7 +403,11 @@ class LoggerDaemon:
     def _on_input(self, channel_id: int, value: bool) -> None:
         """GPIO callbackではserviceへ値を渡すだけにする。"""
         try:
-            self._service.observe_input(channel_id, value)
+            with self._input_callback_lock:
+                self._input_sequences[channel_id] = (
+                    self._input_sequences.get(channel_id, 0) + 1
+                )
+                self._service.observe_input(channel_id, value)
         except Exception:
             # GPIO Zeroのcallback threadへ例外を返すと、入力監視thread側の
             # エラーだけが残り、Heartbeat停止・OUT OFFが実行されない。
@@ -525,20 +533,31 @@ class LoggerDaemon:
         # 変化した入力だけが片方へ反映されるため、一つのsnapshotを共有する。
         input_values = self._gpio.input_values()
         try:
-            self._service.start(input_values)
+            # 再開時は前sessionのcallbackが既に接続されている。入力受付が
+            # LOGGINGへ変わる前にrule側も初期化し、確定edgeを後から消さない。
             self._rule_runner.start_session(
                 {
                     channel_id: input_values[channel_id]
                     for channel_id in self._service.enabled_channel_ids
                 }
             )
+            self._service.start(input_values)
             # 初回設定後のSTART_LOGGINGでも必ずcallbackを接続する。callback登録前
             # の変化は再読してdebounce候補へ渡し、監視開始直後のedgeを欠落させない。
             self._gpio.attach_input_callbacks(self._on_input)
+            with self._input_callback_lock:
+                read_sequences = dict(self._input_sequences)
             current_values = self._gpio.input_values()
-            for channel_id, value in current_values.items():
-                if value != input_values.get(channel_id):
-                    self._service.observe_input(channel_id, value)
+            with self._input_callback_lock:
+                for channel_id, value in current_values.items():
+                    # 値を読んでから適用するまでに届いたcallbackを優先する。
+                    # 古いON再読が新しいOFFを消すと、次のedgeまで誤状態が残る。
+                    if self._input_sequences.get(channel_id, 0) != (
+                        read_sequences.get(channel_id, 0)
+                    ):
+                        continue
+                    if value != input_values.get(channel_id):
+                        self._service.observe_input(channel_id, value)
             self._apply_heartbeat_settings()
             self._outputs.resume_heartbeat()
             self._record_audit("logging_started")
