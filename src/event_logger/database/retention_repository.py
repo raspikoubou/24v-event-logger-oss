@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from bisect import bisect_right
 from collections.abc import Sequence
 
-from event_logger.common.models import CounterReset
+from event_logger.common.models import CounterReset, EventKind
 from event_logger.database.repository_helpers import (
     _counter_config,
     _counter_event_matches,
     _counter_reset_from_row,
     _delete_ids,
     _lastrowid,
+    _validate_channel_ids,
 )
 
 
@@ -87,6 +89,27 @@ class CounterResetRepository:
             (widget_id,),
         ).fetchone()
         return _counter_reset_from_row(row) if row is not None else None
+
+    def count_total(self, *, reset_id: int, channel_id: int, value: int) -> int:
+        """同じ読取りsnapshotでcarryと残存edgeを合算する。"""
+        _validate_channel_ids([channel_id])
+        if reset_id < 1 or value not in (0, 1):
+            raise ValueError("reset id or edge value is invalid")
+        # 別々のSELECTでは、途中のretention commitにより削除前のcarryと
+        # 削除後の残存数を足してしまう。単一SQLにして表示の一時的な減少を防ぐ。
+        # reset IDは要求が取得した基準に固定し、並行する手動resetとも混ぜない。
+        row = self._connection.execute(
+            """
+            SELECT carried_count + (
+                SELECT COUNT(*) FROM events
+                WHERE channel_id = ? AND value = ? AND kind = ?
+                  AND id > counter_resets.after_event_id
+            ) AS total_count
+            FROM counter_resets WHERE id = ?
+            """,
+            (channel_id, value, int(EventKind.EDGE), reset_id),
+        ).fetchone()
+        return int(row[0]) if row is not None else 0
 
 
 class RetentionRepository:
@@ -226,19 +249,34 @@ class RetentionRepository:
             """
         ).fetchall()
         result: dict[int, int] = {}
+        matching_ids: dict[tuple[int, str], list[int]] = {}
         for reset_row in rows:
             config = _counter_config(reset_row["config_json"])
             if config is None:
                 continue
+            channel_id = config.get("channel_id")
+            edge = config.get("edge", "rising")
+            if (
+                isinstance(channel_id, bool)
+                or not isinstance(channel_id, int)
+                or not 1 <= channel_id <= 6
+                or not isinstance(edge, str)
+                or edge not in {"rising", "falling", "both", "any"}
+            ):
+                continue
+            key = (channel_id, "both" if edge == "any" else edge)
+            if key not in matching_ids:
+                # timestamp順に削除するbatchでも、reset基準はevent ID順である。
+                # 同じ信号条件の照合を一度だけ行い、全reset履歴を二分探索する。
+                # 履歴数×batch件数の総当たりでwriterの5秒待ちを使い切らない。
+                matching_ids[key] = sorted(
+                    int(event_row["id"])
+                    for event_row in event_rows
+                    if _counter_event_matches(event_row, config)
+                )
             after_event_id = int(reset_row["after_event_id"])
-            count = sum(
-                1
-                for event_row in event_rows
-                if int(event_row["id"]) > after_event_id
-                and _counter_event_matches(event_row, config)
-            )
+            ids = matching_ids[key]
+            count = len(ids) - bisect_right(ids, after_event_id)
             if count:
                 result[int(reset_row["id"])] = count
         return result
-
-

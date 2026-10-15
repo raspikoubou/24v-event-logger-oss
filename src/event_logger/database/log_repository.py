@@ -91,10 +91,14 @@ class OutputEventRepository:
         start_ms: int,
         end_ms: int,
         output_channels: Sequence[int] | None = None,
+        limit: int | None = None,
+        descending: bool = False,
     ) -> list[OutputEvent]:
-        """期間内のOUT eventを古い順で返す。"""
+        """期間内のOUT eventを返す。既定は時刻・IDの昇順。"""
         if start_ms >= end_ms:
             raise ValueError("start_ms must be before end_ms")
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be positive")
         clauses = ["ts_utc_ms >= ?", "ts_utc_ms < ?"]
         parameters: list[object] = [start_ms, end_ms]
         if output_channels:
@@ -102,12 +106,16 @@ class OutputEventRepository:
             placeholders = ", ".join("?" for _ in output_channels)
             clauses.append(f"output_channel IN ({placeholders})")
             parameters.extend(output_channels)
-        rows = self._connection.execute(
+        order = "DESC" if descending else "ASC"
+        query = (
             "SELECT * FROM output_events WHERE "
             + " AND ".join(clauses)
-            + " ORDER BY ts_utc_ms, id",
-            parameters,
-        ).fetchall()
+            + f" ORDER BY ts_utc_ms {order}, id {order}"
+        )
+        if limit is not None:
+            query += " LIMIT ?"
+            parameters.append(limit)
+        rows = self._connection.execute(query, parameters).fetchall()
         return [_output_event_from_row(row) for row in rows]
 
     def count_between(
@@ -290,5 +298,3 @@ class LogRepository:
         cursor = self._connection.execute(query, parameters)
         for row in cursor:
             yield _log_record_from_row(row)
-
-

@@ -13,15 +13,18 @@ from typing import Protocol
 
 from event_logger.database.connection import connect_database
 from event_logger.database.repositories import (
+    CounterResetRepository,
     EventBatchRepository,
     EventRepository,
     EventWrite,
     InputEventWrite,
     OutputEventRepository,
     OutputEventWrite,
+    WidgetRepository,
 )
 from event_logger.loggerd.event_queue import (
     EventQueue,
+    PendingCounterReset,
     PendingDatabaseEvent,
     PendingInputEvent,
     PendingOutputEvent,
@@ -201,6 +204,8 @@ class EventWriter:
 
     def append_pending(self, pending: PendingDatabaseEvent) -> None:
         """event種別に対応するRepositoryへ1件commitする。"""
+        if isinstance(pending, PendingCounterReset):
+            raise TypeError("counter reset requires the background writer")
         if isinstance(pending, PendingInputEvent):
             self._event_repository.append(
                 session_id=pending.session_id,
@@ -352,36 +357,83 @@ class BackgroundEventWriter:
                     if self._stop_requested.is_set() and len(self._event_queue) == 0:
                         return
                     continue
+                remaining = list(pending_events)
                 try:
-                    commit_started_ns = monotonic_ns()
-                    with self._state_lock:
-                        self._commit_started_ns = commit_started_ns
-                    batch_repository.append_many(
-                        [_event_write(pending) for pending in pending_events]
-                    )
+                    # resetを含むbatchはその前後で分割し、確定入力と同じFIFOの
+                    # 位置へ基準を保存する。制御loopではDBの完了を待たない。
+                    while remaining:
+                        if isinstance(remaining[0], PendingCounterReset):
+                            self._apply_counter_reset(connection, remaining[0])
+                            self._event_queue.task_done()
+                            remaining = remaining[1:]
+                            continue
+                        count = next(
+                            (
+                                index
+                                for index, pending in enumerate(remaining)
+                                if isinstance(pending, PendingCounterReset)
+                            ),
+                            len(remaining),
+                        )
+                        self._commit_event_batch(batch_repository, remaining[:count])
+                        remaining = remaining[count:]
                 except Exception as error:
                     with self._state_lock:
                         self._commit_started_ns = None
-                    self._event_queue.requeue_front_many(pending_events)
+                    self._event_queue.requeue_front_many(remaining)
                     self._set_failure(error)
                     return
-                commit_elapsed_ns = monotonic_ns() - commit_started_ns
-                if commit_elapsed_ns >= _SLOW_COMMIT_NS:
-                    _log_slow_commit(
-                        pending_events[0],
-                        commit_elapsed_ns,
-                        pending_count=len(self._event_queue),
-                        batch_count=len(pending_events),
-                    )
-                self._event_queue.task_done(len(pending_events))
-                with self._state_lock:
-                    self._commit_started_ns = None
-                    self._completed += len(pending_events)
-                    self._latency_monitor.record(
-                        completed_ns=monotonic_ns(), elapsed_ns=commit_elapsed_ns
-                    )
         finally:
             connection.close()
+
+    def _commit_event_batch(
+        self, repository: EventBatchRepository, events: list[PendingDatabaseEvent]
+    ) -> None:
+        """resetをまたがないevent batchを保存し、未commit数と遅延を更新する。"""
+        started_ns = monotonic_ns()
+        with self._state_lock:
+            self._commit_started_ns = started_ns
+        repository.append_many([_event_write(event) for event in events])
+        elapsed_ns = monotonic_ns() - started_ns
+        if elapsed_ns >= _SLOW_COMMIT_NS:
+            _log_slow_commit(
+                events[0],
+                elapsed_ns,
+                pending_count=len(self._event_queue),
+                batch_count=len(events),
+            )
+        self._event_queue.task_done(len(events))
+        with self._state_lock:
+            self._commit_started_ns = None
+            self._completed += len(events)
+            self._latency_monitor.record(
+                completed_ns=monotonic_ns(), elapsed_ns=elapsed_ns
+            )
+
+    @staticmethod
+    def _apply_counter_reset(
+        connection: sqlite3.Connection, pending: PendingCounterReset
+    ) -> None:
+        """FIFOの位置でresetをcommitし、対象変更時はwidgetも原子的に保存する。"""
+        try:
+            repository = CounterResetRepository(connection)
+            if pending.widget is None:
+                pending.result = repository.create(
+                    widget_id=pending.widget_id, reset_at_ms=pending.reset_at_ms
+                )
+            else:
+                WidgetRepository(connection).update_with_counter_reset(
+                    pending.widget, reset_at_ms=pending.reset_at_ms
+                )
+                pending.result = repository.latest(pending.widget_id)
+        except (ValueError, sqlite3.IntegrityError) as error:
+            # 削除済みwidget等の要求拒否は、入力writer自体の保存障害ではない。
+            pending.error = error
+        except Exception as error:
+            pending.error = error
+            raise
+        finally:
+            pending.completed.set()
 
     def _set_failure(self, error: Exception) -> None:
         """失敗を保持し、daemon側の次回loopでCriticalへ伝える。"""
@@ -399,6 +451,8 @@ def _log_slow_commit(
     batch_count: int = 1,
 ) -> None:
     """DB workerで遅れたcommitを記録する。"""
+    if isinstance(event, PendingCounterReset):
+        raise TypeError("counter reset is not an input/output event")
     if isinstance(event, PendingInputEvent):
         event_kind = "input"
         channel_id = event.channel_id
@@ -422,6 +476,8 @@ def _log_slow_commit(
 
 def _event_write(event: PendingDatabaseEvent) -> EventWrite:
     """Queue eventをDB writer向けの不変値へ変換する。"""
+    if isinstance(event, PendingCounterReset):
+        raise TypeError("counter reset is not an input/output event")
     if isinstance(event, PendingInputEvent):
         return InputEventWrite(
             session_id=event.session_id,

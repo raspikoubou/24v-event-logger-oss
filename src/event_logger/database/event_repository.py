@@ -200,8 +200,9 @@ class EventRepository:
         kinds: Sequence[EventKind] | None = None,
         limit: int | None = None,
         offset: int = 0,
+        descending: bool = False,
     ) -> list[InputEvent]:
-        """期間 `[start_ms, end_ms)` のeventを古い順で返す。"""
+        """期間 `[start_ms, end_ms)` のeventを返す。既定は時刻・IDの昇順。"""
         if start_ms >= end_ms:
             raise ValueError("start_ms must be before end_ms")
         if limit is not None and limit < 1:
@@ -219,10 +220,11 @@ class EventRepository:
             placeholders = ", ".join("?" for _ in kinds)
             clauses.append(f"kind IN ({placeholders})")
             parameters.extend(int(kind) for kind in kinds)
+        order = "DESC" if descending else "ASC"
         query = (
             "SELECT * FROM events WHERE "
             + " AND ".join(clauses)
-            + " ORDER BY ts_utc_ms, id"
+            + f" ORDER BY ts_utc_ms {order}, id {order}"
         )
         if limit is not None:
             query += " LIMIT ? OFFSET ?"
@@ -355,6 +357,29 @@ class EventRepository:
             ).fetchone()
         return _event_from_row(row) if row is not None else None
 
+    def last_edge_between(
+        self, *, channel_id: int, value: int, start_ms: int, end_ms: int
+    ) -> InputEvent | None:
+        """選択期間の最新edgeを、履歴を展開せずevent ID順で返す。"""
+        _validate_channel_ids([channel_id])
+        if value not in (0, 1) or start_ms >= end_ms:
+            raise ValueError("edge value or period is invalid")
+        row = self._connection.execute(
+            """
+            SELECT id FROM events INDEXED BY idx_events_edge_count
+            WHERE channel_id = ? AND value = ? AND kind = ?
+              AND ts_utc_ms >= ? AND ts_utc_ms < ?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (channel_id, value, int(EventKind.EDGE), start_ms, end_ms),
+        ).fetchone()
+        if row is None:
+            return None
+        event = self._connection.execute(
+            "SELECT * FROM events WHERE id = ?", (int(row[0]),)
+        ).fetchone()
+        return _event_from_row(event) if event is not None else None
+
     def list_after_id(
         self,
         *,
@@ -480,5 +505,3 @@ class EventRepository:
             parameters,
         ).fetchone()
         return int(row[0])
-
-

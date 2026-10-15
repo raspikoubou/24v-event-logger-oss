@@ -601,7 +601,16 @@ def _event_list_rows(
                             },
                         )
                     )
-    rows.sort(key=lambda row: (row[0], str(row[1]["id"])), reverse=True)
+    # 同一msではログ画面と同じrecord type・数値ID順にする。文字列比較では
+    # input:9がinput:10より新しくなり、表示件数の境界で新しい記録を落とす。
+    rows.sort(
+        key=lambda row: (
+            row[0],
+            str(row[1]["id"]).partition(":")[0],
+            int(str(row[1]["id"]).partition(":")[2]),
+        ),
+        reverse=True,
+    )
     return [row[1] for row in rows[:raw_limit]]
 
 

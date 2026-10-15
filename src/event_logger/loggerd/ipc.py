@@ -13,6 +13,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from event_logger.domain.widgets import (
+    Widget,
+    WidgetSize,
+    WidgetType,
+    normalize_widget_config,
+)
+
 MAX_MESSAGE_BYTES = 64 * 1024
 
 
@@ -25,6 +32,7 @@ class ControlCommand(StrEnum):
     TEST_OUTPUT = "test_output"
     END_OUTPUT_TEST = "end_output_test"
     RELOAD_CONFIG = "reload_config"
+    RESET_COUNTER = "reset_counter"
 
 
 class IpcProtocolError(ValueError):
@@ -49,11 +57,20 @@ class ControlRequest:
     channel: int | None = None
     duration_ms: int | None = None
     request_id: str | None = None
+    widget_id: str | None = None
+    widget: Widget | None = None
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, object]) -> ControlRequest:
         """JSON objectを検証してControlRequestへ変換する。"""
-        allowed = {"command", "channel", "duration_ms", "request_id"}
+        allowed = {
+            "command",
+            "channel",
+            "duration_ms",
+            "request_id",
+            "widget_id",
+            "widget",
+        }
         unknown = set(payload) - allowed
         if unknown:
             raise IpcProtocolError(f"unknown request fields: {sorted(unknown)}")
@@ -82,11 +99,30 @@ class ControlRequest:
             raise IpcProtocolError(
                 "channel and duration_ms are only valid for test_output"
             )
+        widget_id = payload.get("widget_id")
+        widget = None
+        if command is ControlCommand.RESET_COUNTER:
+            if (
+                not isinstance(widget_id, str)
+                or not 0 < len(widget_id) <= 100
+                or request_id is None
+            ):
+                raise IpcProtocolError(
+                    "reset_counter requires widget_id and request_id"
+                )
+            if payload.get("widget") is not None:
+                widget = _counter_widget(payload["widget"])
+                if widget.id != widget_id:
+                    raise IpcProtocolError("widget id does not match reset target")
+        elif widget_id is not None or payload.get("widget") is not None:
+            raise IpcProtocolError("widget fields are only valid for reset_counter")
         return cls(
             command=command,
             channel=channel,
             duration_ms=duration_ms,
             request_id=request_id,
+            widget_id=widget_id if isinstance(widget_id, str) else None,
+            widget=widget,
         )
 
     def to_mapping(self) -> dict[str, object]:
@@ -98,6 +134,19 @@ class ControlRequest:
             payload["duration_ms"] = self.duration_ms
         if self.request_id is not None:
             payload["request_id"] = self.request_id
+        if self.widget_id is not None:
+            payload["widget_id"] = self.widget_id
+        if self.widget is not None:
+            payload["widget"] = {
+                "id": self.widget.id,
+                "type": self.widget.widget_type.value,
+                "title": self.widget.title,
+                "config": dict(self.widget.config),
+                "size": self.widget.size.value,
+                "sort_order": self.widget.sort_order,
+                "enabled": self.widget.enabled,
+                "updated_at_ms": self.widget.updated_at_ms,
+            }
         return payload
 
 
@@ -284,3 +333,48 @@ def _optional_int(value: object, field_name: str) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise IpcProtocolError(f"{field_name} must be an integer")
     return value
+
+
+def _counter_widget(payload: object) -> Widget:
+    """固定スキーマのcounter設定だけをwriterへ渡せる形へ変換する。"""
+    if not isinstance(payload, dict) or set(payload) != {
+        "id",
+        "type",
+        "title",
+        "config",
+        "size",
+        "sort_order",
+        "enabled",
+        "updated_at_ms",
+    }:
+        raise IpcProtocolError("counter widget fields are invalid")
+    if not all(
+        isinstance(payload[key], str) for key in ("id", "type", "title", "size")
+    ):
+        raise IpcProtocolError("counter widget text fields are invalid")
+    config = payload["config"]
+    if not isinstance(config, dict) or not isinstance(payload["enabled"], bool):
+        raise IpcProtocolError("counter widget config or enabled is invalid")
+    order = _optional_int(payload["sort_order"], "sort_order")
+    updated_ms = _optional_int(payload["updated_at_ms"], "updated_at_ms")
+    if order is None or updated_ms is None or updated_ms < 0:
+        raise IpcProtocolError("counter widget order or timestamp is invalid")
+    try:
+        widget = Widget(
+            id=payload["id"],
+            widget_type=WidgetType(payload["type"]),
+            title=payload["title"],
+            config=normalize_widget_config(config),
+            size=WidgetSize(payload["size"]),
+            sort_order=order,
+            enabled=payload["enabled"],
+            updated_at_ms=updated_ms,
+        )
+    except (TypeError, ValueError) as error:
+        raise IpcProtocolError(str(error)) from error
+    if (
+        widget.widget_type is not WidgetType.EVENT_COUNT
+        or config.get("count_mode") != "reset"
+    ):
+        raise IpcProtocolError("only reset-based counter settings are supported")
+    return widget

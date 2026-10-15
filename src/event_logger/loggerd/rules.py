@@ -182,11 +182,19 @@ class OutputRuleRunner:
             self._paused_for_maintenance = True
             if not self._owners_active:
                 return
+            first_error: Exception | None = None
             for rule in self._rules:
-                self._output_manager.release_rule(
-                    rule.condition.output_channel,
-                    rule.id,
-                )
+                try:
+                    self._output_manager.release_rule(
+                        rule.condition.output_channel,
+                        rule.id,
+                    )
+                except Exception as error:
+                    # 1 OUTの異常で、他の条件通知のOFFまで中断しない。
+                    if first_error is None:
+                        first_error = error
+            if first_error is not None:
+                raise first_error
             self._owners_active = False
 
     def _resume_owners(self) -> None:
@@ -220,6 +228,8 @@ class OutputRuleRunner:
     def tick(self) -> None:
         """全ruleを評価し、成立状態をOutputManagerへ反映する。"""
         with self._lock:
+            if self._paused_for_maintenance:
+                return
             now_ns = self._clock.now_monotonic_ns()
             actions: list[tuple[int, bool]] = []
             for rule in self._rules:

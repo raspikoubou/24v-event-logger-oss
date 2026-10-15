@@ -6,6 +6,7 @@ DB接続は要求ごとに生成し、ストリーミング応答の終了後ま
 
 from __future__ import annotations
 
+import socket
 import sqlite3
 from collections.abc import Callable, Iterable, Iterator
 from contextvars import ContextVar, Token
@@ -60,6 +61,68 @@ _REQUEST_WEB_CONTEXT: ContextVar[WebContext | None] = ContextVar(
 )
 
 
+class _HttpInputLimitMiddleware:
+    """製品UIが送らない転送形式と過大bodyを、解析・DB接続前に拒否する。"""
+
+    MAX_BODY_BYTES = 1024 * 1024
+
+    def __init__(self, application: Callable[..., Iterable[bytes]]) -> None:
+        """フォームとJSONの既知長bodyだけを受けるWSGI境界を作る。"""
+        self._application = application
+
+    def __call__(
+        self, environ: dict[str, Any], start_response: Callable[..., Any]
+    ) -> Iterable[bytes]:
+        """chunked本文を読まずに拒否し、keepaliveの残body待ちも終了する。"""
+        response = self.reject_request(environ, start_response)
+        if response is not None:
+            return response
+        return self._application(environ, start_response)
+
+    def reject_request(
+        self, environ: dict[str, Any], start_response: Callable[..., Any]
+    ) -> Iterable[bytes] | None:
+        """不適切なbodyだけを拒否する。認証・変更lockより前に呼ぶ。"""
+        status = None
+        if environ.get("HTTP_TRANSFER_ENCODING"):
+            status = "400 Bad Request"
+        else:
+            try:
+                length = int(environ.get("CONTENT_LENGTH") or "0")
+            except (ValueError, TypeError):
+                status = "400 Bad Request"
+            else:
+                if length < 0:
+                    status = "400 Bad Request"
+                elif length > self.MAX_BODY_BYTES:
+                    status = "413 Content Too Large"
+        if status is None:
+            return None
+        # GunicornはWSGIのConnection response headerを無視し、keepalive前に
+        # 未読bodyをdrainする。受信側だけ閉じて、未終端chunkの再解析を防ぐ。
+        # 送信側は開いておき、拒否応答をブラウザーへ返す。
+        transport = environ.get("gunicorn.socket")
+        if transport is not None:
+            try:
+                transport.shutdown(socket.SHUT_RD)
+            except OSError:
+                # 切断済みでもbodyへ触れず、通常の応答終了処理へ任せる。
+                pass
+        body = (
+            b'{"ok":false,"error":{"code":"INVALID_HTTP_BODY",'
+            b'"message":"Request body is unsupported or too large"}}'
+        )
+        start_response(
+            status,
+            [
+                ("Content-Type", "application/json"),
+                ("Content-Length", str(len(body))),
+                ("Connection", "close"),
+            ],
+        )
+        return [body]
+
+
 class _ConfigurationRequestMiddleware:
     """設定の保存・daemon反映・復元を、認証確認前から要求単位で直列化する。"""
 
@@ -67,11 +130,15 @@ class _ConfigurationRequestMiddleware:
         """製品の単一Gunicorn worker内で、設定と共有認証の整合性を守る。"""
         self._application = application
         self._lock = RLock()
+        self._input_limits = _HttpInputLimitMiddleware(application)
 
     def __call__(
         self, environ: dict[str, Any], start_response: Callable[..., Any]
     ) -> Iterable[bytes]:
         """読取りは並行させ、変更要求の認証・保存・反映確認を分離しない。"""
+        rejected = self._input_limits.reject_request(environ, start_response)
+        if rejected is not None:
+            return rejected
         if environ.get("REQUEST_METHOD") in {"GET", "HEAD", "OPTIONS"} or (
             environ.get("PATH_INFO") in {"/api/update", "/api/system/reboot"}
         ):

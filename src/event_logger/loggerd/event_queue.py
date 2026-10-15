@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass
-from threading import Condition
+from dataclasses import dataclass, field
+from threading import Condition, Event
 from time import monotonic, monotonic_ns
 
-from event_logger.common.models import EventKind, OutputSource
+from event_logger.common.models import CounterReset, EventKind, OutputSource
+from event_logger.domain.widgets import Widget
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +38,19 @@ class PendingOutputEvent:
     clock_synced: bool
 
 
-type PendingDatabaseEvent = PendingInputEvent | PendingOutputEvent
+@dataclass(slots=True)
+class PendingCounterReset:
+    """先行eventのcommit後に保存するreset。Eventでworkerの結果を公開する。"""
+
+    widget_id: str
+    reset_at_ms: int
+    widget: Widget | None = None
+    completed: Event = field(default_factory=Event)
+    result: CounterReset | None = None
+    error: Exception | None = None
+
+
+type PendingDatabaseEvent = PendingInputEvent | PendingOutputEvent | PendingCounterReset
 
 
 class EventQueueFull(RuntimeError):
