@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import subprocess
@@ -109,6 +110,8 @@ class UpdateAgent:
                 archive, version
             )
             staging = staging_path
+            # WebからIDを受け取らず、実際に起動する管理側プロセスへ発行する。
+            attempt_id = secrets.token_hex(16)
             process = subprocess.Popen(
                 [
                     str(self._helper_path),
@@ -124,6 +127,7 @@ class UpdateAgent:
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
                 close_fds=True,
+                env={**os.environ, "EVENT_LOGGER_UPDATE_ATTEMPT_ID": attempt_id},
             )
             self._process = process
             threading.Thread(
@@ -131,7 +135,7 @@ class UpdateAgent:
                 args=(process, staging_path),
                 daemon=True,
             ).start()
-            return {"ok": True, "started": True}
+            return {"ok": True, "started": True, "attempt_id": attempt_id}
         except (OSError, ValueError) as error:
             if staging is not None:
                 shutil.rmtree(staging, ignore_errors=True)

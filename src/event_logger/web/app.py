@@ -90,6 +90,7 @@ from event_logger.web.request_context import (
     _REQUEST_WEB_CONTEXT as _REQUEST_WEB_CONTEXT,
 )
 from event_logger.web.request_context import WebContext as WebContext
+from event_logger.web.request_context import _ConfigurationRequestMiddleware
 from event_logger.web.request_context import _create_web_context as _create_web_context
 from event_logger.web.request_context import (
     _DatabaseRequestMiddleware as _DatabaseRequestMiddleware,
@@ -286,6 +287,9 @@ def _finish_app_creation(
                 control_client=control_client,
             ),
         )
+    app.wsgi_app = _ConfigurationRequestMiddleware(  # type: ignore[method-assign]
+        app.wsgi_app
+    )
     app.extensions["event_logger.web_context"] = context
     if isinstance(control_client, _DemoControlClient):
         control_client.set_configuration_digest_provider(
@@ -590,7 +594,7 @@ def _read_update_status(path_value: object) -> dict[str, object] | None:
     return {
         key: value
         for key, value in payload.items()
-        if key in {"status", "version", "message", "updated_at"}
+        if key in {"status", "version", "message", "updated_at", "attempt_id"}
     }
 
 

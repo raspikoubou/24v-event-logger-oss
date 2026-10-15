@@ -2,16 +2,38 @@
 
 from __future__ import annotations
 
-from flask import Flask
+import hashlib
+import json
+
+from flask import Flask, request
 
 from event_logger.maintenance.update import (
     GitHubReleaseClient,
+    ReleaseInfo,
     UpdateError,
+    UpdateOutcomeUnknown,
     download_and_verify,
     is_newer_version,
     launch_updater,
     request_reboot,
 )
+
+
+def _release_token(release: ReleaseInfo) -> str:
+    """確認時の版とasset情報を、適用時の再取得結果へ対応付ける。"""
+    identity = [
+        release.tag,
+        release.version,
+        release.archive.name,
+        release.archive.url,
+        release.archive.size,
+        release.archive.api_url,
+        release.checksums.name,
+        release.checksums.url,
+        release.checksums.size,
+        release.checksums.api_url,
+    ]
+    return hashlib.sha256(json.dumps(identity).encode("utf-8")).hexdigest()
 
 
 def _register_update_routes(app: Flask, demo: bool) -> None:
@@ -27,8 +49,6 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
     @app.post("/api/system/reboot")
     def reboot_system() -> Response:
         """確認後の本体再起動を、root権限のないWebから管理agentへ依頼する。"""
-        from flask import request
-
         # 固定操作に任意引数を付けられると誤解させない。CSRF・共有passwordは
         # 他の変更endpointと同じbefore_request境界で検証済み。
         if request.get_data():
@@ -82,6 +102,7 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
                 "available": is_newer_version(current, release.version),
                 "release_url": release.url,
                 "notes": release.notes,
+                "release_token": _release_token(release),
                 "status": _read_update_status(app.config.get("UPDATE_STATUS_FILE")),
             }
         )
@@ -97,8 +118,28 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
                 503,
             )
         current = str(app.config["APP_VERSION"])
+        payload = request.get_json(silent=True)
+        if (
+            not isinstance(payload, dict)
+            or not isinstance(payload.get("expected_version"), str)
+            or not isinstance(payload.get("release_token"), str)
+        ):
+            return _error(
+                "UPDATE_CONFIRMATION_REQUIRED",
+                "更新内容を確認し直してから適用してください。",
+                409,
+            )
         try:
             release = GitHubReleaseClient(repository).latest()
+            if (
+                release.version != payload["expected_version"]
+                or _release_token(release) != payload["release_token"]
+            ):
+                return _error(
+                    "UPDATE_TARGET_CHANGED",
+                    "配布内容が変更されました。更新内容を確認し直してください。",
+                    409,
+                )
             if not is_newer_version(current, release.version):
                 return _error(
                     "UPDATE_NOT_AVAILABLE",
@@ -109,7 +150,10 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
                 release,
                 work_dir=str(app.config["UPDATE_WORK_DIR"]),
             )
-            launch_updater(
+            # agentへ依頼する直前の記録を返し、確認画面を開いた後に更新された
+            # 前回結果も、同じ版への再試行の結果として誤認させない。
+            previous_status = _read_update_status(app.config.get("UPDATE_STATUS_FILE"))
+            attempt_id = launch_updater(
                 helper_path=str(app.config["UPDATE_HELPER"]),
                 archive_path=archive_path,
                 checksum_path=checksum_path,
@@ -120,13 +164,30 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
                     else None
                 ),
             )
+        except UpdateOutcomeUnknown:
+            # helperの起動と応答の配送は別。応答消失を確定した失敗と返さず、
+            # 依頼直前の状態を除外しながら今回の結果を監視させる。
+            response = _ok(
+                {
+                    "started": False,
+                    "outcome_unknown": True,
+                    "current_version": current,
+                    "target_version": release.version,
+                    "previous_status": previous_status,
+                    "attempt_id": None,
+                }
+            )
+            response.status_code = 202
+            return response
         except (UpdateError, ValueError, OSError) as error:
-            return _error("UPDATE_FAILED", str(error), 502)
+            return _error("UPDATE_NOT_STARTED", str(error), 502)
         response = _ok(
             {
                 "started": True,
                 "current_version": current,
                 "target_version": release.version,
+                "previous_status": previous_status,
+                "attempt_id": attempt_id,
                 "status": _read_update_status(app.config.get("UPDATE_STATUS_FILE")),
             }
         )

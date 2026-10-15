@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import socket
 import subprocess
 import tempfile
@@ -21,6 +22,10 @@ class UpdateError(RuntimeError):
     """Release確認・asset検証・updater起動に失敗した。"""
 
 
+class UpdateOutcomeUnknown(UpdateError):
+    """管理agentへ送信した依頼の起動結果を確定できない。"""
+
+
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 """Webから受け取るRelease archiveの上限。"""
 
@@ -32,6 +37,7 @@ class ReleaseAsset:
     name: str
     url: str
     size: int
+    api_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,12 +98,22 @@ class GitHubReleaseClient:
             name = raw_asset.get("name")
             download_url = raw_asset.get("browser_download_url")
             size = raw_asset.get("size", 0)
+            asset_id = raw_asset.get("id")
             if (
                 isinstance(name, str)
                 and isinstance(download_url, str)
                 and isinstance(size, int)
+                and type(asset_id) is int
+                and asset_id > 0
             ):
-                assets[name] = ReleaseAsset(name, download_url, size)
+                # browser_download_urlは同名再アップロード後も同じになり得る。
+                # 不変のasset IDからAPI URLを組み立て、確認したファイルだけを
+                # 取得する。GitHub由来の任意URLをそのまま信用しない。
+                api_url = (
+                    f"https://api.github.com/repos/{self._repository}"
+                    f"/releases/assets/{asset_id}"
+                )
+                assets[name] = ReleaseAsset(name, download_url, size, api_url)
         version = _normalize_version(tag)
         archive = assets.get(f"event-logger-{version}.tar.zst")
         checksums = assets.get("SHA256SUMS")
@@ -180,9 +196,14 @@ def download_and_verify(
             if release.archive.size > 0
             else MAX_ARCHIVE_BYTES
         )
-        _download(release.archive.url, archive_path, timeout, max_bytes=archive_limit)
         _download(
-            release.checksums.url,
+            release.archive.api_url or release.archive.url,
+            archive_path,
+            timeout,
+            max_bytes=archive_limit,
+        )
+        _download(
+            release.checksums.api_url or release.checksums.url,
             checksum_path,
             timeout,
             max_bytes=16 * 1024 * 1024,
@@ -207,21 +228,23 @@ def launch_updater(
     checksum_path: str | os.PathLike[str],
     version: str,
     socket_path: str | os.PathLike[str] | None = None,
-) -> None:
+) -> str | None:
     """固定pathのupdaterだけを引数分離で起動する。
 
     通常のWeb service userはroot権限を持たないため、productionではrootで
     常駐するupdate-agentのUnix socketへ依頼する。socket未指定時だけ、root
     からの開発・保守実行としてhelperを直接起動する。
+
+    Returns:
+        今回の処理ID。IDを返さない旧agentの場合だけNone。
     """
     if socket_path is not None:
-        _request_update_agent(
+        return _request_update_agent(
             socket_path,
             archive_path=archive_path,
             checksum_path=checksum_path,
             version=version,
         )
-        return
     helper = Path(helper_path)
     if not helper.is_file() or not os.access(helper, os.X_OK):
         raise UpdateError("configured update helper is not executable")
@@ -230,6 +253,7 @@ def launch_updater(
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", version):
         raise UpdateError("release version is invalid")
     try:
+        attempt_id = secrets.token_hex(16)
         subprocess.Popen(
             [
                 str(helper),
@@ -245,14 +269,22 @@ def launch_updater(
             stderr=subprocess.DEVNULL,
             start_new_session=True,
             close_fds=True,
+            env={**os.environ, "EVENT_LOGGER_UPDATE_ATTEMPT_ID": attempt_id},
         )
     except (OSError, ValueError) as error:
         raise UpdateError(f"update helper could not be started: {error}") from error
+    return attempt_id
 
 
 def _download(url: str, destination: Path, timeout: float, *, max_bytes: int) -> None:
     """HTTPS assetを上限付きstreamとして保存する。"""
-    request = Request(url, headers={"User-Agent": "event-logger-updater"})
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "event-logger-updater",
+            "Accept": "application/octet-stream",
+        },
+    )
     try:
         with (
             urlopen(request, timeout=timeout) as response,
@@ -291,7 +323,7 @@ def _request_update_agent(
     archive_path: str | os.PathLike[str],
     checksum_path: str | os.PathLike[str],
     version: str,
-) -> None:
+) -> str | None:
     """root update-agentへ固定schemaの依頼を送る。"""
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", version):
         raise UpdateError("release version is invalid")
@@ -312,12 +344,19 @@ def _request_update_agent(
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
             connection.settimeout(30.0)
             connection.connect(str(socket_path))
-            connection.sendall(payload)
-            response = _read_agent_response(connection)
+            try:
+                connection.sendall(payload)
+                response = _read_agent_response(connection)
+            except (OSError, UpdateError) as error:
+                # 接続後は、返答だけを失ってhelperが起動している場合がある。
+                # 未起動と断定せず、Webに状態監視を継続させる。
+                raise UpdateOutcomeUnknown(
+                    "更新依頼の応答を確認できません。実際の更新状態を確認します。"
+                ) from error
     except (OSError, TimeoutError) as error:
         raise UpdateError(f"update-agent is unavailable: {error}") from error
     if not isinstance(response, dict):
-        raise UpdateError("update-agent returned an invalid response")
+        raise UpdateOutcomeUnknown("update-agent returned an invalid response")
     if response.get("ok") is not True:
         message = response.get("message")
         raise UpdateError(
@@ -325,6 +364,9 @@ def _request_update_agent(
             if isinstance(message, str)
             else "update-agent rejected request"
         )
+    # 旧agentはIDを返さない。更新自体を拒否せず画面側の旧形式判定へ渡す。
+    attempt_id = response.get("attempt_id")
+    return attempt_id if isinstance(attempt_id, str) else None
 
 
 def request_reboot(socket_path: str | os.PathLike[str]) -> None:

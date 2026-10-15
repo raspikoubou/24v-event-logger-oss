@@ -33,6 +33,16 @@ EXCLUDED_FILE_NAMES = frozenset(
         "check_release_notes.py",
         "test_write_diagnostics.py",
         "test_write_diagnostics.cjs",
+        "test_auth_sessions.py",
+        "test_auth_sessions.cjs",
+        "test_update_monitor.cjs",
+        "test_duration_display.cjs",
+        "test_timeline_scroll.cjs",
+        "test_update_status.py",
+        "test_release_asset.py",
+        "test_configuration_transactions.py",
+        "test_frontend_policies.cjs",
+        "test_release_boundaries.py",
     }
 )
 FORBIDDEN_FILE_NAMES = frozenset({".env", "event-logger.env"})

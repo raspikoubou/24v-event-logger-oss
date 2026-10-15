@@ -17,6 +17,9 @@ class SharedPasswordAuth:
         self._lock = RLock()
         self._enabled = enabled
         self._password_hash = password_hash
+        # Cookieにはhashを出さず、現在の認証設定にだけ有効な乱数を持たせる。
+        # Web再起動でも既存ログインを失効させ、再認証を要求する。
+        self._session_generation = secrets.token_urlsafe(32)
         if enabled and not password_hash:
             raise ValueError("password_hash is required when auth is enabled")
 
@@ -35,11 +38,36 @@ class SharedPasswordAuth:
             return True
         return verify_password(password, password_hash)
 
+    def authenticate(self, password: str) -> str | None:
+        """照合した認証設定に対応するCookie用世代を返す。"""
+        # 照合後に別threadでpasswordが変わっても、新しい世代を旧passwordへ
+        # 発行しないよう、照合と世代取得を同じlock内で完結させる。
+        with self._lock:
+            if (
+                not self._enabled
+                or self._password_hash is None
+                or not verify_password(password, self._password_hash)
+            ):
+                return None
+            return self._session_generation
+
+    def accepts_session(self, generation: object) -> bool:
+        """現在の共有認証に対応するログインだけを受け付ける。"""
+        with self._lock:
+            return not self._enabled or (
+                isinstance(generation, str)
+                and generation.isascii()
+                and secrets.compare_digest(generation, self._session_generation)
+            )
+
     def configure(self, *, enabled: bool, password_hash: str | None) -> None:
         """設定画面から共有認証の有効状態を更新する。"""
         if enabled and not password_hash:
             raise ValueError("password_hash is required when auth is enabled")
         with self._lock:
+            if enabled != self._enabled or password_hash != self._password_hash:
+                # 無効化→同じpasswordで再有効化しても古いCookieを復活させない。
+                self._session_generation = secrets.token_urlsafe(32)
             self._enabled = enabled
             self._password_hash = password_hash
 
