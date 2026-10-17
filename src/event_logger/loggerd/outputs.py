@@ -164,6 +164,12 @@ class OutputManager:
         """正常終了時に全OUTをOFFへ戻す。"""
         first_error: Exception | None = None
         try:
+            try:
+                # maintenance中の終了でもTESTのOFF履歴とwatchdogの物理OFF時刻を
+                # 保存する。先に全OUTをOFF/clearすると、その履歴を失ってしまう。
+                self.end_output_test()
+            except Exception as error:
+                first_error = error
             for channel_id in sorted(self._outputs):
                 try:
                     self._set_state(

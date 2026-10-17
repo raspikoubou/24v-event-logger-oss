@@ -389,6 +389,14 @@ class LoggerDaemon:
             if stop_error is None and was_logging:
                 self._record_audit("logging_stopped")
         try:
+            # maintenance中はservice.stop()がsessionを持たないため何もしない。
+            # GPIO/DBを閉じる前に、診断テストのOFF・履歴・timer終了も必ず済ませる。
+            try:
+                self._outputs.shutdown_off()
+            except Exception as error:
+                _LOGGER.exception("failed to shut down outputs before GPIO close")
+                if stop_error is None:
+                    stop_error = error
             self._control.close()
         finally:
             try:

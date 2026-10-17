@@ -6,8 +6,10 @@ DB接続は要求ごとに生成し、ストリーミング応答の終了後ま
 
 from __future__ import annotations
 
+import io
 import socket
 import sqlite3
+import threading
 from collections.abc import Callable, Iterable, Iterator
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -65,6 +67,7 @@ class _HttpInputLimitMiddleware:
     """製品UIが送らない転送形式と過大bodyを、解析・DB接続前に拒否する。"""
 
     MAX_BODY_BYTES = 1024 * 1024
+    BODY_TIMEOUT_SECONDS = 10.0
 
     def __init__(self, application: Callable[..., Iterable[bytes]]) -> None:
         """フォームとJSONの既知長bodyだけを受けるWSGI境界を作る。"""
@@ -74,10 +77,57 @@ class _HttpInputLimitMiddleware:
         self, environ: dict[str, Any], start_response: Callable[..., Any]
     ) -> Iterable[bytes]:
         """chunked本文を読まずに拒否し、keepaliveの残body待ちも終了する。"""
-        response = self.reject_request(environ, start_response)
+        response = self.prepare_request(environ, start_response)
         if response is not None:
             return response
         return self._application(environ, start_response)
+
+    def prepare_request(
+        self, environ: dict[str, Any], start_response: Callable[..., Any]
+    ) -> Iterable[bytes] | None:
+        """bodyを設定lockの外で受信し、途中停止した接続の占有時間を制限する。"""
+        rejected = self.reject_request(environ, start_response)
+        if rejected is not None:
+            return rejected
+        length = int(environ.get("CONTENT_LENGTH") or "0")
+        transport = environ.get("gunicorn.socket")
+        if length == 0 or transport is None:
+            return None
+        deadline_lock = threading.Lock()
+        reading = True
+        expired = False
+
+        def expire() -> None:
+            """小刻みの送信でも全体の受信期限を延長させない。"""
+            nonlocal expired
+            with deadline_lock:
+                # cancelだけでは開始済みcallbackを止められない。body受信後に
+                # keepaliveで再利用されたsocketを旧timerが閉じないよう同期する。
+                if reading:
+                    expired = True
+                    _shutdown_request_input(transport)
+
+        timer = threading.Timer(self.BODY_TIMEOUT_SECONDS, expire)
+        timer.daemon = True
+        timer.start()
+        body = b""
+        try:
+            body = environ["wsgi.input"].read(length)
+        except OSError:
+            # 切断・受信停止はその要求だけを拒否し、変更処理へ到達させない。
+            pass
+        finally:
+            with deadline_lock:
+                reading = False
+            timer.cancel()
+        if expired or len(body) != length:
+            return self._reject_response(
+                environ,
+                start_response,
+                "408 Request Timeout" if expired else "400 Bad Request",
+            )
+        environ["wsgi.input"] = io.BytesIO(body)
+        return None
 
     def reject_request(
         self, environ: dict[str, Any], start_response: Callable[..., Any]
@@ -98,16 +148,19 @@ class _HttpInputLimitMiddleware:
                     status = "413 Content Too Large"
         if status is None:
             return None
+        return self._reject_response(environ, start_response, status)
+
+    @staticmethod
+    def _reject_response(
+        environ: dict[str, Any], start_response: Callable[..., Any], status: str
+    ) -> Iterable[bytes]:
+        """未読bodyの再待機を防ぎ、当該要求だけを終了する。"""
         # GunicornはWSGIのConnection response headerを無視し、keepalive前に
         # 未読bodyをdrainする。受信側だけ閉じて、未終端chunkの再解析を防ぐ。
         # 送信側は開いておき、拒否応答をブラウザーへ返す。
         transport = environ.get("gunicorn.socket")
         if transport is not None:
-            try:
-                transport.shutdown(socket.SHUT_RD)
-            except OSError:
-                # 切断済みでもbodyへ触れず、通常の応答終了処理へ任せる。
-                pass
+            _shutdown_request_input(transport)
         body = (
             b'{"ok":false,"error":{"code":"INVALID_HTTP_BODY",'
             b'"message":"Request body is unsupported or too large"}}'
@@ -123,6 +176,15 @@ class _HttpInputLimitMiddleware:
         return [body]
 
 
+def _shutdown_request_input(transport: Any) -> None:
+    """拒否応答を書けるよう、socketの受信側だけを閉じる。"""
+    try:
+        transport.shutdown(socket.SHUT_RD)
+    except OSError:
+        # 切断済みの場合も通常の応答終了処理へ進む。
+        pass
+
+
 class _ConfigurationRequestMiddleware:
     """設定の保存・daemon反映・復元を、認証確認前から要求単位で直列化する。"""
 
@@ -136,7 +198,7 @@ class _ConfigurationRequestMiddleware:
         self, environ: dict[str, Any], start_response: Callable[..., Any]
     ) -> Iterable[bytes]:
         """読取りは並行させ、変更要求の認証・保存・反映確認を分離しない。"""
-        rejected = self._input_limits.reject_request(environ, start_response)
+        rejected = self._input_limits.prepare_request(environ, start_response)
         if rejected is not None:
             return rejected
         if environ.get("REQUEST_METHOD") in {"GET", "HEAD", "OPTIONS"} or (

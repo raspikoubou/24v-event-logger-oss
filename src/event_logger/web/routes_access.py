@@ -77,6 +77,10 @@ def _register_auth_routes(app: Flask, auth: SharedPasswordAuth) -> None:
             if (
                 not isinstance(expected, str)
                 or not isinstance(provided, str)
+                # compare_digestのstr比較はASCIIだけを受け付ける。フォームや
+                # headerの任意文字を500へ変えず、通常のCSRF拒否として扱う。
+                or not expected.isascii()
+                or not provided.isascii()
                 or not secrets.compare_digest(expected, provided)
             ):
                 return _error("CSRF_FAILED", "csrf token is invalid", 400)

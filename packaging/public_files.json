@@ -53,6 +53,8 @@
   "packaging/test_configuration_transactions.py",
   "packaging/test_frontend_policies.cjs",
   "packaging/test_release_boundaries.py",
+  "packaging/test_shutdown_boundaries.py",
+  "packaging/test_update_staging.py",
   "packaging/test_duration_display.cjs",
   "packaging/test_release_asset.py",
   "packaging/test_timeline_scroll.cjs",

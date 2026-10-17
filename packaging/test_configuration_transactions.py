@@ -14,7 +14,9 @@ from event_logger.web.auth import hash_password, verify_password
 from event_logger.web.control_service import _configuration_fingerprint
 
 
-def test_failed_reload_does_not_undo_another_successful_save(tmp_path: Path) -> None:
+def test_failed_reload_does_not_undo_another_successful_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """反映確認中の保存と後続の無効化を競合させ、無効化の成功を守る。"""
     reloading, release_first, second_entered = Event(), Event(), Event()
 
@@ -67,7 +69,7 @@ def test_failed_reload_does_not_undo_another_successful_save(tmp_path: Path) -> 
             second_entered.set()
         return serialized(environ, start)
 
-    app.wsgi_app = observed
+    monkeypatch.setattr(app, "wsgi_app", observed)
     results: dict[str, int] = {}
 
     def save(name: str, payload: dict[str, object]) -> None:
@@ -148,7 +150,7 @@ def test_password_save_and_authentication_switch_are_serialized(
             second_entered.set()
         return serialized(environ, start)
 
-    app.wsgi_app = observed
+    monkeypatch.setattr(app, "wsgi_app", observed)
     results: dict[int, int] = {}
 
     def save(index: int, password: str) -> None:
