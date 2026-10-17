@@ -9,6 +9,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
+from urllib.request import Request
 
 import pytest
 
@@ -54,12 +55,16 @@ def test_download_uses_the_confirmed_asset_id(
         f"{hashlib.sha256(body).hexdigest()}  event-logger-1.0.2.tar.zst\n"
     ).encode()
     responses = iter([json.dumps(payload).encode(), body, checksum])
-    requests = []
+    requests: list[Request] = []
 
-    def open_response(request: object, **_kwargs: object) -> io.BytesIO:
+    class Response(io.BytesIO):
+        """download応答と同じheaders属性を持つメモリstream。"""
+
+        headers: dict[str, str] = {}
+
+    def open_response(request: Request, **_kwargs: object) -> Response:
         requests.append(request)
-        response = io.BytesIO(next(responses))
-        response.headers = {}
+        response = Response(next(responses))
         return response
 
     monkeypatch.setattr("event_logger.maintenance.update.urlopen", open_response)

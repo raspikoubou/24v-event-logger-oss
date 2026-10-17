@@ -43,6 +43,8 @@ EXCLUDED_FILE_NAMES = frozenset(
         "test_configuration_transactions.py",
         "test_frontend_policies.cjs",
         "test_release_boundaries.py",
+        "test_shutdown_boundaries.py",
+        "test_update_staging.py",
     }
 )
 FORBIDDEN_FILE_NAMES = frozenset({".env", "event-logger.env"})

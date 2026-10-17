@@ -24,13 +24,15 @@ from event_logger.database.repositories import (
     OutputRuleRepository,
     SessionRepository,
     SettingsRepository,
+    WidgetRepository,
 )
 from event_logger.domain.outputs import OutputOwnerRegistry
+from event_logger.domain.widgets import WidgetType
 from event_logger.hardware.fake_gpio import FakeGPIO
 from event_logger.hardware.gpiozero_adapter import GpioZeroHat
 from event_logger.hardware.ports import OutputPort
 from event_logger.loggerd.db_writer import BackgroundEventWriter
-from event_logger.loggerd.event_queue import EventQueue
+from event_logger.loggerd.event_queue import EventQueue, PendingCounterReset
 from event_logger.loggerd.ipc import (
     ControlCommand,
     ControlRequest,
@@ -135,6 +137,13 @@ class LoggerDaemon:
             output_manager=self._outputs,
             confirmed_input_callback=self._rule_runner.observe,
         )
+        # 開始時の再読とcallbackの順序だけを保護する。開始処理ではGPIO読取りや
+        # snapshotのDB保存をこのlockの外で行い、追加の待機区間を作らない。
+        self._input_callback_lock = threading.RLock()
+        self._input_sequences: dict[int, int] = {}
+        self._counter_reset_requests: dict[
+            str, tuple[ControlRequest, PendingCounterReset]
+        ] = {}
         self._apply_heartbeat_settings()
         heartbeat_enabled, heartbeat_channel, heartbeat_interval = (
             self._heartbeat_settings()
@@ -380,6 +389,14 @@ class LoggerDaemon:
             if stop_error is None and was_logging:
                 self._record_audit("logging_stopped")
         try:
+            # maintenance中はservice.stop()がsessionを持たないため何もしない。
+            # GPIO/DBを閉じる前に、診断テストのOFF・履歴・timer終了も必ず済ませる。
+            try:
+                self._outputs.shutdown_off()
+            except Exception as error:
+                _LOGGER.exception("failed to shut down outputs before GPIO close")
+                if stop_error is None:
+                    stop_error = error
             self._control.close()
         finally:
             try:
@@ -399,7 +416,11 @@ class LoggerDaemon:
     def _on_input(self, channel_id: int, value: bool) -> None:
         """GPIO callbackではserviceへ値を渡すだけにする。"""
         try:
-            self._service.observe_input(channel_id, value)
+            with self._input_callback_lock:
+                self._input_sequences[channel_id] = (
+                    self._input_sequences.get(channel_id, 0) + 1
+                )
+                self._service.observe_input(channel_id, value)
         except Exception:
             # GPIO Zeroのcallback threadへ例外を返すと、入力監視thread側の
             # エラーだけが残り、Heartbeat停止・OUT OFFが実行されない。
@@ -439,20 +460,10 @@ class LoggerDaemon:
         """allowlist済みcontrol commandをdaemon状態へ適用する。"""
         if request.command is ControlCommand.STATUS:
             return self._status_payload()
+        if request.command is ControlCommand.RESET_COUNTER:
+            return self._reset_counter(request)
         if request.command is ControlCommand.STOP_LOGGING:
-            try:
-                # 停止途中にprocessが終了しても、次回起動で勝手に再開しない。
-                self._settings.set_json(
-                    key="logging_paused",
-                    value=True,
-                    updated_at_ms=self._clock.now_utc_ms(),
-                    audit_action="logging_pause_changed",
-                )
-            finally:
-                # DB保存の失敗は成功ACKにしないが、現在の入力/出力は停止する。
-                self._rule_runner.pause()
-                self._outputs.disable_heartbeat()
-                self._service.enter_maintenance()
+            self._stop_logging()
             self._record_audit("logging_stopped")
             return self._status_payload()
         if request.command is ControlCommand.START_LOGGING:
@@ -519,26 +530,140 @@ class LoggerDaemon:
             return self._status_payload()
         raise ValueError(f"unsupported control command: {request.command}")
 
+    def _stop_logging(self) -> None:
+        """受付を先に閉じ、1つの停止障害でも残りのOUT停止とflag保存を試す。"""
+        if self._service.status is not LoggerStatus.LOGGING:
+            raise RuntimeError("logger is not logging")
+        stop_error: Exception | None = None
+        pause_attempted = False
+
+        def persist_pause() -> None:
+            """入力・OUT停止後、queue保存待ちより前に永続pauseを保存する。"""
+            nonlocal stop_error, pause_attempted
+            pause_attempted = True
+            try:
+                self._settings.set_json(
+                    key="logging_paused",
+                    value=True,
+                    updated_at_ms=self._clock.now_utc_ms(),
+                    audit_action="logging_pause_changed",
+                )
+            except Exception as error:
+                _LOGGER.exception("failed to save logging pause")
+                if stop_error is None:
+                    stop_error = error
+
+        try:
+            self._service.enter_maintenance(on_quiesced=persist_pause)
+        except Exception as error:
+            _LOGGER.exception("failed to stop logging session")
+            self._mark_critical()
+            if stop_error is None:
+                stop_error = error
+        finally:
+            if not pause_attempted:
+                persist_pause()
+        for stop_operation in (
+            self._rule_runner.pause,
+            self._outputs.disable_heartbeat,
+        ):
+            try:
+                stop_operation()
+            except Exception as error:
+                _LOGGER.exception("failed to stop output owner")
+                self._mark_critical()
+                if stop_error is None:
+                    stop_error = error
+        if stop_error is not None:
+            raise stop_error
+
+    def _reset_counter(self, request: ControlRequest) -> Mapping[str, object]:
+        """resetをFIFOへ一度だけ投入し、loopを塞がず同じ要求IDで結果を返す。"""
+        if request.request_id is None or request.widget_id is None:
+            raise ValueError("counter reset requires request_id and widget_id")
+        self._event_writer.raise_if_failed()
+        saved = self._counter_reset_requests.get(request.request_id)
+        if saved is None:
+            # 応答消失時の再送を二重resetにしない。完了分だけを有界に保持する。
+            if len(self._counter_reset_requests) >= 64:
+                for key, (_, operation) in tuple(self._counter_reset_requests.items()):
+                    if operation.completed.is_set():
+                        del self._counter_reset_requests[key]
+                        break
+            if len(self._counter_reset_requests) >= 64:
+                raise RuntimeError("too many pending counter resets")
+            widget = request.widget or WidgetRepository(self._connection).get(
+                request.widget_id
+            )
+            if (
+                widget is None
+                or widget.id != request.widget_id
+                or widget.widget_type is not WidgetType.EVENT_COUNT
+                or widget.config.get("count_mode") != "reset"
+            ):
+                raise ValueError("widget is not a reset-based counter")
+            pending = PendingCounterReset(
+                widget_id=request.widget_id,
+                reset_at_ms=self._clock.now_utc_ms(),
+                widget=request.widget,
+            )
+            self._service.enqueue_counter_reset(pending)
+            self._counter_reset_requests[request.request_id] = (request, pending)
+        else:
+            previous, pending = saved
+            if previous != request:
+                raise ValueError(
+                    "counter reset request_id was reused with other values"
+                )
+        if not pending.completed.is_set():
+            return {"pending": True}
+        if pending.error is not None:
+            raise RuntimeError("counter reset could not be saved") from pending.error
+        if pending.result is None:
+            raise RuntimeError("counter reset has no result")
+        result = pending.result
+        return {
+            "pending": False,
+            "reset": {
+                "id": result.id,
+                "widget_id": result.widget_id,
+                "reset_at_ms": result.reset_at_ms,
+                "after_event_id": result.after_event_id,
+                "carried_count": result.carried_count,
+            },
+        }
+
     def _start_logging_session(self) -> None:
         """現在入力のsnapshotを保存し、callbackを接続して監視を開始する。"""
         # session開始とrule evaluator開始で異なるsnapshotを読むと、同時に
         # 変化した入力だけが片方へ反映されるため、一つのsnapshotを共有する。
         input_values = self._gpio.input_values()
         try:
-            self._service.start(input_values)
+            # 再開時は前sessionのcallbackが既に接続されている。入力受付が
+            # LOGGINGへ変わる前にrule側も初期化し、確定edgeを後から消さない。
             self._rule_runner.start_session(
                 {
                     channel_id: input_values[channel_id]
                     for channel_id in self._service.enabled_channel_ids
                 }
             )
+            self._service.start(input_values)
             # 初回設定後のSTART_LOGGINGでも必ずcallbackを接続する。callback登録前
             # の変化は再読してdebounce候補へ渡し、監視開始直後のedgeを欠落させない。
             self._gpio.attach_input_callbacks(self._on_input)
+            with self._input_callback_lock:
+                read_sequences = dict(self._input_sequences)
             current_values = self._gpio.input_values()
-            for channel_id, value in current_values.items():
-                if value != input_values.get(channel_id):
-                    self._service.observe_input(channel_id, value)
+            with self._input_callback_lock:
+                for channel_id, value in current_values.items():
+                    # 値を読んでから適用するまでに届いたcallbackを優先する。
+                    # 古いON再読が新しいOFFを消すと、次のedgeまで誤状態が残る。
+                    if self._input_sequences.get(channel_id, 0) != (
+                        read_sequences.get(channel_id, 0)
+                    ):
+                        continue
+                    if value != input_values.get(channel_id):
+                        self._service.observe_input(channel_id, value)
             self._apply_heartbeat_settings()
             self._outputs.resume_heartbeat()
             self._record_audit("logging_started")

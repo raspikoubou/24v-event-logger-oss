@@ -188,18 +188,40 @@ class GpioZeroHat:
 
     def all_outputs_off(self) -> None:
         """全OUTをOFFにする。"""
+        first_error: Exception | None = None
         for device in self._outputs.values():
-            device.off()
+            try:
+                device.off()
+            except Exception as error:
+                # 一つのport障害を他のOUTの停止中断へ波及させない。
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
 
     def close(self) -> None:
         """GPIO Zero deviceを明示的に解放する。"""
-        self.all_outputs_off()
-        for device in self._inputs.values():
-            device.close()
-        for device in self._outputs.values():
-            device.close()
+        first_error: Exception | None = None
+        try:
+            self.all_outputs_off()
+        except Exception as error:
+            first_error = error
+        # OFFに失敗しても全deviceの解放を試す。close時の別例外で最初の
+        # 故障を隠さず、診断traceのfdも最後に必ず解放する。
+        for device in (*self._inputs.values(), *self._outputs.values()):
+            try:
+                device.close()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
         if self._callback_trace is not None:
-            self._callback_trace.close()
+            try:
+                self._callback_trace.close()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
 
 
 def _make_callback(

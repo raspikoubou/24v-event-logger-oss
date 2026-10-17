@@ -58,6 +58,7 @@ class OutputManager:
         self._output_test: OutputTest | None = None
         self._output_test_timer: threading.Timer | None = None
         self._output_test_watchdog_expired = False
+        self._output_test_off_event: PendingOutputEvent | None = None
         self._output_test_lock = threading.RLock()
         # Timer threadとdaemon loopが同じGPIO portを触るため、物理操作だけを
         # 直列化する。SQLiteの同期commit待ちでwatchdogのOFFが遅れないよう、
@@ -163,6 +164,12 @@ class OutputManager:
         """正常終了時に全OUTをOFFへ戻す。"""
         first_error: Exception | None = None
         try:
+            try:
+                # maintenance中の終了でもTESTのOFF履歴とwatchdogの物理OFF時刻を
+                # 保存する。先に全OUTをOFF/clearすると、その履歴を失ってしまう。
+                self.end_output_test()
+            except Exception as error:
+                first_error = error
             for channel_id in sorted(self._outputs):
                 try:
                     self._set_state(
@@ -289,6 +296,7 @@ class OutputManager:
                 raise RuntimeError("another output test is already running")
             self._output_test = output_test
             self._output_test_watchdog_expired = False
+            self._output_test_off_event = None
             # threading.Timerは指定時刻どおりに起床する保証がなく、Pi実測でも
             # 5,000ms指定のloopbackがわずかに上限を越えた。最大50ms（指定時間
             # の1%）早く物理OFFを予約し、1ms指定だけは最小1msを保つ。
@@ -301,7 +309,7 @@ class OutputManager:
             timer = threading.Timer(
                 watchdog_delay_ms / 1000,
                 self._output_test_watchdog,
-                args=(channel_id,),
+                args=(channel_id, output_test),
             )
             timer.daemon = True
             self._output_test_timer = timer
@@ -339,7 +347,7 @@ class OutputManager:
         ):
             # FakeClockや、履歴保存中に期限を越えた短い競合窓でも、begin完了
             # 時点で期限超過した物理ONを残さない。
-            self._output_test_watchdog(channel_id)
+            self._output_test_watchdog(channel_id, output_test)
             self.output_test_tick()
         # GPIO/履歴の更新が成功した後は、daemon loopが期限処理を引き継ぐ。
 
@@ -358,11 +366,15 @@ class OutputManager:
             with self._physical_lock:
                 was_active = self._outputs[channel_id].is_active
                 self._outputs[channel_id].off()
+            off_event = self._output_test_off_event
             # 物理OFFを済ませてからstateをclearする。新しいテストがこのOUTを
             # 再利用した直後に、旧期限処理がそれをOFFにすることを防ぐ。
             self._clear_output_test()
         if was_active or watchdog_expired:
-            self._record_output_event(channel_id, False, OutputSource.TEST)
+            if off_event is not None:
+                self._persist_output_event(off_event)
+            else:
+                self._record_output_event(channel_id, False, OutputSource.TEST)
         return True
 
     def end_output_test(self) -> None:
@@ -375,22 +387,40 @@ class OutputManager:
             with self._physical_lock:
                 was_active = self._outputs[output_test.channel_id].is_active
                 self._outputs[output_test.channel_id].off()
+            off_event = self._output_test_off_event
             self._clear_output_test()
         if was_active or watchdog_expired:
-            self._record_output_event(
-                output_test.channel_id,
-                False,
-                OutputSource.TEST,
-            )
+            if off_event is not None:
+                self._persist_output_event(off_event)
+            else:
+                self._record_output_event(
+                    output_test.channel_id,
+                    False,
+                    OutputSource.TEST,
+                )
 
-    def _output_test_watchdog(self, channel_id: int) -> None:
+    def _output_test_watchdog(self, channel_id: int, output_test: OutputTest) -> None:
         """DBへ触れず、期限到達時の物理OFFだけを実行する。"""
         with self._output_test_lock:
-            if self._output_test is None or self._output_test.channel_id != channel_id:
+            # cancelは実行開始済みcallbackを止めない。同じOUTの次テストへ
+            # 古い期限が作用しないよう、channelではなくテスト自体を照合する。
+            if self._output_test is not output_test:
                 return
-            self._output_test_watchdog_expired = True
+            if self._output_test_watchdog_expired:
+                return
             with self._physical_lock:
                 self._outputs[channel_id].off()
+                # DBやloopが遅れても、履歴のOFF時刻は物理操作の時刻を保つ。
+                self._output_test_off_event = PendingOutputEvent(
+                    session_id=self._session_id_provider(),
+                    ts_utc_ms=self._clock.now_utc_ms(),
+                    mono_ns=self._clock.now_monotonic_ns(),
+                    channel_id=channel_id,
+                    value=0,
+                    source=OutputSource.TEST,
+                    clock_synced=self._clock.is_synchronized(),
+                )
+            self._output_test_watchdog_expired = True
 
     def _clear_output_test(self) -> None:
         """出力テスト状態とwatchdog timerを破棄する。"""
@@ -399,6 +429,7 @@ class OutputManager:
             self._output_test_timer = None
             self._output_test = None
             self._output_test_watchdog_expired = False
+            self._output_test_off_event = None
             if timer is not None:
                 timer.cancel()
 

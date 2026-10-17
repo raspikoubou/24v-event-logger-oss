@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING
 
 from flask import Flask
 
+from event_logger.loggerd.ipc import IpcProtocolError, IpcRemoteError
+from event_logger.web.control_service import _save_counter_reset
+
 if TYPE_CHECKING:
     from event_logger.web.app import WebContext
 
@@ -27,7 +30,6 @@ def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
         request,
         sqlite3,
     )
-
 
     @app.post("/api/output-rules")
     def create_output_rule() -> Response:
@@ -52,9 +54,7 @@ def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
             _reload_after_rollback(context)
             return _error(error.code, error.message, 409)
         except (OSError, IpcProtocolError, RuntimeError) as error:
-            context.output_rules.delete(
-                rule.id, ts_utc_ms=context.clock.now_utc_ms()
-            )
+            context.output_rules.delete(rule.id, ts_utc_ms=context.clock.now_utc_ms())
             _reload_after_rollback(context)
             return _error("LOGGERD_UNAVAILABLE", str(error), 503)
         return _ok(_output_rule_payload(rule))
@@ -156,7 +156,6 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
         sqlite3,
     )
 
-
     @app.get("/api/widgets")
     def list_widgets() -> Response:
         """保存済みDashboard widget設定を返す。"""
@@ -201,14 +200,13 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
                 # retention済みの旧条件のcarry値は、新しい対象信号の累計へ
                 # 流用できない。対象条件を変えた時点で新しいreset基準を作り、
                 # 過去eventと派生carryを混在させない。
-                context.widgets.update_with_counter_reset(
-                    widget,
-                    reset_at_ms=context.clock.now_utc_ms(),
-                )
+                _save_counter_reset(context, widget_id, widget=widget)
             else:
                 context.widgets.update(widget)
         except (TypeError, ValueError, sqlite3.IntegrityError) as error:
             return _error("INVALID_REQUEST", str(error), 400)
+        except (OSError, IpcProtocolError, IpcRemoteError, RuntimeError) as error:
+            return _error("COUNTER_RESET_UNAVAILABLE", str(error), 503)
         return _ok(_widget_payload(widget))
 
     @app.delete("/api/widgets/<widget_id>")
@@ -247,10 +245,10 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
             return _error("INVALID_REQUEST", "widget is not an event counter", 400)
         if widget.config.get("count_mode", "period") != "reset":
             return _error("INVALID_REQUEST", "widget is not reset-based", 400)
-        reset = context.counter_resets.create(
-            widget_id=widget.id,
-            reset_at_ms=context.clock.now_utc_ms(),
-        )
+        try:
+            reset = _save_counter_reset(context, widget.id)
+        except (OSError, IpcProtocolError, IpcRemoteError, RuntimeError) as error:
+            return _error("COUNTER_RESET_UNAVAILABLE", str(error), 503)
         return _ok(
             {
                 "id": reset.id,
@@ -260,5 +258,3 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
                 "carried_count": reset.carried_count,
             }
         )
-
-

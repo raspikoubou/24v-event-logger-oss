@@ -11,6 +11,7 @@ import re
 import secrets
 import shutil
 import socket
+import stat
 import subprocess
 import tempfile
 import threading
@@ -135,7 +136,12 @@ class UpdateAgent:
                 args=(process, staging_path),
                 daemon=True,
             ).start()
-            return {"ok": True, "started": True, "attempt_id": attempt_id}
+            return {
+                "ok": True,
+                "started": True,
+                "attempt_id": attempt_id,
+                "assets_staged": True,
+            }
         except (OSError, ValueError) as error:
             if staging is not None:
                 shutil.rmtree(staging, ignore_errors=True)
@@ -247,7 +253,7 @@ class UpdateAgent:
         )
         try:
             staged_archive = staging / archive.name
-            shutil.copyfile(archive, staged_archive)
+            _copy_update_archive(archive, staged_archive)
             os.chmod(staged_archive, 0o600)
             expected = self._trusted_checksum(version, staged_archive.name)
             if _sha256_file(staged_archive).lower() != expected.lower():
@@ -395,6 +401,31 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _copy_update_archive(source: Path, destination: Path) -> None:
+    """検証後の差替えを想定し、開いた通常fileだけを上限付きでコピーする。"""
+    # Web userのstagingはpath検証後も書換え可能。最終pathのsymlinkを辿らず、
+    # FIFOへ差し替わってもopenで停止しない。判定対象は同じfdの実体とする。
+    descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as archive:
+        source_stat = os.fstat(archive.fileno())
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise ValueError("update archive must be a regular file")
+        if source_stat.st_size > MAX_ARCHIVE_BYTES:
+            raise ValueError("update archive is too large")
+        with destination.open("xb") as staged:
+            remaining = MAX_ARCHIVE_BYTES
+            while True:
+                # fstat後に伸び続けるfileも上限で打ち切り、root領域を無制限に
+                # 消費させない。正当性はコピー完了後にtrusted checksumで検証する。
+                chunk = archive.read(min(1024 * 1024, remaining + 1))
+                if not chunk:
+                    break
+                if len(chunk) > remaining:
+                    raise ValueError("update archive is too large")
+                staged.write(chunk)
+                remaining -= len(chunk)
 
 
 def _remove_staging_after(process: subprocess.Popen[bytes], staging: Path) -> None:

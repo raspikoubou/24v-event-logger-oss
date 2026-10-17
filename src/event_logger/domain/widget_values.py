@@ -492,7 +492,6 @@ def _fill_output_unknown_gaps(
     """OUTの既知区間以外をUNKNOWNで埋める。"""
     result: list[dict[str, object]] = []
     cursor = start_ms
-    seen_known = False
     for interval in sorted(
         intervals,
         key=lambda value: (
@@ -502,7 +501,9 @@ def _fill_output_unknown_gaps(
     ):
         interval_start = cast(int, interval["start_ms"])
         interval_end = cast(int, interval["end_ms"])
-        if interval_start > cursor and seen_known:
+        if interval_start > cursor:
+            # 最初の履歴より前も観測根拠がない。途中の欠落と同じUNKNOWNで
+            # 埋め、表示期間の先頭を暗黙の既知状態として省略しない。
             result.append(
                 {
                     "start_ms": cursor,
@@ -516,22 +517,11 @@ def _fill_output_unknown_gaps(
             interval["start_ms"] = cursor
             interval_start = cursor
         if interval_start == interval_end and start_ms <= interval_start < end_ms:
-            if not seen_known and interval_start > cursor:
-                result.append(
-                    {
-                        "start_ms": cursor,
-                        "end_ms": interval_start,
-                        "state": "UNKNOWN",
-                        "duration_ms": interval_start - cursor,
-                    }
-                )
             result.append(interval)
             cursor = max(cursor, interval_start)
-            seen_known = True
         elif interval_start < interval_end:
             result.append(interval)
             cursor = max(cursor, interval_end)
-            seen_known = True
     if cursor < end_ms:
         result.append(
             {
@@ -601,7 +591,16 @@ def _event_list_rows(
                             },
                         )
                     )
-    rows.sort(key=lambda row: (row[0], str(row[1]["id"])), reverse=True)
+    # 同一msではログ画面と同じrecord type・数値ID順にする。文字列比較では
+    # input:9がinput:10より新しくなり、表示件数の境界で新しい記録を落とす。
+    rows.sort(
+        key=lambda row: (
+            row[0],
+            str(row[1]["id"]).partition(":")[0],
+            int(str(row[1]["id"]).partition(":")[2]),
+        ),
+        reverse=True,
+    )
     return [row[1] for row in rows[:raw_limit]]
 
 
