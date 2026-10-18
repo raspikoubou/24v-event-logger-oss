@@ -91,6 +91,8 @@ def _build_output_rule(
             検証済みのOutputRule Domain object。
                 種別固有条件やOUT owner競合はValueError。
     """
+    # まず共通fieldとchannel ownershipを検証し、次にconditionを固定Domain型へ
+    # 変換する。ここでHTTP/JSON値をDomain内部へ流さない。
     name = _json_text(payload.get("name"), "name")
     input_channel = _json_int(payload.get("input_channel"), "input_channel")
     output_channel = _json_int(payload.get("output_channel"), "output_channel")
@@ -118,6 +120,8 @@ def _build_output_rule(
         edge = EdgeDirection(edge_text)
     except ValueError as error:
         raise ValueError("unsupported edge") from error
+    # 条件値が揃ってからDomain objectを作り、その後にdisabled ruleも含むOUT owner
+    # 一意性を確認する。ruleの無効化は別用途への割当解放を意味しない。
     condition = ConditionRule(
         id=rule_id,
         input_channel=input_channel,
@@ -173,6 +177,8 @@ def _build_widget(
             検証済みのWidget Domain object。widget typeごとの必須config、表示順、
                 期間境界を反映する。
     """
+    # 更新時は欠落fieldをbaseから継承し、新規作成時は必須typeを要求する。
+    # configを直接上書きせずnormalize_widget_configへ通して型固有の既定値を揃える。
     raw_type = payload.get("type", base.widget_type.value if base else None)
     widget_type_text = _json_text(raw_type, "type")
     try:
@@ -193,6 +199,8 @@ def _build_widget(
     else:
         config = raw_config
     normalized_config = normalize_widget_config(config)
+    # ID/size/order/enabledはconfigとは別の外側fieldとして解決する。
+    # UIの単純化payloadもwidget Domainの同じshapeへ戻して保存する。
     resolved_id = widget_id
     if resolved_id is None:
         raw_id = payload.get("id")

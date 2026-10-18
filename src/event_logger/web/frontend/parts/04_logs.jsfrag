@@ -179,6 +179,8 @@
    * @returns {Promise<void>} setup payloadを保存し、成功時は完了画面へ遷移する。API失敗はrejectする。
    */
   async function completeSetup() {
+    // 保存前に画面入力を正規化して一括検証し、field単位の部分送信を避ける。
+    // API側でも同じ制約を再検証するが、ここでは即時の入力案内を担う。
     const deviceName = document.querySelector("#setup-device-name").value.trim();
     const passwordProtection = switchIsOn(document.querySelector("#setup-password-protection"));
     const error = document.querySelector("#setup-error");
@@ -320,6 +322,8 @@
   async function finishOutputTest(showMessage = true) {
     if (!activeOutputTest) return;
     if (liveMode) {
+      // timer満了と利用者の明示終了は同じend endpointを通す。画面側でOFFを
+      // 推測せず、ACK後にstatus snapshotを読んで表示を揃える。
       try {
         await liveJson("/api/outputs/test/end", { method: "POST" });
         activeOutputTest = null;
@@ -349,6 +353,8 @@
    */
   async function startOutputTest(outputId) {
     if (liveMode) {
+      // 5秒上限の実機側制約を明示して要求し、受付後だけtimerを開始する。
+      // 失敗時は状態を再取得して、画面のON表示が残らないようにする。
       try {
         await liveJson("/api/outputs/test", {
           method: "POST",

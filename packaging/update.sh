@@ -203,6 +203,8 @@ restore_product_active_states() {
 cleanup_update() {
   local exit_status=$?
   if [[ "$exit_status" -ne 0 ]]; then
+    # rollbackは service停止→current/venv復元→DB復元→unit復元→service再開の順。
+    # 各段階の失敗を累積し、前提が崩れた後段を実行しない。
     # set -eで途中終了しても、停止済みserviceとcurrent symlinkを旧状態へ
     # 戻す。health check失敗だけをrollback対象にしてはいけない。
     if [[ "$SERVICES_STOPPED" -eq 1 ]]; then
@@ -217,6 +219,7 @@ cleanup_update() {
       fi
     fi
     if [[ "$CURRENT_SWITCHED" -eq 1 && -n "$OLD_RELEASE" ]]; then
+      # release参照を戻してからunit定義を戻し、新しいコードを旧serviceが読む状態を避ける。
       if ! ln -sfn "$OLD_RELEASE" "$APP_ROOT/current" || \
          ! ln -sfn "$OLD_VENV" "$APP_ROOT/venv"; then
         ROLLBACK_FAILED=1
@@ -227,6 +230,7 @@ cleanup_update() {
       fi
     fi
     if [[ "$BACKUP_READY" -eq 1 && -n "$BACKUP" && "$ROLLBACK_FAILED" -eq 0 ]]; then
+      # DBはrollback全体が健全な場合だけ復元し、WAL/SHMを消してbackupと混在させない。
       if ! cp -- "$BACKUP" "$DATA_ROOT/logger.db" || \
          ! rm -f -- "$DATA_ROOT/logger.db-wal" "$DATA_ROOT/logger.db-shm" || \
          ! chown "$SERVICE_USER:$SERVICE_USER" "$DATA_ROOT/logger.db"; then
@@ -239,9 +243,11 @@ cleanup_update() {
       ROLLBACK_FAILED=1
     fi
     if [[ "$SERVICES_STOPPED" -eq 1 && "$ROLLBACK_FAILED" -eq 0 ]]; then
+      # 全file/unit復元が終わった後にだけ起動状態を戻す。
       restore_product_active_states || ROLLBACK_FAILED=1
     fi
     if [[ "$ROLLBACK_FAILED" -eq 1 ]]; then
+      # rollbackが完全でない場合は稼働を残さず、明示したfailed状態を保存する。
       # 再開途中で一部unitだけ起動した場合も、復旧未確認の状態を
       # 稼働中として残さない。systemctlの失敗は元のrollback失敗を隠さない。
       systemctl stop event-logger-maintenance.timer \
@@ -258,6 +264,7 @@ cleanup_update() {
       fi
     fi
   fi
+  # success/failure双方でstaging・snapshot・lockを後片付けし、元のstatusを維持する。
   rm -rf -- "$STAGING" || true
   rm -rf -- "$INSTALL_STATE_DIR" || true
   if [[ "$exit_status" -eq 0 ]]; then
@@ -368,6 +375,8 @@ systemctl start event-loggerd.service event-logger-web.service
 # 副作用: health CLIを起動し、失敗間に1秒ずつ待機する。
 health_check() {
   local attempt
+  # service群とloopback HTTP/DB診断が同時に準備できた時だけ成功とする。
+  # 最大15回再試行し、sleepは失敗時だけ行う。
   for attempt in $(seq 1 15); do
     if { [[ ! -f "$NEW_RELEASE/packaging/systemd/event-logger-hostname.service" ]] || \
          systemctl is-active --quiet event-logger-hostname.service; } && \

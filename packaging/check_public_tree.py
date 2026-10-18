@@ -72,6 +72,8 @@ def inspect(revision: str, approved: set[str]) -> list[str]:
             revision,
         ]
     )
+    # 対象snapshotのindex/treeからpathとblob IDを列挙する。HEADとworking treeを
+    # 混ぜず、--stagedならstage済み内容だけを検査する。
     for record in git(*args).split(b"\0"):
         if not record:
             continue
@@ -83,6 +85,8 @@ def inspect(revision: str, approved: set[str]) -> list[str]:
         )
         name = raw_path.decode("utf-8")
         path = PurePosixPath(name)
+        # 各entryについて許可path・機密候補・通常file modeを確認し、blobの値は
+        # 診断へ出さない。安全でないmodeは以降の内容検査を避けて拒否する。
         if name not in approved:
             errors.append(f"{revision}: unapproved path: {name}")
         if (

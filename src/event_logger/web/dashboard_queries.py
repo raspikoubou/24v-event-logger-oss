@@ -55,6 +55,8 @@ def _dashboard_events(
     channel_ranges: dict[int, tuple[int, int]] = {}
     lookup_ranges: dict[int, tuple[int, int]] = {}
     events_by_id: dict[int, InputEvent] = {}
+    # widget種別で必要な証跡が異なる。最新N件・特定edgeは専用queryで上限を
+    # DB側に適用し、duration/timelineだけ期間履歴と境界状態を後でまとめて取る。
     for widget in widgets:
         if widget.widget_type is WidgetType.EVENT_COUNT:
             # 全カウント方式をRepositoryのCOUNTで集計する。reset/storedも
@@ -293,6 +295,8 @@ def _dashboard_output_events(
     """
     output_ranges: dict[int, tuple[int, int]] = {}
     events_by_id: dict[int, OutputEvent] = {}
+    # event-listはDB側で件数を制限し、他の履歴widgetは同じ期間のchannelを
+    # まとめて読む。IN側のevent queryと混ぜずOUT repositoryの境界を保つ。
     for widget in widgets:
         time_range = widget_ranges.get(widget.id)
         raw_signals = widget.config.get("signals")
@@ -338,6 +342,8 @@ def _dashboard_output_events(
         )
         for event in candidates:
             events_by_id[event.id] = event
+    # 選択期間の最初の状態を描画するため直前のOUT eventを加える。
+    # 開始前の全履歴は不要なので各channelにつき最新1件だけ取得する。
     for channel_id, (start_ms, _) in sorted(output_ranges.items()):
         previous = repository.last_before(
             output_channel=channel_id,

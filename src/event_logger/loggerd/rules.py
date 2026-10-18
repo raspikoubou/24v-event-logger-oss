@@ -128,6 +128,8 @@ class OutputRuleRunner:
             self.validate_configuration(rules)
             new_rules = list(rules)
             if self._paused_for_maintenance:
+                # maintenance中はphysical ownerの変更をせず、再開時に適用する
+                # 設定とreset境界だけ更新する。
                 self._rules = new_rules
                 self._update_reset_points(new_rules)
                 return
@@ -138,6 +140,7 @@ class OutputRuleRunner:
             released_previous: list[OutputRule] = []
             assigned_new: list[OutputRule] = []
             try:
+                # 同じrule ID/OUTのownerは維持し、不要になった旧ownerだけ先に解放する。
                 for rule in previous_rules_by_id.values():
                     replacement = new_owner_rules.get(rule.id)
                     if replacement is not None and (
@@ -150,6 +153,8 @@ class OutputRuleRunner:
                         rule.id,
                     )
                     released_previous.append(rule)
+                # 旧owner解放後に新ownerを割り当てる。各成功分を記録し、後続失敗時に
+                # 適用済みの部分状態だけを補償できるようにする。
                 for rule in new_owner_rules.values():
                     previous = previous_rules_by_id.get(rule.id)
                     if previous is not None and (
@@ -162,6 +167,7 @@ class OutputRuleRunner:
                         rule.condition.output_channel,
                     )
                     assigned_new.append(rule)
+                # 条件signatureが変わったruleの積算起点を一つのmonotonic時刻へ揃える。
                 now_ns = self._clock.now_monotonic_ns()
                 for rule in new_rules:
                     previous = next(

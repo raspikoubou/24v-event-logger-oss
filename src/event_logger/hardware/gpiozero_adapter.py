@@ -146,6 +146,8 @@ class GpioZeroHat:
         )
         callback_trace = _GPIOCallbackTrace(trace_path)
         try:
+            # Raspberry Pi依存を生成時まで遅らせる。
+            # host testやdemo importをGPIOなしで保つため。
             from gpiozero import (
                 Device,
                 DigitalInputDevice,
@@ -160,6 +162,8 @@ class GpioZeroHat:
                 "gpiozero and lgpio are required on Raspberry Pi"
             ) from error
 
+        # 固定pin mapでinput/output deviceを作る。
+        # 途中失敗では作成済みdeviceを閉じてから例外を外へ返す。
         try:
             Device.pin_factory = LGPIOFactory(chip=0)
             pull_up = not INPUT_PULL_DOWN

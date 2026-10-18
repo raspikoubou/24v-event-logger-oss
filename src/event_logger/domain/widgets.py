@@ -146,6 +146,7 @@ def validate_widget_config(
             state or event」に該当すると判定した場合。 「elapsed_time state must be ON
             or OFF」に該当すると判定した場合。 event_list limitが1〜100の範囲外の場合。
     """
+    # まずmapping・禁止キー・共通期間/信号を検証し、その後widget種別固有の設定を見る。
     if not isinstance(config, Mapping):
         raise ValueError("widget config must be an object")
     forbidden_keys = {
@@ -177,6 +178,7 @@ def validate_widget_config(
     elif len(channels) != 1:
         raise ValueError(f"{widget_type.value} requires exactly one channel")
 
+    # 種別ごとに利用する任意fieldだけを検査し、未使用の拡張keyは保持可能にする。
     if widget_type is WidgetType.CURRENT_STATE:
         _optional_bool(config, "show_elapsed")
         _optional_text(config, "on_label")

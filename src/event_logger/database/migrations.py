@@ -57,6 +57,7 @@ def migrate_connection(connection: sqlite3.Connection) -> MigrationResult:
         SchemaVersionError: 「existing tables have no schema version; refusing implicit
             conversion」に該当すると判定した場合。
     """
+    # user_versionを起点に移行経路を選び、対応外schemaへは変更を加えない。
     old_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
     if old_version > LATEST_SCHEMA_VERSION:
         raise SchemaVersionError(
@@ -64,11 +65,13 @@ def migrate_connection(connection: sqlite3.Connection) -> MigrationResult:
             f"{LATEST_SCHEMA_VERSION}"
         )
     if old_version == LATEST_SCHEMA_VERSION:
+        # versionが最新でも、旧定義で残り得るtable/index/auto_vacuumだけを補修する。
         changed = _ensure_events_autoincrement(connection)
         changed = _ensure_incremental_vacuum(connection) or changed
         changed = _ensure_query_indexes(connection) or changed
         return MigrationResult(old_version, old_version, changed)
     if old_version == 1:
+        # v1のevent ID意味を保ったままv2 tableへ移し、追加の保守要件も続けて満たす。
         _migrate_v1_to_v2(connection)
         _ensure_incremental_vacuum(connection)
         _ensure_query_indexes(connection)
@@ -82,6 +85,7 @@ def migrate_connection(connection: sqlite3.Connection) -> MigrationResult:
             "existing tables have no schema version; refusing implicit conversion"
         )
 
+    # version 0の空DBだけを新規schemaとして初期化する。
     _create_schema_latest(connection)
     return MigrationResult(old_version, LATEST_SCHEMA_VERSION, True)
 
@@ -95,9 +99,11 @@ def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
     Returns:
         None。 渡されたSQLite接続へ変更を適用し、 接続のcloseは呼出元に残す。
     """
+    # table再作成中だけFK検査を止め、元の設定をfinallyで必ず戻す。
     foreign_keys = int(connection.execute("PRAGMA foreign_keys").fetchone()[0])
     connection.execute("PRAGMA foreign_keys = OFF")
     try:
+        # 新tableへのcopy・旧table置換・index・version更新を一transactionにまとめる。
         connection.execute("BEGIN IMMEDIATE")
         connection.execute(
             """
@@ -246,6 +252,7 @@ def _ensure_query_indexes(connection: sqlite3.Connection) -> bool:
             "ON output_events(session_id, id)",
         ),
     )
+    # 任意tableを持たない互換DBもあるため、table存在を確認してから不足indexを追加する。
     changed = False
     for name, table, statement in indexes:
         table_row = connection.execute(
@@ -263,6 +270,7 @@ def _ensure_query_indexes(connection: sqlite3.Connection) -> bool:
         if row is None:
             connection.execute(statement)
             changed = True
+    # indexを追加したときだけcommitし、変更のないDBへ不要なwriteを発生させない。
     if changed:
         connection.commit()
     return changed

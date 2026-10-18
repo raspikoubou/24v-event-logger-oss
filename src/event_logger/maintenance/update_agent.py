@@ -127,6 +127,8 @@ class UpdateAgent:
         """
         staging: Path | None = None
         try:
+            # connection処理は「schema検証→root用helper・同時実行確認→checksum検証済み
+            # archiveのstaging→helper起動」。OS操作は検証完了後まで行わない。
             request = _read_request(connection)
             # 再起動は配布元未設定でも使える固定操作。Webからcommandや
             # systemd unit名を渡せる汎用実行口にはしない。
@@ -141,6 +143,8 @@ class UpdateAgent:
             staged_archive, staged_checksum, staging_path = self._stage_trusted_archive(
                 archive, version
             )
+            # subprocessに渡すのはroot-owned staging内のfileだけ。起動後は完了threadが
+            # stagingを削除するので、helper実行中のasset消失を避ける。
             staging = staging_path
             # WebからIDを受け取らず、実際に起動する管理側プロセスへ発行する。
             attempt_id = secrets.token_hex(16)
@@ -174,6 +178,8 @@ class UpdateAgent:
                 "assets_staged": True,
             }
         except (OSError, ValueError) as error:
+            # helper未起動の検証/起動失敗では、この接続で作ったstagingのみ削除し、
+            # 呼出側には拒否理由を応答する。
             if staging is not None:
                 shutil.rmtree(staging, ignore_errors=True)
             return {"ok": False, "message": str(error)}
@@ -389,6 +395,8 @@ class UpdateAgent:
             ValueError: 引数の形式・範囲が仕様外、または現在
                 の状態では要求を適用できない場合。
         """
+        # repositoryとlatest stable tagを先に固定し、要求versionと一致しないreleaseの
+        # checksumを照合対象にしない。
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", self._repository):
             raise ValueError("trusted update repository is not configured")
         api_url = f"https://api.github.com/repos/{self._repository}/releases/latest"
@@ -416,6 +424,8 @@ class UpdateAgent:
             raise ValueError("trusted release is not stable")
         if tag.removeprefix("v") != version:
             raise ValueError("requested version is not the current trusted release")
+        # asset metadataのdownload URLはそのまま信用せず、対象repoのRelease pathで
+        # SHA256SUMSを指定できることを確認してから取得する。
         checksum_url: str | None = None
         for raw_asset in assets:
             if not isinstance(raw_asset, dict):
@@ -429,6 +439,7 @@ class UpdateAgent:
             f"https://github.com/{self._repository}/releases/download/"
         ):
             raise ValueError("trusted checksum asset is invalid")
+        # 上限+1 byteまで読むことで過大応答を検出し、無制限なmemory使用を避ける。
         checksum_request = Request(
             checksum_url,
             headers={"User-Agent": "event-logger-update-agent"},

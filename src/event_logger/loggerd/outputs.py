@@ -417,6 +417,8 @@ class OutputManager:
             raise RuntimeError("heartbeat must be stopped before output test")
         if self._owners.owner(channel_id).kind is not OutputOwnerKind.UNUSED:
             raise RuntimeError("output is owned by another logger function")
+        # 開始は「入力制約確認→期限watchdog予約→GPIO ON→履歴記録」。
+        # 履歴系が遅延・失敗してもOFF期限を先に確保する順序を保つ。
         output_test = OutputTest(
             channel_id=channel_id,
             started_ns=self._clock.now_monotonic_ns(),
@@ -464,6 +466,8 @@ class OutputManager:
         try:
             self._record_output_event(channel_id, True, OutputSource.TEST)
         except Exception:
+            # 物理ON後の履歴失敗は、同じtest tokenを解除してOUTもOFFへ戻す。
+            # OFFの履歴記録が成功するとは限らないため、物理状態を優先する。
             # 同じtokenのテストだけを片付ける。履歴書込み中に別要求が
             # 先に終了・再開始した場合、その新しいテストをOFFにしない。
             with self._output_test_lock:
@@ -669,6 +673,8 @@ class OutputManager:
                 、writerなどの状態が成立していない場合、または
                 副作用処理に失敗した場合。
         """
+        # GPIO操作は短いphysical lock内だけで行い、履歴DB/Queue処理をlock外へ
+        # 分離する。slow stageを別々に測ることで物理遅延と保存遅延を区別する。
         output = self._outputs[channel_id]
         physical_lock_started_ns = self._clock.now_monotonic_ns()
         with self._physical_lock:
@@ -697,6 +703,8 @@ class OutputManager:
             elapsed_ns=gpio_elapsed_ns,
         )
         if changed or force_record:
+            # 同じ状態のheartbeat tickは履歴を増やさない。状態変更か明示記録時だけ
+            # eventを出し、保存失敗なら物理ONを残さず元の例外を伝播する。
             database_started_ns = self._clock.now_monotonic_ns()
             event_stage = (
                 "event_enqueue" if self._event_sink is not None else "event_database"

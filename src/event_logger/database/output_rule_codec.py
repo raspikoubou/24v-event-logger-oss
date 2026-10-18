@@ -27,6 +27,8 @@ def _output_rule_from_row(row: sqlite3.Row) -> OutputRule:
             channel and duration must be integers」に該当すると判定した場合。
             boolean設定値がbool型でない場合。
     """
+    # JSON型・enum・数値fieldを順にdomain条件へ復元する。
+    # 行の一部だけ不正でもrule全体を拒否する。
     try:
         config = json.loads(str(row["config_json"]))
         if not isinstance(config, dict):

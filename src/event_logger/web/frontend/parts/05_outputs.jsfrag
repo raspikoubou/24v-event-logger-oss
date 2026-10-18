@@ -249,6 +249,8 @@
    */
   async function setLoggingState(nextLogging) {
     if (liveMode) {
+      // live modeではdaemonのACKを唯一の状態根拠にする。停止/再開後もAPI snapshotを
+      // 再読込してからmessageを出し、HTTP成功だけで記録状態を決めない。
       try {
         await liveJson(nextLogging ? "/api/logging/start" : "/api/logging/stop", { method: "POST" });
         await refreshLiveState();
@@ -259,6 +261,8 @@
       }
       return;
     }
+    // Demoではloggerd/DBがないため画面内の区間モデルを更新する。停止時はUNKNOWN
+    // 区間を開始し、再開時は新しいsnapshotを先頭へ追加して状態境界を表現する。
     if (activeOutputTest) finishOutputTest(false);
     logging = nextLogging;
     if (logging) {

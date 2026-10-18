@@ -38,6 +38,8 @@ def _parse_log_filters(clock: Clock, timezone_name: str) -> dict[str, Any]:
                 負offset等はValueError。
     """
     now_ms = clock.now_utc_ms()
+    # named periodとcustom rangeは同時指定させない。どちらが優先か曖昧なqueryを
+    # 受け入れず、以降の全条件を同じ半開区間として扱う。
     period = request.args.get("period")
     if period is not None:
         if any(name in request.args for name in ("from", "to", "from_ms", "to_ms")):
@@ -77,6 +79,8 @@ def _parse_log_filters(clock: Clock, timezone_name: str) -> dict[str, Any]:
             _format_local_input(timestamp_ms, timezone_name)
         except (ValueError, OverflowError, OSError) as error:
             raise ValueError("date/time is outside the supported range") from error
+    # datetimeをCSVへstreamし始めてから変換不能と判明するとHTTP 400へ戻せない。
+    # timezone変換可能性を検索開始前に確認した後、信号・値・種別の選択を検証する。
     channel_value = request.args.get("channel_id")
     signals: list[str] | None = None
     if channel_value:
@@ -102,6 +106,8 @@ def _parse_log_filters(clock: Clock, timezone_name: str) -> dict[str, Any]:
         allowed={"rule", "heartbeat", "test", "startup"},
         field_name="source",
     )
+    # paginationの許可値とoffsetを最後に確定し、Repositoryへは検証済みfilterだけ
+    # を渡す。負値をSQL層へ持ち込まずHTTP query境界で拒否する。
     limit = _query_int("limit", 100)
     offset = _query_int("offset", 0)
     if limit not in (50, 100, 500):

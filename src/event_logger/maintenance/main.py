@@ -61,16 +61,22 @@ def run_once(
         ValueError: 引数の形式・範囲が仕様外、または現在
             の状態では要求を適用できない場合。
     """
+    # 処理順は「設定検証→SQLite integrity→retention→容量保護→最終snapshot」。
+    # integrity不良時には削除やauditを始めず、1回の保守を失敗として返す。
     _validate_retention_days(retention_days)
     current_clock = clock or SystemClock()
     with closing(connect_database(database_path)) as connection:
         with connection:
+            # transaction内でschema準備とintegrity確認を済ませてから、破壊的な
+            # retentionへ進む。接続は外側のclosingで常に閉じる。
             initialize_connection(connection)
             integrity = check_connection(connection)
             if not integrity.ok:
                 raise DatabaseIntegrityError(integrity)
             selected_retention_days = retention_days
             if use_stored_retention:
+                # 通常timerは保存済み設定を優先する。明示CLIの無効化指定だけは
+                # stored valueで上書きされない。
                 stored = SettingsRepository(connection).get_json(
                     "retention_days", retention_days
                 )
@@ -85,6 +91,7 @@ def run_once(
             if selected_retention_days is None:
                 retention_result = RetentionResult(0, 0, 0)
             else:
+                # UTC epochでcutoffを決め、retention serviceに削除境界を委ねる。
                 cutoff_ms = current_clock.now_utc_ms() - (
                     selected_retention_days * 24 * 60 * 60 * 1000
                 )
@@ -92,6 +99,8 @@ def run_once(
             monitor = StorageMonitor()
             storage = monitor.inspect(database_path, disk_path=disk_path)
             if monitor.needs_capacity_protection(storage):
+                # 初回inspectが危険容量を示す場合だけ、削除後も毎回再計測して
+                # 必要性が消えるまで容量保護を続ける。
                 capacity_result = retention_service.run_capacity_protection(
                     should_continue=lambda: monitor.needs_capacity_protection(
                         monitor.inspect(database_path, disk_path=disk_path)
@@ -102,6 +111,7 @@ def run_once(
                     capacity_result.deleted_input_events
                     or capacity_result.deleted_output_events
                 ):
+                    # 容量保護が実データを削除した場合だけ監査記録を残す。
                     repository.record_audit(
                         action="capacity_retention",
                         details_json=json.dumps(
@@ -117,6 +127,7 @@ def run_once(
                         ),
                         ts_utc_ms=current_clock.now_utc_ms(),
                     )
+                # 操作後の値を返すため再測定し、呼出側へ開始前の古い容量を返さない。
                 storage = monitor.inspect(database_path, disk_path=disk_path)
     return MaintenanceResult(
         retention=retention_result,

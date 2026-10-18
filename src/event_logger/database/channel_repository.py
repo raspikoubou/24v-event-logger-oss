@@ -95,6 +95,7 @@ class ChannelRepository:
         _validate_channel_text(off_label, "off_label")
         if not 0 <= debounce_ms <= 5000:
             raise ValueError("debounce_ms must be between 0 and 5000")
+        # channel更新とauditを同じtransactionに含め、設定変更だけが残る状態を防ぐ。
         self._connection.execute("BEGIN IMMEDIATE")
         try:
             cursor = self._connection.execute(
@@ -161,6 +162,7 @@ class ChannelRepository:
             ValueError: boolean設定値がbool型でない場合。
                 debounce_msが0〜5000の範囲外の場合。
         """
+        # 全件を先に正規化・検証し、一件でも不正なら書込みを始めない。
         normalized: list[tuple[int, bool, str, int, str, str]] = []
         seen: set[int] = set()
         for update in updates:
@@ -184,6 +186,7 @@ class ChannelRepository:
             normalized.append(
                 (channel_id, enabled, name, debounce_ms, on_label, off_label)
             )
+        # 検証済み変更と各監査行をまとめてcommitし、部分更新を見せない。
         self._connection.execute("BEGIN IMMEDIATE")
         try:
             for (

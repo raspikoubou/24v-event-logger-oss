@@ -31,6 +31,8 @@ Args:
 Returns:
     なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     if context.events.count_all() == 0:
+        # eventが空のときだけsessionと固定時刻eventを作る。二回目のapp factoryや
+        # requestで履歴を重複投入せず、sampleの相対順・経過時間を固定する。
         base_ms = context.clock.now_utc_ms() - 8 * 60 * 60 * 1000
         session = context.sessions.create(
             boot_id="demo-boot",
@@ -57,6 +59,8 @@ Returns:
                 clock_synced=True,
             )
         context.sessions.end(session.id, context.clock.now_utc_ms())
+    # widget fixtureはevent fixtureとは独立に補う。利用者がdemo設定を編集した後も
+    # 空のwidget一覧だけを初期状態へ戻せる。
     if not context.widgets.list_all():
         base_ms = context.clock.now_utc_ms() - 8 * 60 * 60 * 1000
         context.widgets.create(

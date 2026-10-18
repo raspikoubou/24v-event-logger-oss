@@ -50,6 +50,7 @@ else
   # 戻り値: rm成功なら0。失敗時はtrap実行時の終了statusへ影響する。
   # 副作用: 不完全なstaging directoryを再帰削除する。
   cleanup() {
+    # build失敗・中断時も一時展開だけを除去し、公開済みversion directoryには触れない。
     rm -rf -- "${STAGING_ROOT:-}"
   }
   trap cleanup EXIT
@@ -94,6 +95,8 @@ done
 if [[ -L "$CURRENT_LINK" && "$(readlink "$CURRENT_LINK")" == "$VERSION" ]]; then
   exit 0
 fi
+# version directoryの所有権とsymlink内容を検証してから一時linkをrenameする。
+# 同一filesystem内renameでcurrentの切替を原子的に行う。
 if [[ -e "$CURRENT_LINK" || -L "$CURRENT_LINK" ]]; then
   [[ -L "$CURRENT_LINK" ]] || die "runtime current path is not a symlink"
   CURRENT_TARGET="$(readlink "$CURRENT_LINK")"

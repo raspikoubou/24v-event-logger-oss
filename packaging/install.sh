@@ -149,6 +149,8 @@ stop_product_services() {
 restore_product_services() {
   local unit
   local failed=0
+  # 各unitの永続enable状態を先に戻し、次に今回の実行状態を復元する。
+  # 復元失敗は継続して集計し、他unitも可能な範囲で元へ戻す。
   for unit in "${PRODUCT_UNITS[@]}"; do
     if [[ "${PREVIOUS_UNIT_EXISTS[$unit]}" -eq 1 ]]; then
       if [[ "${PREVIOUS_UNIT_ENABLED[$unit]}" -eq 1 ]]; then
@@ -189,8 +191,10 @@ restore_product_units() {
 cleanup_install() {
   local exit_status=$?
   local rollback_failed=0
+  # EXIT時の状態を捕捉した後、一時展開物を先に除去する。失敗時だけrollbackする。
   rm -rf -- "$STAGING_ROOT" || true
   if [[ "$exit_status" -ne 0 && "$SERVICES_STOPPED" -eq 1 ]]; then
+    # DBやsymlinkを戻す前に新旧serviceを止め、復元中のfile使用を避ける。
     # DBファイルを差し替える前に、途中まで起動した新版も含めて停止する。
     local unit
     for unit in "${PRODUCT_UNITS[@]}"; do
@@ -201,6 +205,8 @@ cleanup_install() {
   fi
   if [[ "$exit_status" -ne 0 && "$rollback_failed" -eq 0 && \
       "$CURRENT_LINKED" -eq 1 ]]; then
+    # 二つの参照先を以前のsnapshotへ戻す。rollback途中の失敗があれば後段の
+    # DB/unit復元やservice再開を抑止する。
     if [[ -n "$PREVIOUS_CURRENT_TARGET" ]]; then
       ln -sfn "$PREVIOUS_CURRENT_TARGET" "$APP_ROOT/current" || rollback_failed=1
     else
@@ -214,6 +220,8 @@ cleanup_install() {
   fi
   if [[ "$exit_status" -ne 0 && "$rollback_failed" -eq 0 && \
       "$DATABASE_MIGRATION_STARTED" -eq 1 ]]; then
+    # migration開始後だけDBを復元する。既存DBは一時file経由で置換し、
+    # 新規DBなら本体とWAL/SHMをまとめて削除する。
     if [[ "$DATABASE_EXISTED" -eq 1 && -n "$DATABASE_BACKUP" && \
         -f "$DATABASE_BACKUP" ]]; then
       local restore_path="$DATA_ROOT/logger.db.restore.$$"
@@ -236,9 +244,12 @@ cleanup_install() {
   fi
   if [[ "$exit_status" -ne 0 && "$rollback_failed" -eq 0 && \
       "$UNIT_FILES_CHANGED" -eq 1 ]]; then
+    # systemd unitはsymlink/DB復元後に戻す。以降の再開は全rollback成功時だけ。
     restore_product_units || rollback_failed=1
   fi
   if [[ "$exit_status" -ne 0 && "$SERVICES_STOPPED" -eq 1 ]]; then
+    # recovery prerequisitesを確認してserviceを復元する。失敗時は一部起動状態を
+    # 残さず全対象を停止して失敗markerを残す。
     # SQLite切替後にservice用loader pathを反映できなければ、旧unitを再開しない。
     if [[ "$PRIVATE_RUNTIME_READY" -eq 1 && \
         "$PRIVATE_SQLITE_UNITS_READY" -eq 0 ]]; then
@@ -259,6 +270,7 @@ cleanup_install() {
   fi
   if [[ "$RELEASE_CREATED" -eq 1 && "$INSTALL_SUCCEEDED" -eq 0 && \
       "$rollback_failed" -eq 0 ]]; then
+    # 新releaseを今回作成し、rollbackも完了した場合だけ孤立releaseを削除する。
     rm -rf -- "$RELEASE_ROOT"
   fi
   rm -rf -- "$INSTALL_STATE_DIR"

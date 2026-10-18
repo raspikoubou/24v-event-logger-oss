@@ -186,6 +186,8 @@ def create_app(config: Mapping[str, Any] | None = None) -> Flask:
                 構築中失敗時はfactoryがbase SQLite connectionを閉じる。
     """
     app = Flask(__name__, template_folder="templates", static_folder="static")
+    # 先に全設定のfallbackを置き、次に呼出元値を上書きする。
+    # factoryの後段が環境変数やmodule-global状態へ直接依存しない形に揃える。
     app.config.from_mapping(
         DEMO=False,
         APP_VERSION=VERSION,
@@ -218,6 +220,8 @@ def create_app(config: Mapping[str, Any] | None = None) -> Flask:
     app.extensions["event_logger.auth"] = auth
     _register_auth_routes(app, auth)
 
+    # 認証routeを登録後にclock/databaseを選ぶ。thread-safe requestsではfile DBが
+    # 必須なので、接続を作成する前にmemory設定を拒否する。
     demo = bool(app.config["DEMO"])
     clock = app.config.get("CLOCK") or _default_clock(demo)
     database_path = app.config["DATABASE_PATH"]
@@ -226,6 +230,8 @@ def create_app(config: Mapping[str, Any] | None = None) -> Flask:
     if thread_safe_requests and database_path_text == ":memory:":
         raise ValueError("thread-safe requests require a file-backed SQLite database")
     connection = connect_database(database_path_text)
+    # ownershipは_finish_app_creationの成功時にWebContextへ移る。失敗時だけこの
+    # factoryが閉じるため、構築例外でSQLite connectionを漏らさない。
     try:
         return _finish_app_creation(
             app,
@@ -270,6 +276,8 @@ def _finish_app_creation(
                 受け取ったconnectionの寿命はWebContextが所有する。
     """
     initialize_connection(connection)
+    # 共有connectionから依存を組み立て、設定・認証を復元してからrequest境界と
+    # routeを登録する。未完成のcontextをFlaskへ公開しない。
     control_client = _control_client(app, demo)
     status_provider = _status_provider(app)
     timezone_name = str(app.config["TIMEZONE"])
@@ -294,6 +302,8 @@ def _finish_app_creation(
         raise ValueError("stored password hash is invalid")
     auth.configure(enabled=stored_protection, password_hash=stored_hash)
     context = base_context
+    # file DBはrequestごとにconnectionを持たせる。memory demoは同じconnectionを
+    # 共有しないとrequestごとに別databaseになりfixtureを参照できない。
     if thread_safe_requests:
         context = cast(WebContext, _RequestScopedWebContext(base_context))
         # Flask上のWSGI middleware設定なので、methodをinstance側でwrapする。
@@ -321,6 +331,8 @@ def _finish_app_creation(
     if demo:
         _seed_demo_data(context)
 
+    # middleware/contextを先に確定してからrouteを登録する。全routeは同じWebContext
+    # 境界を通り、request終了時に接続を閉じられる。
     _register_page_routes(app, context)
 
     _register_status_routes(app, context, auth)
@@ -459,6 +471,8 @@ def _control_endpoint(
                 503,
             )
         _mark_configuration_out_of_sync(context, stopped=True)
+    # reload前に期待fingerprintを作り、ACK後のdigestと照合する。IPC成功だけでは
+    # 設定適用を証明しないため、違えばstart/testを許可できる同期状態へ戻さない。
     expected_digest = (
         _configuration_fingerprint(context)
         if control_request.command is ControlCommand.RELOAD_CONFIG
@@ -474,6 +488,8 @@ def _control_endpoint(
     except TimeoutError as error:
         # timeout後もloggerdが要求を実行済みの場合がある。状態を再照会し、
         # 確認できた操作だけ成功として返す。再送するとsessionやOUTを重複操作する。
+        # 再送ではなくSTATUSを照会して副作用の実施有無を確かめる。
+        # 不明な結果は成功扱いにせず、危険な二重操作を避けるため503へ返す。
         try:
             status_request = ControlRequest(ControlCommand.STATUS)
             if isinstance(context.control_client, UnixControlClient):

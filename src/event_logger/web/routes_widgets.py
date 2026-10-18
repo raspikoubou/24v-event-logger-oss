@@ -95,6 +95,8 @@ def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return _error("INVALID_REQUEST", "JSON object is required", 400)
+        # PUTは部分fieldだけを受けても既存設定を失わないようにcurrent値へmergeし、
+        # 共通builderで再検証してからDBへ保存する。
         condition = current.condition
         merged: dict[str, object] = {
             "name": current.name,
@@ -117,6 +119,8 @@ def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
             context.output_rules.update(updated)
         except (TypeError, ValueError, sqlite3.IntegrityError) as error:
             return _error("INVALID_REQUEST", str(error), 400)
+        # DB保存後にloggerd ACKを待つ。拒否/通信失敗は後続節で前のruleへ復元し、
+        # Webとdaemonで適用済み設定が異なる状態を残さない。
         try:
             if context.control_client is None:
                 raise RuntimeError("loggerd reload was not acknowledged")

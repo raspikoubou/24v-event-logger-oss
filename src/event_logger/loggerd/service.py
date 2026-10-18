@@ -196,6 +196,8 @@ class LoggerService:
             if self.status is not LoggerStatus.STOPPED:
                 raise RuntimeError(f"cannot start from status {self.status}")
             self._validate_input_values(input_values)
+            # sessionより先にOUTをOFFへ初期化する。出力初期化に失敗したときは
+            # DB sessionだけが開始済みになる状態を作らない。
             if self._output_manager is not None:
                 try:
                     self._output_manager.startup_off()
@@ -210,6 +212,8 @@ class LoggerService:
                 clock_synced=self._clock.is_synchronized(),
             )
             self._session_id = session.id
+            # session開始時の入力状態をchannelごとのdebounce基準にし、再起動後に
+            # 起動時点のON/OFFを変化eventとして誤記録しない。
             self._debouncers = {}
             self._confirmed_values = {}
             self._confirmed_since_ns = {}
@@ -232,6 +236,7 @@ class LoggerService:
                         clock_synced=self._clock.is_synchronized(),
                     )
             except Exception:
+                # snapshotの一部だけ保存されたsessionをLOGGING扱いにしない。
                 self.status = LoggerStatus.CRITICAL
                 raise
             self.status = LoggerStatus.LOGGING
@@ -411,6 +416,8 @@ class LoggerService:
             if self.status is not LoggerStatus.LOGGING:
                 return
             session_id = self._session_id
+            # 停止処理の概要: 停止境界までのdebounce確定→callback受付遮断→OUT OFF
+            # とpause記録→Queue drain→session終了。長いDB flushはlock外で待つ。
             # maintenance遷移時刻が監視受付の境界であり、DB flushやOUT OFFの
             # 遅延をsessionの正常終了時刻へ含めない。
             ended_at_ms = self._clock.now_utc_ms()
@@ -446,6 +453,8 @@ class LoggerService:
                 # callback内で失敗を保持すれば、flag異常でも現在の停止を完了できる。
                 if on_quiesced is not None:
                     on_quiesced()
+            # Queueの保存完了後にsession終了時刻を書き、永続化待ちで終了済み
+            # sessionの時刻が先行しないようにする。
             self._event_writer.wait_until_drained()
             if session_id is not None:
                 self._session_repository.end(

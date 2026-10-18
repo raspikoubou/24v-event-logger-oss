@@ -75,6 +75,8 @@
         configurationSync: { outOfSync: false, stopped: false, message: "" }
       };
     }
+    // statusを先に読み、timezone・状態・更新済みcustom rangeを以降のAPI requestの
+    // 基準にする。status取得前に各endpointを並列化すると表示世代が混在する。
     const status = await liveJson("/api/status");
     const storageWarning = storageWarningFor(
       status.storage,
@@ -83,6 +85,8 @@
     const selectedPeriod = period || status.dashboard_period || "8h";
     const selectedCustomRange = customRange || status.dashboard_custom_range;
     let dashboardReceivedAtMs = null;
+    // statusで選択条件を確定してから独立endpointを並列取得する。dashboard/logは
+    // 呼出元が必要とした時だけ要求し、不要な大きな履歴payloadを避ける。
     const [widgets, rules, setup, logs, dashboard] = await Promise.all([
       liveJson("/api/widgets"),
       liveJson("/api/output-rules"),
@@ -120,6 +124,8 @@
         durationMs: dashboard.to_ms - dashboard.from_ms
       };
     }
+    // APIのsnake_case payloadを画面のcamelCase fixtureへ一度だけ変換する。
+    // 不明なlogger状態をOFFと誤表示しないよう、IN/OUT値はUNKNOWNに保つ。
     const knownLoggerState = ["logging", "maintenance", "critical"].includes(status.logger_status);
     /**
      * channelsの処理を行い、画面状態の該当部分を扱う。
@@ -264,6 +270,8 @@
    * @returns {Promise<void>} 初期データ取得と初期描画が完了した時にresolveする。取得失敗はrejectする。
    */
   async function start() {
+    // 初期fixtureが揃うまではrunAppを呼ばず、nullなwidget/channel配列でevent handlerが
+    // 起動しないようにする。取得後は画面instanceを一度だけ作る。
     const fixtures = await loadLiveFixtures(null, liveMode);
     runApp(fixtures);
   }
@@ -274,6 +282,8 @@
    * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
    */
   function runApp(fixtures) {
+  // 画面固有の一時状態はrunAppのclosure内に置き、poll更新後も入力draftやfocusを
+  // 同じ画面instanceで扱う。固定fixtureとlive modeで状態モデルを共有する。
   let currentPeriod = fixtures.settings.dashboardPeriod || "8h";
   let dashboardCustomRangeDraft = null;
   let logging = fixtures.loggerStatus === "logging";
@@ -338,6 +348,8 @@
    * @returns {Promise<void>} live statusと必要なDashboard dataをDOMへ反映後resolveする。通信失敗時はErrorをrejectする。
    */
   async function refreshLiveStateOnce(forceDashboard = false) {
+    // API取得前にdashboard更新の要否を判定し、表示周期を別に制御する。
+    // status/logのpollで重いdashboard集計まで毎回再取得しない。
     const nowMs = Date.now();
     const customRangeForRefresh = (
       dashboardCustomRangeDraft || fixtures.settings.dashboardCustomRange
@@ -359,6 +371,8 @@
       customRangeForRefresh,
       activeView !== "logs"
     );
+    // 取得したsnapshotをまとめて置き換えてから描画する。custom範囲draftだけは
+    // statusの保存値に上書きさせず、「適用」前の画面入力を保持する。
     fixtures.nowMs = next.nowMs;
     fixtures.channels = next.channels;
     fixtures.outputs = next.outputs;
@@ -386,6 +400,8 @@
       if (bounds) fixtures.dashboardPeriods[currentPeriod] = bounds;
     }
     if (next.dashboardWarning) nextDashboardRefreshAtMs = Date.now() + 30_000;
+    // output testのtimerは一時状態を追跡する。daemon側でOFFになった場合もtimerを
+    // 残さず、別のOUTへ切り替わった場合は以前の表示を終了してから同期する。
     if (liveMode) {
       if (next.outputTestChannel === null) {
         if (activeOutputTest?.timerId) window.clearTimeout(activeOutputTest.timerId);
@@ -411,6 +427,8 @@
       fixtures.widgets = nextWidgets;
       renderPersistedWidgets(nextWidgets);
     }
+    // poll stateを先にDOMへ反映し、ログだけは現在viewと5秒期限に従って別取得する。
+    // channel編集やwidget modalの入力中はそのフォームを後続描画で壊さない。
     renderDataViews();
     if (
       shouldRefreshLogPage({
@@ -1395,6 +1413,8 @@
     // 基準に差分を作る。古い一覧のままPOSTすると重複IDで復旧できなくなる。
     const current = await liveJson("/api/widgets");
     fixtures.widgets = current.items || [];
+    // 行を直接全件POSTすると、更新済みIDと新規IDを区別できない。最新DB一覧を
+    // 基準にupsertし、画面から消えたwidgetだけを最後に削除する。
     const currentById = new Map(fixtures.widgets.map((widget) => [widget.id, widget]));
     const rowsById = new Set();
     for (const group of document.querySelectorAll("#widget-settings-list .widget-group-list")) {
@@ -1415,6 +1435,8 @@
         await liveJson(`/api/widgets/${encodeURIComponent(widget.id)}`, { method: "DELETE" });
       }
     }
+    // 部分成功した通信状態でも、保存結果を再読込してUIとDBを一致させてから
+    // dirty flagを落とす。途中throwならdirtyを保持し、次回は再び最新値から始める。
     const response = await liveJson("/api/widgets");
     fixtures.widgets = response.items || [];
     widgetSettingsDirty = false;
@@ -1589,6 +1611,8 @@
       // 現在の区間DOMを保ち、mouseleave/blur/Esc後の次回更新で追従する。
       return;
     }
+    // 操作中DOMを維持できると判断した後で期間・軸・signal rowを再構築する。
+    // 先にinnerHTMLを置き換えるとpinned detailやkeyboard focusが失われる。
     const periodKey = periodKeyForWidget(card.dataset.widgetPeriod || "follow");
     const bounds = periodBounds(periodKey);
     const axis = Array.from({ length: 5 }, (_, index) => {
@@ -1964,6 +1988,8 @@
    * @returns {Promise<void>} setup payloadを保存し、成功時は完了画面へ遷移する。API失敗はrejectする。
    */
   async function completeSetup() {
+    // 保存前に画面入力を正規化して一括検証し、field単位の部分送信を避ける。
+    // API側でも同じ制約を再検証するが、ここでは即時の入力案内を担う。
     const deviceName = document.querySelector("#setup-device-name").value.trim();
     const passwordProtection = switchIsOn(document.querySelector("#setup-password-protection"));
     const error = document.querySelector("#setup-error");
@@ -2105,6 +2131,8 @@
   async function finishOutputTest(showMessage = true) {
     if (!activeOutputTest) return;
     if (liveMode) {
+      // timer満了と利用者の明示終了は同じend endpointを通す。画面側でOFFを
+      // 推測せず、ACK後にstatus snapshotを読んで表示を揃える。
       try {
         await liveJson("/api/outputs/test/end", { method: "POST" });
         activeOutputTest = null;
@@ -2134,6 +2162,8 @@
    */
   async function startOutputTest(outputId) {
     if (liveMode) {
+      // 5秒上限の実機側制約を明示して要求し、受付後だけtimerを開始する。
+      // 失敗時は状態を再取得して、画面のON表示が残らないようにする。
       try {
         await liveJson("/api/outputs/test", {
           method: "POST",
@@ -2472,6 +2502,8 @@
    */
   async function setLoggingState(nextLogging) {
     if (liveMode) {
+      // live modeではdaemonのACKを唯一の状態根拠にする。停止/再開後もAPI snapshotを
+      // 再読込してからmessageを出し、HTTP成功だけで記録状態を決めない。
       try {
         await liveJson(nextLogging ? "/api/logging/start" : "/api/logging/stop", { method: "POST" });
         await refreshLiveState();
@@ -2482,6 +2514,8 @@
       }
       return;
     }
+    // Demoではloggerd/DBがないため画面内の区間モデルを更新する。停止時はUNKNOWN
+    // 区間を開始し、再開時は新しいsnapshotを先頭へ追加して状態境界を表現する。
     if (activeOutputTest) finishOutputTest(false);
     logging = nextLogging;
     if (logging) {

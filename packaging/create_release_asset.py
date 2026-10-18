@@ -116,6 +116,8 @@ def _archive_entries() -> list[tuple[PurePosixPath, Path, bool]]:
                 symlink・想定外pathは含めない。
     """
     entries: list[tuple[PurePosixPath, Path, bool]] = []
+    # root直下は個別allow-listで追加し、directory treeはsymlinkを辿らず走査する。
+    # 配布に不要なcacheは除外し、禁止候補が見つかればarchive生成前に止める。
     for name in ROOT_FILES:
         path = PROJECT_ROOT / name
         if path.is_symlink() or not path.is_file():
@@ -168,6 +170,7 @@ def _archive_entries() -> list[tuple[PurePosixPath, Path, bool]]:
                 )
                 entries.append((relative_path, file_path, False))
 
+    # OS走査順に依存させずarchive member順を固定して再現可能な入力列にする。
     return sorted(entries, key=lambda entry: entry[0].as_posix())
 
 
@@ -264,6 +267,8 @@ def create_release_asset(
     if source_date_epoch < 0:
         raise ValueError("source_date_epoch must not be negative")
 
+    # Versionとallow-listを検証し、既存成果物を上書きしない名前を先に決める。
+    # 一時archiveとchecksumを作る前に入力境界を確定する。
     version = _read_version()
     archive_name = f"event-logger-{version}.tar.zst"
     archive_path = output_directory / archive_name
@@ -276,6 +281,8 @@ def create_release_asset(
     archive_temporary: Path | None = None
     checksum_temporary: Path | None = None
     checksum_published = False
+    # 完成物は同じ出力directoryのtemp fileで作り、checksumとarchiveのrenameだけを
+    # 公開境界にする。途中失敗なら一方だけ残さずtempもcleanupする。
     try:
         with tempfile.NamedTemporaryFile(
             dir=output_directory, delete=False

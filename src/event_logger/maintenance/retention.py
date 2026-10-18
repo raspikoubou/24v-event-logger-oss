@@ -75,6 +75,8 @@ class RetentionService:
         deleted_input = 0
         deleted_output = 0
         carried = 0
+        # 一batchずつ削除してDB writerへ譲る。返却された削除数を積み上げ、
+        # 途中batch失敗はrepository例外のまま呼出元へ伝播させる。
         while True:
             result = self._repository.delete_old_batch(
                 cutoff_ms=cutoff_ms,
@@ -86,9 +88,12 @@ class RetentionService:
             deleted_input += input_count
             deleted_output += output_count
             carried += carried_count
+            # counter carry-forwardだけが起きたbatchで無限loopしないよう、
+            # event削除が0件なら追加batchを要求せず終える。
             if input_count == 0 and output_count == 0:
                 break
             _yield_for_database_writer()
+        # 全削除後の最後にvacuumを試し、削除数集計とvacuum時間を返す。
         self._repository.incremental_vacuum()
         return RetentionResult(
             deleted_input_events=deleted_input,

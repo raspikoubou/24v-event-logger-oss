@@ -184,6 +184,8 @@ class WidgetRepository:
         Raises:
             ValueError: deviceまたはSQLite操作で失敗が返された場合。
         """
+        # widget更新とreset境界確定を同じtransactionに含める。
+        # 読取側へ片方だけ反映した中間状態を見せない。
         self._connection.execute("BEGIN IMMEDIATE")
         try:
             cursor = self._connection.execute(
@@ -407,11 +409,14 @@ class OutputRuleRepository:
         Raises:
             ValueError: deviceまたはSQLite操作で失敗が返された場合。
         """
+        # 固定条件schemaだけをJSON化して保存する。
+        # SQLや任意式を実行可能な形では受け取らない。
         config_json = json.dumps(
             _output_rule_config(rule.condition),
             ensure_ascii=False,
             separators=(",", ":"),
         )
+        # rule本体と監査行を一transactionで更新し、記録の片側だけ残さない。
         self._connection.execute("BEGIN IMMEDIATE")
         try:
             cursor = self._connection.execute(

@@ -43,6 +43,7 @@ def _build_log_query(
             output」に該当すると判定した場合。 「sources contains an unsupported output
             source」に該当すると判定した場合。
     """
+    # 先に境界と各filterを検証し、不正値をSQL組み立て途中まで持ち込まない。
     if start_ms >= end_ms:
         raise ValueError("start_ms must be before end_ms")
     input_channels, output_channels = _split_signals(signals)
@@ -58,6 +59,7 @@ def _build_log_query(
     if sources and any(source not in allowed_sources for source in sources):
         raise ValueError("sources contains an unsupported output source")
 
+    # 各表へ適用する条件を整理し、該当する表だけをUNIONへ加える。
     selected_kinds = set(kinds) if kinds else None
     selects: list[str] = []
     parameters: list[object] = []
@@ -67,6 +69,7 @@ def _build_log_query(
         and (selected_kinds is None or bool(selected_kinds & {"edge", "snapshot"}))
     )
     if include_input:
+        # 入力eventの条件はevents表内で絞り、bind値もこのSELECTのplaceholder順に積む。
         input_clause, input_params = _channel_clause("channel_id", input_channels)
         if values:
             placeholders = ", ".join("?" for _ in values)
@@ -98,6 +101,7 @@ def _build_log_query(
         selected_kinds is None or "output" in selected_kinds
     )
     if include_output:
+        # OUT履歴も独立した索引条件で取得し、入力履歴と同じ列構成へ合わせる。
         output_clause, output_params = _channel_clause(
             "output_channel", output_channels
         )
@@ -120,6 +124,7 @@ def _build_log_query(
             + output_clause
         )
         parameters.extend([start_ms, end_ms, *output_params])
+    # filterに合う表がない場合は空結果queryを返し、呼出側の実行経路を保つ。
     if not selects:
         return (
             "SELECT id, 'input' AS record_type, ts_utc_ms, mono_ns, channel_id, "

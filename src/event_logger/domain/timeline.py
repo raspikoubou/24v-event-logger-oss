@@ -52,6 +52,7 @@ def build_state_intervals(
     if start_ms >= end_ms:
         raise ValueError("start_ms must be before end_ms")
 
+    # 対象channelだけをsession単位に分け、各sessionの状態遷移列を組み立てる。
     grouped_events: dict[int, list[InputEvent]] = defaultdict(list)
     for event in events:
         if event.channel_id == channel_id:
@@ -61,6 +62,8 @@ def build_state_intervals(
         # events.idを正とする。timestampは表示軸としてのみ利用する。
         session_events.sort(key=lambda event: event.id)
 
+    # sessionごとに検索期間との重なりを切り出してから区間化する。
+    # sessionをまたいで状態を引き継がないため、各sessionを独立して処理する。
     intervals: list[StateInterval] = []
     for session in sorted(sessions, key=lambda item: item.id):
         session_events = grouped_events.get(session.id, [])
@@ -86,6 +89,7 @@ def build_state_intervals(
             )
         )
 
+    # session外や無効区間を最後にUNKNOWNで埋め、全channel共通の表示期間にそろえる。
     return _fill_unknown_gaps(
         intervals,
         channel_id=channel_id,
@@ -186,6 +190,7 @@ def _build_session_intervals(
     previous_mono_ns: int | None = None
     clock_adjusted = False
     result: list[StateInterval] = []
+    # event ID順に遷移をたどり、表示時刻の逆行は座標補正だけで扱う。
     for event in session_events:
         # 表示上のtimestampは時計補正で逆行し得る。状態遷移の順番はevent ID
         # で維持し、timeline上の座標だけを単調に進める。
@@ -227,6 +232,8 @@ def _build_session_intervals(
             effective_event_ms = min(start_ms + 1, end_ms - 1)
         if effective_event_ms > end_ms:
             break
+        # 次のedgeで現在状態を閉じる。monotonic値が取れない区間は
+        # wall-clockの長さを境界計算にだけ使い、確定durationとしては保存しない。
         if state is not None:
             display_end_ms = max(effective_event_ms, cursor_ms + 1)
             display_end_ms = min(display_end_ms, end_ms)
@@ -260,6 +267,8 @@ def _build_session_intervals(
         state = "ON" if event.value else "OFF"
         cursor_ms = min(max(effective_event_ms, cursor_ms), end_ms - 1)
         state_started_mono_ns = event.mono_ns
+    # 最後のedgeからsession終端まで続く状態を追加し、終端時刻が確かな場合だけ
+    # monotonic durationを確定値として持たせる。
     tail_monotonic_available = (
         state_started_mono_ns is not None and end_mono_ns is not None
     )
@@ -361,6 +370,7 @@ def _fill_unknown_gaps(
         時間順に並んだ状態区間。 未観測期間はUNKNOWNとして含み、
             未確定時間を補間しない。
     """
+    # 開始境界から順に穴を埋め、重複部分は前の区間終端で切って時系列を保つ。
     result: list[StateInterval] = []
     cursor_ms = start_ms
     for interval in sorted(intervals, key=lambda item: (item.start_ms, item.end_ms)):
