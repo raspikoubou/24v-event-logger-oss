@@ -184,6 +184,9 @@ class EventWriterPort(Protocol):
             None。入力eventを共有Queueへ追加する。
         """
 
+    def raise_if_failed(self) -> None:
+        """保存失敗があれば例外を送出する。同期writerは常に正常とみなす。"""
+
     def drain_all(self) -> int:
         """writerの状態を確認し、完了済み件数を返す。
 
@@ -279,6 +282,10 @@ class EventWriter:
             raise
         self._event_queue.task_done()
         return True
+
+    def raise_if_failed(self) -> None:
+        """同期writerはエラーを保持せず、その場の書き込みで例外を返す。"""
+        return
 
     def drain_all(self) -> int:
         """現在Queueにあるeventを順番に保存する。
