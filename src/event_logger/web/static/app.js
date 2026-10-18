@@ -12,6 +12,7 @@
     shouldRefreshLogPage
   } = window.EventLoggerRefreshPolicy;
 
+  // API呼び出しを一本化する。更新系だけCSRFヘッダーを付け、認証切れとAPIエラーを画面へ伝える。
   async function liveJson(path, options = {}) {
     const requestOptions = { ...options, headers: { ...(options.headers || {}) } };
     if (requestOptions.body && !requestOptions.headers["Content-Type"]) {
@@ -42,6 +43,7 @@
   } = window.EventLoggerRetentionPolicy;
   const { serializeDemoCsv } = window.EventLoggerCsvFormat;
 
+  // 実機では複数APIの結果を画面用fixturesへまとめる。デモでは通信せず固定データを返す。
   async function loadLiveFixtures(
     period = null,
     includeDashboard = false,
@@ -239,11 +241,13 @@
     storageWarningMessage
   } = window.EventLoggerStoragePolicy;
 
+  // 初期データ取得が完了してから画面の状態管理とイベント登録を開始する。
   async function start() {
     const fixtures = await loadLiveFixtures(null, liveMode);
     runApp(fixtures);
   }
 
+  // この関数のローカル変数が画面全体の状態を保持する。各画面処理は同じfixturesを参照する。
   function runApp(fixtures) {
   let currentPeriod = fixtures.settings.dashboardPeriod || "8h";
   let dashboardCustomRangeDraft = null;
@@ -293,12 +297,14 @@
     "イベント一覧": "ダッシュボード内に簡易ログを表示します。"
   };
 
+  // デモ用の仮想時計。壁時計の変更に影響されないperformance.now()の差分で進める。
   function demoNowMs() {
     return demoClockBaseMs + performance.now() - demoClockStartedAtMs;
   }
 
   const refreshLiveState = createRefreshCoordinator(refreshLiveStateOnce);
 
+  // 定期ポーリングで取得した状態を反映する。編集中のフォームや開いた詳細表示は不要に作り直さない。
   async function refreshLiveStateOnce(forceDashboard = false) {
     const nowMs = Date.now();
     const customRangeForRefresh = (
@@ -399,6 +405,7 @@
     refreshCurrentStateCards();
   }
 
+  // loggerdの状態から操作可否・表示を同期する。画面の見た目だけで運転状態を決めない。
   function syncLiveControls() {
     const critical = fixtures.loggerStatus === "critical";
     const configurationBlocked = Boolean(fixtures.configurationSync?.outOfSync);
@@ -440,6 +447,7 @@
     banner.hidden = logging && loggerStateKnown;
   }
 
+  // 時刻同期できなかったイベントと保存上の注意を表示する。
   function renderUnsynchronizedWarnings() {
     const count = fixtures.unsynchronizedCount;
     const latencyWarning = Boolean(fixtures.writeLatency?.warning);
@@ -540,6 +548,7 @@
     toastTimer = window.setTimeout(() => toast.classList.remove("is-visible"), 2400);
   }
 
+  // タブ切替時に必要な画面だけ描画・更新する。
   function switchView(viewName) {
     activeView = viewName;
     renderUnsynchronizedWarnings();
@@ -556,6 +565,7 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  // 表示時刻を更新する。時刻は選択タイムゾーンに従って整形する。
   function renderClock() {
     const nowMs = demoNowMs();
     const demoNow = new Date(nowMs);
@@ -575,6 +585,7 @@
     renderLastEventCard();
   }
 
+  // 選択信号と表示期間に合致する直近イベントだけをカードへ描画する。
   function renderRecentEvents() {
     const card = document.querySelector('[data-widget="recent-events"]');
     const list = document.querySelector("#recent-events");
@@ -638,6 +649,7 @@
     return formatDuration(durationMs);
   }
 
+  // 確定済みの入力状態と時刻情報から現在値カードに必要な値を組み立てる。
   function currentStateValues(channelId, onLabel, offLabel, widgetId) {
     const channel = fixtures.channels.find((item) => `IN${item.id}` === channelId);
     if (liveMode) {
@@ -718,6 +730,7 @@
     )).join("");
   }
 
+  // 表示対象の現在値カードをまとめて更新する。
   function refreshCurrentStateCards() {
     document.querySelectorAll("#dashboard-realtime-grid [data-widget-type='現在状態']").forEach((card) => {
       updateCurrentStateCard(card, {
@@ -731,10 +744,12 @@
     });
   }
 
+  // 「共通期間に追従」を現在のダッシュボード期間へ解決する。
   function periodKeyForWidget(periodSetting) {
     return periodSetting === "follow" ? currentPeriod : periodSetting;
   }
 
+  // 保存済みの固定期間ならその境界を使い、ローリング期間だけ現在時刻から逆算する。
   function periodBounds(periodKey, durationOverrideMs = 0) {
     const period = fixtures.dashboardPeriods[periodKey];
     const endMs = period.endAt ? Date.parse(period.endAt) : demoNowMs();
@@ -749,6 +764,7 @@
     return event.timestamp ? Date.parse(event.timestamp) : Date.parse(`2026-09-12T${event.time}+09:00`);
   }
 
+  // 利用者入力の開始・終了を検証し、画面内のカスタム期間境界へ反映する。
   function applyCustomPeriod(fromInput, toInput) {
     const startMs = parseLocalDateTime(fromInput.value);
     const endMs = parseLocalDateTime(toInput.value);
@@ -769,12 +785,14 @@
     });
   }
 
+  // UNKNOWNをON/OFFへ算入せず、確定している区間だけを集計する。
   function stateDurationInPeriod(channelId, periodKey, targetState = "ON", durationOverrideMs = 0) {
     return timelineIntervals(channelId, periodKey, durationOverrideMs)
       .filter((interval) => interval.state === targetState)
       .reduce((total, interval) => total + interval.endMs - interval.startMs, 0);
   }
 
+  // イベントから連続区間を復元する。記録停止後と欠落区間はUNKNOWNとして保持する。
   function timelineIntervals(channelId, periodKey, durationOverrideMs = 0) {
     const bounds = periodBounds(periodKey, durationOverrideMs);
     const observedEndMs = Math.max(bounds.startMs, Math.min(bounds.endMs, loggingStoppedAtMs || demoNowMs()));
@@ -831,6 +849,7 @@
     return `${classPrefix}-${isNarrow ? "marker" : "segment"}`;
   }
 
+  // 状態区間を横幅比率へ変換し、タイムラインの表示要素を生成する。
   function timelineMarksHtml(
     channelId,
     periodKey,
@@ -863,6 +882,7 @@
     }).join("");
   }
 
+  // 個別ウィジェット用の縮小タイムラインを構築する。
   function miniTimelineHtml(channelId, periodKey, durationOverrideMs = 0, dashboardValue = null) {
     const domainIntervals = dashboardValue?.channels?.find((item) => item.signal === channelId)?.intervals;
     const marks = timelineMarksHtml(
@@ -875,6 +895,7 @@
     return `<div class="custom-mini-timeline"><div class="custom-mini-track" data-mini-timeline-track>${marks}</div></div>`;
   }
 
+  // ウィジェット種別に応じて履歴表示の本文を切り替える。
   function historyWidgetBodyHtml(config) {
     if (liveMode && fixtures.dashboardWarning) {
       return `<p class="custom-widget-empty" role="status">${escapeHtml(fixtures.dashboardWarning.message)}</p>`;
@@ -987,6 +1008,7 @@
     return `<div class="event-list">${items || '<p class="custom-widget-empty">対象期間の記録はありません。</p>'}</div><small>${escapeHtml(config.channelId)}・${escapeHtml(periodLabel)}</small>`;
   }
 
+  // 履歴カードの表示を更新する。タイムライン操作中はDOM再生成によるフォーカス喪失を避ける。
   function renderHistoryWidgetCard(card) {
     if (card.dataset.widgetType === "タイムライン") {
       const focusedEvent = document.activeElement?.matches("[data-timeline-event]")
@@ -1035,6 +1057,7 @@
     bindTimelineEvents();
   }
 
+  // 縮小タイムラインの倍率を適用し、表示位置の維持を助ける。
   function applyMiniTimelineZoom(card) {
     const label = card.querySelector("[data-mini-zoom-label]");
     if (!label) return;
@@ -1085,6 +1108,7 @@
   const { widgetConfigFromApi, widgetPayloadFromConfig } =
     window.EventLoggerWidgetConfig;
 
+  // 編集行をAPI保存用の設定データへ変換する。
   function widgetApiPayloadFromRow(row, sortOrder) {
     // DOMの読取りはUI側、形式変換は専用モジュールに分離する。
     return widgetPayloadFromConfig(
@@ -1095,6 +1119,7 @@
     );
   }
 
+  // サーバーに保存されているウィジェット構成を画面へ反映する。
   function renderPersistedWidgets(items) {
     const realtimeList = document.querySelector('[data-widget-group="realtime"]');
     const historyList = document.querySelector('[data-widget-group="history"]');
@@ -1119,10 +1144,12 @@
     renderCustomHistoryWidgets();
   }
 
+  // 未保存のローカル編集を定期ポーリングから保護するため変更フラグを立てる。
   function markWidgetSettingsDirty() {
     if (liveMode) widgetSettingsDirty = true;
   }
 
+  // 保存前に最新のサーバー状態を取り直し、追加・更新・削除を順に反映する。
   async function saveWidgetSettings() {
     if (!liveMode || !widgetSettingsDirty) return;
     // 途中の通信失敗で一部だけ保存された場合も、再試行時はDBの最新状態を
@@ -1156,6 +1183,7 @@
   }
 
   // rolling期間の境界は更新されるため、描画済み区間の詳細は絶対時刻を優先する。
+  // イベントの詳細表示で用いる時刻範囲を決定する。
   function timelineEventTimeBounds(dataset, periodBoundsValue) {
     const periodDurationMs = periodBoundsValue.endMs - periodBoundsValue.startMs;
     const storedStartMs = Number(dataset.startMs);
@@ -1202,6 +1230,7 @@
     detail.style.top = `${top}px`;
   }
 
+  // イベントの詳細を表示し、クリック固定の場合は自動非表示を抑止する。
   function showTimelineDetail(button, pin = false) {
     const detail = document.querySelector("#timeline-event-detail");
     const timelineEvent = timelineEventDetails(button);
@@ -1228,6 +1257,7 @@
     positionTimelineDetail(button);
   }
 
+  // ホバーとクリック固定の違いを考慮して詳細を閉じる。
   function hideTimelineDetail(force = false) {
     if (pinnedTimelineEvent && !force) return;
     document.querySelector("#timeline-event-detail").hidden = true;
@@ -1241,6 +1271,7 @@
     }
   }
 
+  // 再描画されたタイムライン要素へ、重複登録を避けて操作イベントを結び直す。
   function bindTimelineEvents() {
     document.querySelectorAll("[data-timeline-event]:not([data-timeline-bound])").forEach((button) => {
       button.dataset.timelineBound = "true";
@@ -1267,6 +1298,7 @@
     });
   }
 
+  // 共通タイムラインを描画する。イベント詳細の閲覧中は更新を延期する。
   function renderTimeline() {
     const card = document.querySelector('[data-widget="timeline"]');
     const timeline = document.querySelector("#timeline");
@@ -1316,6 +1348,7 @@
     applyTimelineZoom();
   }
 
+  // 拡大率とスクロール位置をタイムライン表示へ適用する。
   function applyTimelineZoom() {
     const timeline = document.querySelector("#timeline");
     const zoomLabel = document.querySelector("#timeline-zoom-label");
@@ -1331,6 +1364,7 @@
     if (timelineZoomIndex === 0) timelineScroll.scrollLeft = 0;
   }
 
+  // 現在の表示期間と時間軸をダッシュボードへ反映する。
   function renderDashboardPeriod() {
     const countCard = document.querySelector('[data-widget="cycle-count"]');
     if (countCard && document.querySelector("#cycle-count") && document.querySelector("#count-period-label")) {
@@ -1412,6 +1446,7 @@
     return "入力の変化";
   }
 
+  // デモ用の履歴を現在の検索条件で絞り込む。
   function filteredEvents() {
     const periodKey = document.querySelector("#log-period").value;
     const { startMs, endMs } = periodBounds(periodKey);
@@ -1449,6 +1484,7 @@
     select.value = [...select.options].some((option) => option.value === selected) ? selected : "all";
   }
 
+  // 実機ではAPI側のページ結果を表示し、デモではローカルイベントをページ分割する。
   function renderLogs() {
     const pageSize = Number(document.querySelector("#log-page-size").value);
     const events = liveMode ? logPageEvents : filteredEvents();
@@ -1490,6 +1526,7 @@
     }).join("");
   }
 
+  // 選択中のフィルター・時間範囲・ページを同じクエリ形式にまとめる。
   function logApiQuery(includePaging) {
     const periodKey = document.querySelector("#log-period").value;
     return buildLogApiQuery({
@@ -1507,6 +1544,7 @@
     });
   }
 
+  // ログ一覧を非同期取得する。古い要求の応答が新しい検索結果を上書きしないよう要求IDで判定する。
   async function loadLiveLogPage() {
     const requestId = ++logRequestId;
     logPageLoading = true;
@@ -1546,6 +1584,7 @@
     }
   }
 
+  // 検索条件変更時はページ番号と時間範囲をリセットして検索し直す。
   function reloadLogQuery() {
     logPage = 1;
     // フィルター変更後は新たな時間範囲を検索する。ページ送りの間だけ範囲を固定する。
@@ -1561,6 +1600,7 @@
     }
   }
 
+  // 設定・ログ・ウィジェットなどの各表示内容を更新する。
   function renderDataViews() {
     renderLogSignalOptions();
     renderRecentEvents();
@@ -1581,6 +1621,7 @@
     `).join("");
   }
 
+  // 初期セットアップの入力欄を現在の設定から構成する。
   function renderSetupWizard() {
     setSwitchState(document.querySelector("#setup-password-protection"), fixtures.settings.passwordProtection);
     document.querySelector("#setup-password-field").hidden = !fixtures.settings.passwordProtection;
@@ -1596,6 +1637,7 @@
     }
   }
 
+  // 初期設定を検証し、実機ではAPIへ送信して設定完了を反映する。
   async function completeSetup() {
     const deviceName = document.querySelector("#setup-device-name").value.trim();
     const passwordProtection = switchIsOn(document.querySelector("#setup-password-protection"));
@@ -1676,6 +1718,7 @@
     showToast("初回設定を完了し、記録を開始しました");
   }
 
+  // 通信・保存状態などの診断情報を画面へ反映する。
   function renderHealth() {
     const heartbeatHealth = fixtures.health.find((item) => item.label === "Heartbeat状態");
     const heartbeat = fixtures.settings.heartbeat;
@@ -1722,6 +1765,7 @@
     }).join("");
   }
 
+  // 明示終了またはタイムアウト後に出力テストの画面状態を解放する。
   async function finishOutputTest(showMessage = true) {
     if (!activeOutputTest) return;
     if (liveMode) {
@@ -1747,6 +1791,7 @@
     if (showMessage) showToast(`OUT${outputId}をOFFに戻しました`);
   }
 
+  // メンテナンス時の出力テストを開始し、終了処理との整合を保つ。
   async function startOutputTest(outputId) {
     if (liveMode) {
       try {
@@ -1771,6 +1816,7 @@
     renderHealth();
   }
 
+  // Heartbeat・条件ルール・テストの出力占有関係を表示に反映する。
   function updateOutputOwners() {
     fixtures.outputs.forEach((output) => {
       output.owner = "未使用";
@@ -1818,6 +1864,7 @@
     document.querySelector("#heartbeat-interval").disabled = !enabled;
   }
 
+  // 設定画面の再描画時に、編集中の入力内容を上書きするかどうかを切り替える。
   function renderOutputSettings(preserveForm = false) {
     const heartbeat = fixtures.settings.heartbeat;
     if (!preserveForm) {
@@ -1852,6 +1899,7 @@
     }).join("") || '<p class="empty-rule-list">条件ルールはありません。</p>';
   }
 
+  // ルール有効状態を切り替え、実機ではサーバーの結果を取り直す。
   async function toggleOutputRule(ruleId) {
     const rule = fixtures.outputRules.find((item) => item.id === ruleId);
     if (!rule) return;
@@ -1907,12 +1955,14 @@
     select.value = selectedId || "IN1";
   }
 
+  // 条件種別に応じて必要な入力項目の表示を切り替える。
   function updateRuleConditionFields() {
     const absence = document.querySelector("#rule-condition").value === "event_absence";
     document.querySelector("#rule-value-field").hidden = absence;
     document.querySelector("#rule-edge-field").hidden = !absence;
   }
 
+  // 新規登録と既存ルール編集の双方で同じダイアログを使用する。
   function openOutputRuleDialog(ruleId = null) {
     editingOutputRuleId = ruleId;
     const rule = fixtures.outputRules.find((item) => item.id === ruleId);
@@ -1935,6 +1985,7 @@
     document.querySelector("#output-rule-dialog").showModal();
   }
 
+  // 同一OUTへの競合割当てを保存前に確認する。
   function outputConflict(outputId, ignoredRuleId = null) {
     const heartbeat = fixtures.settings.heartbeat;
     if (heartbeat.enabled && heartbeat.outputId === outputId) return "Heartbeat";
@@ -1947,6 +1998,7 @@
     return Number.isInteger(duration) && duration >= 1 && duration <= 86400;
   }
 
+  // 入力値と出力の競合を検証してから保存し、実機とデモで更新先を分ける。
   async function saveOutputRule() {
     const error = document.querySelector("#rule-error");
     const name = document.querySelector("#rule-name").value.trim();
@@ -2022,6 +2074,7 @@
     editingOutputRuleId = null;
   }
 
+  // 記録の停止・再開を実行する。実機ではAPIを正とし、デモでは状態と履歴を模擬する。
   async function setLoggingState(nextLogging) {
     if (liveMode) {
       try {
@@ -2080,6 +2133,7 @@
     showToast(logging ? "記録を再開しました" : "記録を停止してメンテナンス状態へ移行しました");
   }
 
+  // 危険な操作を確定するための共通確認ダイアログを表示する。
   function openConfirmation(title, message, confirmLabel, action) {
     const dialog = document.querySelector("#confirm-dialog");
     document.querySelector("#dialog-title").textContent = title;
@@ -2089,6 +2143,7 @@
     dialog.showModal();
   }
 
+  // 画面条件に基づくログCSVを実機APIまたはデモデータから取得する。
   function downloadCsv() {
     if (liveMode) {
       const anchor = document.createElement("a");
@@ -2144,6 +2199,7 @@
     document.querySelector("#widget-type-help").textContent = widgetTypeHelp[typeSelect.value];
   }
 
+  // ウィジェット種別に合わせて選択可能な信号を組み立てる。
   function renderWidgetChannelOptions() {
     const select = document.querySelector("#new-widget-channel");
     select.innerHTML = fixtures.channels.map((channel) => (
@@ -2173,6 +2229,7 @@
     return checked.join(",");
   }
 
+  // 既存ウィジェットの編集と新規作成で、入力項目を初期化・復元する。
   function openWidgetDialog(isEditing, widgetGroup = "realtime") {
     const typeSelect = document.querySelector("#new-widget-type");
     typeSelect.disabled = isEditing;
@@ -2223,6 +2280,7 @@
     document.querySelector("#widget-dialog").showModal();
   }
 
+  // 種別固有の設定欄だけを表示し、不適切な設定を入力させない。
   function updateWidgetTypeFields() {
     const type = document.querySelector("#new-widget-type").value;
     const isCurrentState = type === "現在状態";
@@ -2246,6 +2304,7 @@
     document.querySelector("#widget-list-fields").hidden = type !== "イベント一覧";
   }
 
+  // 同一グループ内で並び替え可能な方向だけ操作ボタンを有効にする。
   function updateMoveButtons() {
     document.querySelectorAll("#widget-settings-list .widget-group-list").forEach((group) => {
       const rows = [...group.querySelectorAll(".widget-setting-row")];
@@ -2282,6 +2341,7 @@
     return row.dataset.widgetChannel || channels[row.dataset.widgetRow] || "IN1";
   }
 
+  // 設定行の入力値を保存用ウィジェット設定へ変換する。
   function widgetApiConfigForRow(row) {
     try {
       const config = JSON.parse(row.dataset.apiConfig || "{}");
@@ -2306,6 +2366,7 @@
     return `${type}・${channelId.replaceAll(",", "・")}・${periodText}`;
   }
 
+  // 編集画面の並び順とダッシュボードの表示順を同期する。
   function syncDashboardLayout() {
     const dashboardTargets = {
       realtime: document.querySelector("#dashboard-realtime-grid"),
@@ -2328,6 +2389,7 @@
       .find((widget) => widget.dataset.widget === widgetId) || null;
   }
 
+  // 表示グループ内でウィジェットの順序を変更する。
   function moveWidgetRow(row, direction) {
     const sibling = direction === "up" ? row.previousElementSibling : row.nextElementSibling;
     if (!sibling) return;
@@ -2342,12 +2404,14 @@
     showToast("表示順を変更しました");
   }
 
+  // 追加や複製時に既存IDとの衝突を避ける。
   function uniqueWidgetId(prefix = "widget") {
     let number = 1;
     while (document.querySelector(`[data-widget="${prefix}-${number}"], [data-widget-row="${prefix}-${number}"]`)) number += 1;
     return `${prefix}-${number}`;
   }
 
+  // 表示中の行と上書き指定からウィジェット定義を組み立てる。
   function widgetConfigFromRow(row, overrides = {}) {
     return {
       id: row.dataset.widgetRow,
@@ -2376,6 +2440,7 @@
     };
   }
 
+  // 現在の表示設定を複製し、別IDのカードとして追加する。
   function duplicateWidget(row) {
     const group = row.closest(".widget-group-list").dataset.widgetGroup;
     const config = widgetConfigFromRow(row, {
@@ -2397,6 +2462,7 @@
     showToast("表示項目を複製しました");
   }
 
+  // 画面から削除して、後続の保存対象から除外する。
   function deleteWidget(row) {
     const title = row.querySelector("strong").textContent;
     openConfirmation(
@@ -2416,6 +2482,7 @@
 
 
 
+  // ウィジェットの選択信号などをログ画面の検索条件へ引き継ぐ。
   function openLogsForWidget(widget) {
     const period = periodKeyForWidget(widget.dataset.widgetPeriod || "follow");
     const periodSelect = document.querySelector("#log-period");
@@ -2441,6 +2508,7 @@
     switchView("logs");
   }
 
+  // 画面遷移、期間変更、検索・ページ送りなど、表示系の操作イベントを登録する。
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => switchView(button.dataset.view));
   });
@@ -2453,6 +2521,7 @@
       switchView(button.dataset.viewLink);
     });
   });
+  // カード内のボタンは動的に生成されるため、親要素でクリックを委譲する。
   document.querySelector("#dashboard-history-grid").addEventListener("click", (event) => {
     const miniZoomButton = event.target.closest("[data-mini-zoom]");
     if (miniZoomButton) {
@@ -2608,6 +2677,7 @@
   window.addEventListener("resize", () => {
     if (pinnedTimelineEvent) positionTimelineDetail(pinnedTimelineEvent);
   });
+  // 検索条件変更時はページ番号と検索範囲をリセットする。
   document.querySelectorAll("#log-period, #log-signal, #log-value, #log-kind, #log-source").forEach((select) => {
       select.addEventListener("change", () => {
       if (select.id === "log-period") {
@@ -2640,6 +2710,7 @@
     else renderLogs();
   });
   document.querySelector("#download-csv").addEventListener("click", downloadCsv);
+  // 設定を保存する入口。入力・システム設定の変更可否は後段のAPIでも検証する。
   document.querySelector("#save-settings").addEventListener("click", async () => {
     const pendingChannels = [...document.querySelectorAll("#channel-settings .channel-row")].map((row) => {
       const debounceValue = row.querySelector(".channel-debounce").value.trim();
@@ -2753,6 +2824,7 @@
     renderChannelSettings();
     showToast("設定を保存しました");
   });
+  // ここからは設定画面内の操作をイベント委譲・各ダイアログへ接続する。
   document.querySelectorAll("[data-settings-target]").forEach((button) => {
     button.addEventListener("click", () => openSettingsSection(button.dataset.settingsTarget));
   });
@@ -2797,6 +2869,7 @@
   });
   document.querySelector("#rule-condition").addEventListener("change", updateRuleConditionFields);
   document.querySelector("#save-output-rule").addEventListener("click", saveOutputRule);
+  // 削除操作も確認・再取得を通して画面と永続設定の不一致を避ける。
   document.querySelector("#delete-output-rule").addEventListener("click", async () => {
     const rule = fixtures.outputRules.find((item) => item.id === editingOutputRuleId);
     if (!rule) return;
@@ -2825,6 +2898,7 @@
     document.querySelector("#output-rule-dialog").close();
     showToast("条件ルールを削除しました");
   });
+  // ウィジェット行は動的に入れ替わるため、親リストで追加・移動・編集を受け取る。
   document.querySelector("#widget-settings-list").addEventListener("click", (event) => {
     const addButton = event.target.closest("[data-add-widget-group]");
     if (addButton) {
@@ -2872,6 +2946,7 @@
     markWidgetSettingsDirty();
     showToast("表示幅を変更しました");
   });
+  // ドラッグ中の順序はローカルに反映し、保存操作とは分離する。
   document.querySelector("#widget-settings-list").addEventListener("dragstart", (event) => {
     const row = event.target.closest(".widget-setting-row");
     if (!row || event.target.closest("button, select, input")) {
@@ -2943,6 +3018,7 @@
       showToast("表示する信号を1つ以上選択してください");
     }
   });
+  // ダイアログ終了時に編集中フラグと一時状態を整理する。
   document.querySelector("#widget-dialog").addEventListener("close", (event) => {
     if (event.target.returnValue !== "confirm") return;
     const title = document.querySelector("#new-widget-title").value || document.querySelector("#new-widget-type").value;
@@ -3050,6 +3126,7 @@
     bindTimelineEvents();
     showToast("表示項目を追加しました");
   });
+  // 記録の停止・再開は出力状態にも関わるため、確認ダイアログを経由する。
   document.querySelector("#toggle-logging").addEventListener("click", () => {
     if (fixtures.loggerStatus === "critical") return;
     if (logging) {
@@ -3063,6 +3140,7 @@
       setLoggingState(true);
     }
   });
+  // 設定反映の再試行はユーザーの明示操作として実施する。
   document.querySelector("#retry-config-sync").addEventListener("click", async (event) => {
     const button = event.currentTarget;
     if (!liveMode) return;
@@ -3077,6 +3155,7 @@
       button.disabled = false;
     }
   });
+  // 出力テストの各ボタンは共通の親要素でイベントを受ける。
   document.querySelector("#output-tests").addEventListener("click", (event) => {
     const button = event.target.closest(".test-button");
     if (!button || logging || fixtures.loggerStatus === "critical") return;
