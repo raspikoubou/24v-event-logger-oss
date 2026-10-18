@@ -25,6 +25,7 @@ _REQUIRED_TABLES = frozenset(
 
 
 @dataclass(frozen=True, slots=True)
+# 検査結果とエラー詳細をまとめて保持する。
 class IntegrityReport:
     """SQLite integrity検査の結果。"""
 
@@ -44,6 +45,7 @@ class DatabaseIntegrityError(RuntimeError):
         super().__init__(format_integrity_error(report))
 
 
+# DB接続の成否も検査結果へ統合し、呼び出し側で異常を握りつぶさない。
 def check_database(database_path: str | Path) -> IntegrityReport:
     """SQLite fileを開いて整合性を検査する。"""
     with closing(connect_database(database_path)) as connection:
@@ -51,6 +53,7 @@ def check_database(database_path: str | Path) -> IntegrityReport:
             return check_connection(connection)
 
 
+# SQLite内部の整合性と本製品の必要なテーブル構造を検査する。
 def check_connection(connection: sqlite3.Connection) -> IntegrityReport:
     """開いたSQLite接続のschema・integrity・foreign keyを検査する。"""
     schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])

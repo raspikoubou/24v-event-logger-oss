@@ -14,6 +14,7 @@ from event_logger.domain.rules import OutputRule
 from event_logger.domain.widgets import Widget
 
 
+# 画面のウィジェット定義を個別IDで管理し、表示順と設定内容を永続化する。
 class WidgetRepository:
     """Dashboard widget設定のCRUDとauditを提供する。"""
 
@@ -38,6 +39,7 @@ class WidgetRepository:
         ).fetchone()
         return _widget_from_row(row) if row is not None else None
 
+    # 既存ウィジェットと重複しない識別子を採番する。
     def next_id(self) -> str:
         """人が読める連番widget IDを返す。"""
         rows = self._connection.execute(
@@ -84,6 +86,7 @@ class WidgetRepository:
             raise
         return widget
 
+    # 条件ルールの更新ではルールIDの連続性を維持する。
     def update(self, widget: Widget, *, audit_action: str = "widget_updated") -> Widget:
         """widgetを更新し、旧設定を上書きする。"""
         self._connection.execute("BEGIN IMMEDIATE")
@@ -117,6 +120,7 @@ class WidgetRepository:
             raise
         return widget
 
+    # ウィジェット設定変更とカウンタresetの境界を同じトランザクションで確定する。
     def update_with_counter_reset(
         self,
         widget: Widget,
@@ -207,6 +211,7 @@ class WidgetRepository:
         )
 
 
+# 出力条件を保存する前に競合・対象チャンネルの整合性を確認する。
 class OutputRuleRepository:
     """output_rulesの固定条件JSONをDomain ruleへ変換する。"""
 

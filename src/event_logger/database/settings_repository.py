@@ -10,6 +10,7 @@ import sqlite3
 from collections.abc import Mapping
 
 
+# 設定値をJSONとして保存し、更新時には同じDB内に変更履歴を残す。
 class SettingsRepository:
     """app_settingsのJSON値と設定変更auditを扱う。"""
 
@@ -29,6 +30,7 @@ class SettingsRepository:
         except json.JSONDecodeError as error:
             raise ValueError(f"invalid app setting JSON: {key}") from error
 
+    # 設定本体と変更監査は一つの永続化処理として扱う。
     def set_json(
         self,
         *,
@@ -44,6 +46,7 @@ class SettingsRepository:
             audit_action=audit_action,
         )
 
+    # 関連設定をまとめて更新し、途中失敗で一部だけ有効にならないようにする。
     def set_many_json(
         self,
         *,
@@ -91,6 +94,7 @@ class SettingsRepository:
             raise
 
 
+# 操作・設定変更を後から確認できる監査ログを扱う。
 class AuditLogRepository:
     """運用操作のaudit_log書込みを一箇所へ閉じ込める。"""
 

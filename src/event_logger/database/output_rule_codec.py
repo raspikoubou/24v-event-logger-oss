@@ -13,6 +13,7 @@ from event_logger.domain.rules import (
 )
 
 
+# DB上の条件設定をドメインのルール型へ復元する。型変換の入口をここへ集める。
 def _output_rule_from_row(row: sqlite3.Row) -> OutputRule:
     """output_rules rowを検証付きDomain ruleへ変換する。"""
     try:
@@ -57,6 +58,7 @@ def _output_rule_from_row(row: sqlite3.Row) -> OutputRule:
     )
 
 
+# ルール条件を永続化用の単純な辞書へ変換する。
 def _output_rule_config(condition: ConditionRule) -> dict[str, object]:
     """ConditionRuleを仕様書のconfig_jsonへ変換する。"""
     config: dict[str, object] = {

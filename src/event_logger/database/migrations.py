@@ -25,6 +25,7 @@ class MigrationResult:
     changed: bool
 
 
+# DBスキーマの変更は更新処理から明示的に起動する。通常サービス起動とは分ける。
 def migrate_database(database_path: str | Path) -> MigrationResult:
     """DBを明示的に最新schemaへ更新する。
 
@@ -36,6 +37,7 @@ def migrate_database(database_path: str | Path) -> MigrationResult:
             return migrate_connection(connection)
 
 
+# 既存DBのバージョンと必要な差分だけを確認して段階的に更新する。
 def migrate_connection(connection: sqlite3.Connection) -> MigrationResult:
     """開いた接続を最新schemaへ更新する。"""
     old_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
@@ -67,6 +69,7 @@ def migrate_connection(connection: sqlite3.Connection) -> MigrationResult:
     return MigrationResult(old_version, LATEST_SCHEMA_VERSION, True)
 
 
+# ID再利用を避けるテーブル作り直しでは、既存イベントと参照関係を維持する。
 def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
     """event IDの再利用を防ぐevents tableへ再構築する。"""
     foreign_keys = int(connection.execute("PRAGMA foreign_keys").fetchone()[0])
@@ -117,6 +120,7 @@ def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
         connection.execute(f"PRAGMA foreign_keys = {foreign_keys}")
 
 
+# 既存バージョン番号だけでなく、実際のテーブル定義の差異も補正対象にする。
 def _ensure_events_autoincrement(connection: sqlite3.Connection) -> bool:
     """v2でも旧定義のevents tableならAUTOINCREMENTへ再構築する。"""
     row = connection.execute(
@@ -130,6 +134,7 @@ def _ensure_events_autoincrement(connection: sqlite3.Connection) -> bool:
     return True
 
 
+# 古いDBへ容量回収設定を適用する処理は通常起動から分離する。
 def _ensure_incremental_vacuum(connection: sqlite3.Connection) -> bool:
     """既存v2 DBのauto_vacuumを明示migrationで有効化する。"""
     row = connection.execute("PRAGMA auto_vacuum").fetchone()

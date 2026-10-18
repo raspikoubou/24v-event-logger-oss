@@ -64,6 +64,7 @@ def _widget_from_row(row: sqlite3.Row) -> Widget:
     )
 
 
+# DB内の整数・文字列表現を、型付きのイベントモデルへ正規化する。
 def _event_from_row(row: sqlite3.Row) -> InputEvent:
     """SQLite rowをInputEventへ変換する。"""
     return InputEvent(
@@ -105,6 +106,7 @@ def _channel_from_row(row: sqlite3.Row) -> ChannelConfig:
     )
 
 
+# 入力・出力の異なる保存行を、画面共通のログ表示モデルへ変換する。
 def _log_record_from_row(row: sqlite3.Row) -> LogRecord:
     """UNION queryのSQLite rowを統合ログモデルへ変換する。"""
     raw_record_type = row["record_type"]
@@ -175,6 +177,7 @@ def _input_state(raw_value: object) -> InputState:
     return cast(Literal[0, 1], value)
 
 
+# 削除対象のID群はSQLへ安全にバインドし、空集合も明示的に処理する。
 def _delete_ids(
     connection: sqlite3.Connection,
     table_name: str,
@@ -203,6 +206,7 @@ def _counter_config(raw_config: object) -> dict[str, object] | None:
     return config if isinstance(config, dict) else None
 
 
+# カウンタ集計の対象イベントを、保存済み設定の条件と突き合わせる。
 def _counter_event_matches(
     event_row: sqlite3.Row,
     config: Mapping[str, object],

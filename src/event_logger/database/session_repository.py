@@ -7,6 +7,7 @@ import sqlite3
 from event_logger.common.models import Session
 
 
+# 監視の開始と終了をセッション単位で残し、記録停止区間を判別できるようにする。
 class SessionRepository:
     """監視sessionの作成、終了、検索を提供する。"""
 
@@ -14,6 +15,7 @@ class SessionRepository:
         """接続を受け取る。接続のclose責務は呼び出し側にある。"""
         self._connection = connection
 
+    # 新規セッションの開始時刻と識別子を保存する。
     def create(
         self,
         *,
@@ -41,6 +43,7 @@ class SessionRepository:
             clock_synced=clock_synced,
         )
 
+    # 正常に停止できたセッションだけに終了境界を記録する。
     def end(self, session_id: int, ended_at_ms: int) -> None:
         """正常終了したsessionの終了時刻をcommitする。"""
         cursor = self._connection.execute(

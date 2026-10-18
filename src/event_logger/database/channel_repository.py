@@ -16,6 +16,7 @@ from event_logger.database.repository_helpers import (
 )
 
 
+# 入力チャンネルの設定保存を集中管理し、外部で直接SQL更新させない。
 class ChannelRepository:
     """入力チャンネル設定を読み書きする。"""
 
@@ -36,6 +37,7 @@ class ChannelRepository:
         ).fetchone()
         return _channel_from_row(row) if row is not None else None
 
+    # 個別更新でも値を検証し、監査履歴と設定の整合性を保つ。
     def update(
         self,
         *,
@@ -96,6 +98,7 @@ class ChannelRepository:
             raise RuntimeError("updated channel disappeared")
         return updated
 
+    # 初回設定の複数チャンネルをまとめて反映するための更新経路。
     def update_many(
         self,
         updates: Sequence[Mapping[str, object]],

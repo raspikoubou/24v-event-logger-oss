@@ -18,6 +18,7 @@ from event_logger.database.repository_helpers import (
 )
 
 
+# reset時点の集計値と以後のイベントを分けて扱い、履歴削除後も累積値を保つ。
 class CounterResetRepository:
     """ウィジェット別counter resetの基準を保存・取得する。"""
 
@@ -90,6 +91,7 @@ class CounterResetRepository:
         ).fetchone()
         return _counter_reset_from_row(row) if row is not None else None
 
+    # 既に繰り越した値とreset後の確定エッジを合算する。
     def count_total(self, *, reset_id: int, channel_id: int, value: int) -> int:
         """同じ読取りsnapshotでcarryと残存edgeを合算する。"""
         _validate_channel_ids([channel_id])
@@ -112,6 +114,7 @@ class CounterResetRepository:
         return int(row[0]) if row is not None else 0
 
 
+# 保存期間超過のデータを一度に全削除せず、処理量を制限して段階的に減らす。
 class RetentionRepository:
     """retentionのcarry + DELETE + vacuumをtransaction境界へ閉じ込める。"""
 
@@ -119,6 +122,7 @@ class RetentionRepository:
         """接続を受け取る。"""
         self._connection = connection
 
+    # 古いイベントの削除前に必要なカウンタ差分を繰り越す。履歴削除で表示値を減らさない。
     def delete_old_batch(
         self,
         *,
@@ -183,6 +187,7 @@ class RetentionRepository:
             self._connection.rollback()
             raise
 
+    # 削除した行の領域回収はトランザクションや起動処理から分離する。
     def incremental_vacuum(self) -> bool:
         """空きpageとWALを可能な範囲で段階的に返す。
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 
+# ログ画面とCSV出力が同じ絞り込み規則になるよう、SQL条件を共通化する。
 def _build_log_query(
     *,
     start_ms: int,
@@ -118,6 +119,7 @@ def _build_log_query(
     return query, parameters
 
 
+# INとOUTは保存テーブルが異なるため、選択信号を分けて検索条件を組み立てる。
 def _split_signals(signals: Sequence[str] | None) -> tuple[list[int], list[int]]:
     """IN1/OUT1表記を検証し、入力・出力チャンネルへ分離する。"""
     if signals is None:
@@ -148,6 +150,7 @@ def _split_signals(signals: Sequence[str] | None) -> tuple[list[int], list[int]]
     return input_channels, output_channels
 
 
+# チャンネル番号はバインド引数としてSQLへ渡し、文字列連結で埋め込まない。
 def _channel_clause(column: str, channels: Sequence[int]) -> tuple[str, list[object]]:
     """チャンネル絞り込みSQLをbind parameterで作成する。"""
     if not channels:

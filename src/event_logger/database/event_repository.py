@@ -49,6 +49,7 @@ class OutputEventWrite:
 type EventWrite = InputEventWrite | OutputEventWrite
 
 
+# 入力と出力の確定イベントを一つの書込み単位として扱う。
 class EventBatchRepository:
     """入力・出力eventを同一のSQLite transactionで保存する。"""
 
@@ -56,6 +57,7 @@ class EventBatchRepository:
         """transaction対象の接続を受け取る。接続のclose責務は呼び出し側にある。"""
         self._connection = connection
 
+    # 一括追加はSQLiteのトランザクション内で行い、途中までの保存を避ける。
     def append_many(self, events: Sequence[EventWrite]) -> None:
         """FIFO順のevent群を一括保存し、成功時に一度だけcommitする。
 
@@ -140,6 +142,7 @@ def _insert_output_event(
     )
 
 
+# 入力イベントの書込みと範囲検索を担当し、状態復元に必要な前後イベントも取得する。
 class EventRepository:
     """入力の一次eventを保存・検索する。"""
 
@@ -278,6 +281,7 @@ class EventRepository:
         ).fetchone()
         return int(row[0]) if row is not None else 0
 
+    # 期間開始より前の最後の値は、期間先頭の状態を復元するために必要となる。
     def last_before(self, *, channel_id: int, before_ms: int) -> InputEvent | None:
         """指定時刻より前の最後のeventを返す。"""
         _validate_channel_ids([channel_id])
@@ -292,6 +296,7 @@ class EventRepository:
         ).fetchone()
         return _event_from_row(row) if row is not None else None
 
+    # snapshotと確定edgeを区別し、カウンタ・継続時間集計の基準を得る。
     def last_edge_before(
         self,
         *,
@@ -380,6 +385,7 @@ class EventRepository:
         ).fetchone()
         return _event_from_row(event) if event is not None else None
 
+    # イベントIDを基準に後続データを取得し、時刻補正時の取りこぼしを避ける。
     def list_after_id(
         self,
         *,
@@ -474,6 +480,7 @@ class EventRepository:
         ).fetchone()
         return int(row[0])
 
+    # 入力レベルの保持ではなく状態変化の発生数を数える。
     def count_edges(
         self,
         *,

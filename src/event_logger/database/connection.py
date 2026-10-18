@@ -14,6 +14,7 @@ class SchemaVersionError(RuntimeError):
     """サポートできないschema versionを検出した。"""
 
 
+# 稼働中のDBと保守処理でSQLite設定が食い違わないよう、共通接続を使用する。
 def connect_database(
     database_path: str | Path,
     *,
@@ -71,6 +72,7 @@ def connect_database(
     return connection
 
 
+# 通常起動で既存DBを暗黙に変更しない。スキーマ更新は明示的なmigrationへ分離する。
 def initialize_database(database_path: str | Path) -> None:
     """新規DBへ最新schemaを作成する。
 
@@ -107,6 +109,7 @@ def initialize_connection(connection: sqlite3.Connection) -> None:
         )
 
 
+# 新規DBだけに最新スキーマと初期チャンネルを設定する。
 def _create_schema_latest(connection: sqlite3.Connection) -> None:
     """空のSQLite databaseへ最新schemaを作成する。"""
     schema = _SCHEMA_PATH.read_text(encoding="utf-8")

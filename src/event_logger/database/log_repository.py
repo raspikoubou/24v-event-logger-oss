@@ -21,6 +21,7 @@ from event_logger.database.repository_helpers import (
 )
 
 
+# OUT操作の履歴は入力edgeとは別テーブルで管理し、ソース情報も保持する。
 class OutputEventRepository:
     """OUT状態変化の履歴を保存・検索する。"""
 
@@ -164,6 +165,7 @@ class OutputEventRepository:
         ).fetchone()
         return int(row[0]) if row is not None else 0
 
+    # 範囲開始時点のOUT状態を復元するために直前の出力履歴を取得する。
     def last_before(
         self,
         *,
@@ -208,6 +210,7 @@ class OutputEventRepository:
         return [_output_event_from_row(row) for row in rows]
 
 
+# 入力と出力の異なる履歴を、時刻順の統一ログとして扱う。
 class LogRepository:
     """IN/OUTを同じ時間軸で検索する読み取り専用Repository。"""
 
@@ -273,6 +276,7 @@ class LogRepository:
         ).fetchone()
         return int(row[0]) if row is not None else 0
 
+    # CSVなどの大量読み出しで、ログを全件メモリ展開せず逐次処理する。
     def iter_between(
         self,
         *,
