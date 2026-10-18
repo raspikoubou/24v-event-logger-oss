@@ -6,7 +6,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 
 # source checkoutをpip installしていない開発・demo環境でも表示を壊さない。
-_FALLBACK_VERSION = "1.0.1"
+_FALLBACK_VERSION = "1.0.2"
 
 
 def get_version() -> str:
