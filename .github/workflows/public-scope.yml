@@ -17,3 +17,25 @@ jobs:
         with:
           node-version: "22"
       - run: node packaging/build_frontend.cjs --check
+
+  regression:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Python package and test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Run Python regression tests
+        run: python -m pytest -q packaging/test_*.py
+      - name: Run JavaScript regression tests
+        run: |
+          set -e
+          for test_file in packaging/test_*.cjs; do
+            echo "Running ${test_file}"
+            node "${test_file}"
+          done
