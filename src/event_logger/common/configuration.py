@@ -17,8 +17,16 @@ def configuration_fingerprint(
 ) -> str:
     """loggerd動作に関係する設定を正規化してSHA-256化する。
 
-    SQLiteのupdated_atなど運用監査用フィールドは含めず、daemonが実際に
+    SQLiteのupdated_atなど運用監査用フィールドは含めず、 daemonが実際に
     読み込んだ入力・条件出力・Heartbeatの値だけを比較する。
+
+    Args:
+        channels: 入力channel設定列。 daemonの比較ではchannel ID順に正規化される。
+        rules: 保存または評価する条件rule列。 IDと条件値を使って識別する。
+        heartbeat: Heartbeat設定mapping。 daemon動作に関係するkeyをfingerprintへ含める。
+
+    Returns:
+        canonical JSONから算出したSHA-256 digestの64桁lowercase hex。
     """
     configuration = {
         "channels": [

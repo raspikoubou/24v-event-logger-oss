@@ -15,7 +15,15 @@ if TYPE_CHECKING:
 
 
 def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
-    """条件出力ルールのCRUD routeをappへ登録する。"""
+    """条件出力ルールのCRUD routeをappへ登録する。
+
+        Args:
+            app: Flask application。
+            context: requestごとのRepository、Clock、設定値を保持するWebContext。
+
+        Returns:
+            None。関数の概要に記したroute登録・状態更新を行う。
+    """
 
     from event_logger.web.app import (
         IpcProtocolError,
@@ -33,7 +41,17 @@ def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
 
     @app.post("/api/output-rules")
     def create_output_rule() -> Response:
-        """固定スキーマの条件ルールを保存し、loggerd reloadを確認する。"""
+        """固定スキーマの条件ルールを保存し、loggerd reloadを確認する。
+
+            Args:
+                なし。
+
+            Returns:
+                保存・reload成功時は作成rule payloadをJSON 200で返す。
+                    body/schema/DB制約不正は400、
+                    loggerd拒否は409、IPC不通は503。
+                        reload失敗時はDBのruleを削除して戻す。
+        """
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return _error("INVALID_REQUEST", "JSON object is required", 400)
@@ -61,7 +79,16 @@ def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
 
     @app.put("/api/output-rules/<int:rule_id>")
     def update_output_rule(rule_id: int) -> Response:
-        """条件ルールを編集・無効化し、loggerd reloadを確認する。"""
+        """条件ルールを編集・無効化し、loggerd reloadを確認する。
+
+            Args:
+                rule_id: 対象条件出力ルールの永続ID。
+
+            Returns:
+                更新後のrule payloadをJSON 200で返す。未存在は404、
+                    body/schema/DB制約不正は400、
+                    loggerd拒否は409、IPC不通は503。reload失敗時は以前のruleへ復元する。
+        """
         current = context.output_rules.get(rule_id)
         if current is None:
             return _error("NOT_FOUND", "output rule was not found", 404)
@@ -106,7 +133,14 @@ def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
 
     @app.get("/api/output-rules")
     def list_output_rules() -> Response:
-        """保存済み条件ルールを設定画面へ返す。"""
+        """保存済み条件ルールを設定画面へ返す。
+
+            Args:
+                なし。
+
+            Returns:
+                保存済みrule payload列をitemsに格納したJSON 200を返す。
+        """
         return _ok(
             {
                 "items": [
@@ -118,7 +152,16 @@ def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
 
     @app.delete("/api/output-rules/<int:rule_id>")
     def delete_output_rule(rule_id: int) -> Response:
-        """ルールを削除し、reload失敗時は設定を復元する。"""
+        """ルールを削除し、reload失敗時は設定を復元する。
+
+            Args:
+                rule_id: 対象条件出力ルールの永続ID。
+
+            Returns:
+                削除・reload成功時は削除結果をJSON 200で返す。未存在は404、
+                    loggerd拒否は409、IPC不通は503。
+                    reload失敗時はruleを復元する。
+        """
         rule = context.output_rules.get(rule_id)
         if rule is None:
             return _error("NOT_FOUND", "output rule was not found", 404)
@@ -142,7 +185,16 @@ def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
 
 
 def _register_widget_routes(app: Flask, context: WebContext) -> None:
-    """Dashboard widgetのCRUD routeをappへ登録する。"""
+    """Dashboard widgetのCRUD routeをappへ登録する。
+
+        Args:
+            app: 対象のFlask application。設定値、extension、route登録先として使う。
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+
+        Returns:
+            None。関数の概要に記したroute登録・状態更新を行う。
+    """
 
     from event_logger.web.app import (
         Response,
@@ -158,7 +210,14 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
 
     @app.get("/api/widgets")
     def list_widgets() -> Response:
-        """保存済みDashboard widget設定を返す。"""
+        """保存済みDashboard widget設定を返す。
+
+            Args:
+                なし。
+
+            Returns:
+                保存済みwidget設定列をitemsとしてJSON 200で返す。
+        """
         return _ok(
             {
                 "items": [
@@ -169,7 +228,15 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
 
     @app.post("/api/widgets")
     def create_widget() -> Response:
-        """固定種別のDashboard widgetを作成する。"""
+        """固定種別のDashboard widgetを作成する。
+
+            Args:
+                なし。
+
+            Returns:
+                新規widget payloadをJSON 201で返す。bodyやwidget schema不正、
+                    ID・SQLite範囲違反はINVALID_REQUEST/400。
+        """
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return _error("INVALID_REQUEST", "JSON object is required", 400)
@@ -182,7 +249,15 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
 
     @app.put("/api/widgets/<widget_id>")
     def update_widget(widget_id: str) -> Response:
-        """Dashboard widgetを更新する。"""
+        """Dashboard widgetを更新する。
+
+            Args:
+                widget_id: 対象Dashboard widgetの永続ID。
+
+            Returns:
+                変更後widget payloadをJSON 200で返す。未存在は404、bodyや設定値不正、
+                    SQLite範囲外は400。
+        """
         current = context.widgets.get(widget_id)
         if current is None:
             return _error("NOT_FOUND", "widget was not found", 404)
@@ -211,7 +286,15 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
 
     @app.delete("/api/widgets/<widget_id>")
     def delete_widget(widget_id: str) -> Response:
-        """Dashboard widget設定だけを削除する。生イベントは保持する。"""
+        """Dashboard widget設定だけを削除する。生イベントは保持する。
+
+            Args:
+                widget_id: 対象Dashboard widgetの永続ID。
+
+            Returns:
+                削除したwidget IDを含むJSON 200を返す。widget不存在は404。
+                    過去eventsは削除しない。
+        """
         if context.widgets.get(widget_id) is None:
             return _error("NOT_FOUND", "widget was not found", 404)
         context.widgets.delete(widget_id, ts_utc_ms=context.clock.now_utc_ms())
@@ -219,7 +302,15 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
 
     @app.post("/api/widgets/<widget_id>/duplicate")
     def duplicate_widget(widget_id: str) -> Response:
-        """widgetを複製して新しいID・表示順を割り当てる。"""
+        """widgetを複製して新しいID・表示順を割り当てる。
+
+            Args:
+                widget_id: 対象Dashboard widgetの永続ID。
+
+            Returns:
+                複製した新ID・表示順のwidget payloadをJSON 201で返す。
+                    元widget不存在は404、複製可能数超過・設定不正は400。
+        """
         current = context.widgets.get(widget_id)
         if current is None:
             return _error("NOT_FOUND", "widget was not found", 404)
@@ -237,7 +328,16 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
 
     @app.post("/api/widgets/<widget_id>/reset")
     def reset_widget_counter(widget_id: str) -> Response:
-        """リセット後カウントwidgetの基準event IDを保存する。"""
+        """リセット後カウントwidgetの基準event IDを保存する。
+
+            Args:
+                widget_id: 対象Dashboard widgetの永続ID。
+
+            Returns:
+                新しいafter_event_id境界とcounter値を含むJSON 200を返す。
+                    widget不存在・種類違い・入力不正は400/404、
+                    制御要求失敗は該当409/503。
+        """
         widget = context.widgets.get(widget_id)
         if widget is None:
             return _error("NOT_FOUND", "widget was not found", 404)

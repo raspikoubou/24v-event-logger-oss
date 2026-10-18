@@ -1,3 +1,7 @@
+  /**
+   * 現在の条件のログ一覧とpaging表示を描画する。
+   * @returns {void} 現在のquery結果、page操作、空結果案内をlogs viewへ描画する。
+   */
   function renderLogs() {
     const pageSize = Number(document.querySelector("#log-page-size").value);
     const events = liveMode ? logPageEvents : filteredEvents();
@@ -39,6 +43,11 @@
     }).join("");
   }
 
+  /**
+   * 画面の検索条件からAPI query parameterを組み立てる。
+   * @param {boolean} includePaging - paging queryを含めるか。
+   * @returns {string} 現在のfilter stateを使って組み立てたquery文字列。
+   */
   function logApiQuery(includePaging) {
     const periodKey = document.querySelector("#log-period").value;
     return buildLogApiQuery({
@@ -56,6 +65,10 @@
     });
   }
 
+  /**
+   * 現在の検索条件に合うlive log pageを取得する。
+   * @returns {Promise<void>} APIからpageを取得してlogs viewを更新後resolveする。transport/API失敗はrejectする。
+   */
   async function loadLiveLogPage() {
     const requestId = ++logRequestId;
     logPageLoading = true;
@@ -95,6 +108,10 @@
     }
   }
 
+  /**
+   * ログ条件を再読込し、最初のpageから表示を更新する。
+   * @returns {Promise<void>} page 1の検索を再実行し、結果をDOMへ描画後resolveする。
+   */
   function reloadLogQuery() {
     logPage = 1;
     // フィルター変更後は新たな時間範囲を検索する。ページ送りの間だけ範囲を固定する。
@@ -110,6 +127,10 @@
     }
   }
 
+  /**
+   * ログ・診断などのデータ画面を更新する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderDataViews() {
     renderLogSignalOptions();
     renderRecentEvents();
@@ -119,6 +140,10 @@
     renderCustomHistoryWidgets();
   }
 
+  /**
+   * 入力channel設定を画面へ描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderChannelSettings() {
     document.querySelector("#channel-settings").innerHTML = fixtures.channels.map((channel) => `
       <div class="channel-row${channel.enabled ? "" : " is-disabled"}" data-channel="${channel.id}">
@@ -130,6 +155,10 @@
     `).join("");
   }
 
+  /**
+   * 初回設定wizardを現在のsetup stateで描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderSetupWizard() {
     setSwitchState(document.querySelector("#setup-password-protection"), fixtures.settings.passwordProtection);
     document.querySelector("#setup-password-field").hidden = !fixtures.settings.passwordProtection;
@@ -145,6 +174,10 @@
     }
   }
 
+  /**
+   * 初回設定入力をまとめて保存する。
+   * @returns {Promise<void>} setup payloadを保存し、成功時は完了画面へ遷移する。API失敗はrejectする。
+   */
   async function completeSetup() {
     const deviceName = document.querySelector("#setup-device-name").value.trim();
     const passwordProtection = switchIsOn(document.querySelector("#setup-password-protection"));
@@ -225,6 +258,10 @@
     showToast("初回設定を完了し、記録を開始しました");
   }
 
+  /**
+   * 診断状態を画面へ描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderHealth() {
     const heartbeatHealth = fixtures.health.find((item) => item.label === "Heartbeat状態");
     const heartbeat = fixtures.settings.heartbeat;
@@ -252,6 +289,10 @@
     renderClock();
   }
 
+  /**
+   * OUT testの状態と操作を画面へ描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderOutputTests() {
     const critical = fixtures.loggerStatus === "critical";
     const configurationBlocked = Boolean(fixtures.configurationSync?.outOfSync);
@@ -271,6 +312,11 @@
     }).join("");
   }
 
+  /**
+   * 表示中のOUT testを終了状態にする。
+   * @param {boolean} showMessage - testを通常終了したsuccess通知を表示するか。
+   * @returns {Promise<void>} end-test要求後にtest state表示を更新する。API失敗時はtoast通知する。
+   */
   async function finishOutputTest(showMessage = true) {
     if (!activeOutputTest) return;
     if (liveMode) {
@@ -296,6 +342,11 @@
     if (showMessage) showToast(`OUT${outputId}をOFFに戻しました`);
   }
 
+  /**
+   * 選択OUTの許可された時間制限付きtestを要求する。
+   * @param {number} outputId - 出力番号。
+   * @returns {Promise<void>} 指定OUTのtest要求を送信し、ACKまたは失敗を画面へ反映する。
+   */
   async function startOutputTest(outputId) {
     if (liveMode) {
       try {
@@ -320,6 +371,10 @@
     renderHealth();
   }
 
+  /**
+   * 各OUTの唯一のowner設定を画面へ反映する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function updateOutputOwners() {
     fixtures.outputs.forEach((output) => {
       output.owner = "未使用";
@@ -346,11 +401,21 @@
     }
   }
 
+  /**
+   * ruleの時間条件を画面用文字列へ変換する。
+   * @param {string} rule - 条件出力rule設定。
+   * @returns {string} ruleの継続時間条件を表示するlabel。
+   */
   function durationLabel(rule) {
     const units = { seconds: "秒", minutes: "分", hours: "時間" };
     return `${rule.duration}${units[rule.durationUnit]}`;
   }
 
+  /**
+   * 条件出力ruleを人が読める説明にする。
+   * @param {string} rule - 条件出力rule設定。
+   * @returns {string} rule kindと条件値をまとめた説明文。
+   */
   function ruleDescription(rule) {
     const name = signalDisplayName(rule.channelId);
     const signalLabel = name === rule.channelId ? rule.channelId : `${rule.channelId} ${name}`;
@@ -361,6 +426,10 @@
     return `${signalLabel}が${rule.value}のまま${durationLabel(rule)}継続`;
   }
 
+  /**
+   * Heartbeat設定項目の有効状態と値を同期する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function syncHeartbeatFields() {
     const enabled = switchIsOn(document.querySelector("#heartbeat-enabled"));
     document.querySelector("#heartbeat-output").disabled = !enabled;

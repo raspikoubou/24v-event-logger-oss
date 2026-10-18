@@ -1,3 +1,8 @@
+  /**
+   * fixtureを共有状態へ設定し、各画面の初期化と描画を行う。
+   * @param {Object} fixtures - 固定fixtureまたは現在の画面状態。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function runApp(fixtures) {
   let currentPeriod = fixtures.settings.dashboardPeriod || "8h";
   let dashboardCustomRangeDraft = null;
@@ -47,12 +52,21 @@
     "イベント一覧": "ダッシュボード内に簡易ログを表示します。"
   };
 
+  /**
+   * demo画面の時刻軸に使う固定基準時刻を返す。
+   * @returns {number} demo fixtureの固定時刻をUTC Unix epoch millisecondで返す。
+   */
   function demoNowMs() {
     return demoClockBaseMs + performance.now() - demoClockStartedAtMs;
   }
 
   const refreshLiveState = createRefreshCoordinator(refreshLiveStateOnce);
 
+  /**
+   * 一回分のlive状態を取得し、表示と次回更新時刻を更新する。
+   * @param {boolean} forceDashboard - dashboard更新を強制するか。
+   * @returns {Promise<void>} live statusと必要なDashboard dataをDOMへ反映後resolveする。通信失敗時はErrorをrejectする。
+   */
   async function refreshLiveStateOnce(forceDashboard = false) {
     const nowMs = Date.now();
     const customRangeForRefresh = (
@@ -153,6 +167,10 @@
     refreshCurrentStateCards();
   }
 
+  /**
+   * 現在のserver stateを操作buttonやstatus表示へ同期する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function syncLiveControls() {
     const critical = fixtures.loggerStatus === "critical";
     const configurationBlocked = Boolean(fixtures.configurationSync?.outOfSync);
@@ -194,6 +212,10 @@
     banner.hidden = logging && loggerStateKnown;
   }
 
+  /**
+   * 設定同期や保存状態の警告を表示する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderUnsynchronizedWarnings() {
     const count = fixtures.unsynchronizedCount;
     const latencyWarning = Boolean(fixtures.writeLatency?.warning);
@@ -240,6 +262,10 @@
     }
   }
 
+  /**
+   * 現在設定中のtimezoneを返す。
+   * @returns {string} 本体設定に保存された有効timezone名。未設定時は既定timezone。
+   */
   function selectedTimeZone() {
     return fixtures.settings.timezone || "Asia/Tokyo";
   }
@@ -256,6 +282,11 @@
     event.id ||= fixtures.events.length - index;
   });
 
+  /**
+   * 信号IDに対応する設定名を返す。
+   * @param {string} signalId - 信号ID。
+   * @returns {string} IN/OUT signal IDに対応する設定名。未登録時はsignal IDそのもの。
+   */
   function signalDisplayName(signalId) {
     const match = /^(IN|OUT)(\d+)$/.exec(signalId);
     if (!match) return signalId;
@@ -266,19 +297,39 @@
 
   const { signalIds, channelLabel, escapeHtml } = window.EventLoggerViewFormat;
 
+  /**
+   * switch elementの論理ON/OFF状態を読む。
+   * @param {HTMLElement} button - 対象button element。
+   * @returns {boolean} buttonのaria-checkedがtrueならtrue。
+   */
   function switchIsOn(button) {
     return button.classList.contains("is-on");
   }
 
+  /**
+   * switchのaria状態と表示を指定状態へ更新する。
+   * @param {HTMLElement} button - 対象button element。
+   * @param {boolean} enabled - widgetを有効にするか。
+   * @returns {boolean} buttonがON classを持ち、論理ONならtrue。
+   */
   function setSwitchState(button, enabled) {
     button.classList.toggle("is-on", enabled);
     button.setAttribute("aria-checked", String(enabled));
   }
 
+  /**
+   * boolean設定用controlの現在値を読む。
+   * @param {HTMLElement} button - 対象button element。
+   * @returns {boolean} checkbox/switch controlの論理boolean値。
+   */
   function boolControlValue(button) {
     return switchIsOn(button);
   }
 
+  /**
+   * widget編集switchの状態ラベルを初期化する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function initializeWidgetSwitchLabels() {
     document.querySelectorAll("#widget-settings-list .switch").forEach((button) => {
       button.dataset.onLabel ||= "表示中";
@@ -286,6 +337,11 @@
     });
   }
 
+  /**
+   * 短い利用者向け通知を表示し、時間後に閉じる。
+   * @param {string} message - 利用者向け説明。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function showToast(message) {
     const toast = document.querySelector("#toast");
     toast.textContent = message;
@@ -294,6 +350,11 @@
     toastTimer = window.setTimeout(() => toast.classList.remove("is-visible"), 2400);
   }
 
+  /**
+   * 指定viewを表示し、view依存データを更新する。
+   * @param {string} viewName - 切替先の画面名。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function switchView(viewName) {
     activeView = viewName;
     renderUnsynchronizedWarnings();
@@ -310,6 +371,10 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  /**
+   * 選択timezoneに合わせて画面時計を描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderClock() {
     const nowMs = demoNowMs();
     const demoNow = new Date(nowMs);

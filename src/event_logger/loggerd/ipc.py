@@ -43,7 +43,15 @@ class IpcRemoteError(RuntimeError):
     """loggerdが要求を拒否したことを表す。"""
 
     def __init__(self, code: str, message: str) -> None:
-        """エラーコードと利用者向けメッセージを保持する。"""
+        """エラーコードと利用者向けメッセージを保持する。
+
+        Args:
+            code: loggerdから返されたエラーcode。
+            message: loggerdから返された利用者向けエラーmessage。
+
+        Returns:
+            None。
+        """
         super().__init__(f"{code}: {message}")
         self.code = code
         self.message = message
@@ -62,7 +70,19 @@ class ControlRequest:
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, object]) -> ControlRequest:
-        """JSON objectを検証してControlRequestへ変換する。"""
+        """JSON objectを検証してControlRequestへ変換する。
+
+        Args:
+            payload: 受信または送信するJSON object mapping。
+
+        Returns:
+            schemaとfield間の制約を満たすControlRequest。
+
+        Raises:
+            IpcProtocolError: IPC
+                JSON、size、request/response
+                schemaが規約に合わない場合。
+        """
         allowed = {
             "command",
             "channel",
@@ -126,7 +146,14 @@ class ControlRequest:
         )
 
     def to_mapping(self) -> dict[str, object]:
-        """JSON送信用のmappingへ変換する。"""
+        """JSON送信用のmappingへ変換する。
+
+        Args:
+            なし。
+
+        Returns:
+            JSON直列化用のcommandと指定fieldだけを含むdict。
+        """
         payload: dict[str, object] = {"command": self.command.value}
         if self.channel is not None:
             payload["channel"] = self.channel
@@ -163,7 +190,16 @@ class UnixControlServer:
         *,
         socket_timeout: float = 1.0,
     ) -> None:
-        """socket pathとコマンドhandlerを注入する。"""
+        """socket pathとコマンドhandlerを注入する。
+
+        Args:
+            path: 対象fileまたはUnix socketのfilesystem path。
+            handler: 検証済みControlRequestを処理する関数。
+            socket_timeout: socket操作のtimeout（秒）。
+
+        Returns:
+            None。
+        """
         self._path = Path(path)
         self._handler = handler
         self._socket_timeout = socket_timeout
@@ -171,7 +207,20 @@ class UnixControlServer:
         self._owns_path = False
 
     def start(self) -> None:
-        """Unix socketを作成してlistenする。"""
+        """Unix socketを作成してlistenする。
+
+        Args:
+            なし。
+
+        Returns:
+            None。Unix socketをbind/listen状態にしてserver所有権を記録する。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+            FileExistsError: 同じpathに許可されない既存file/socketがある場合。
+        """
         if self._server is not None:
             raise RuntimeError("control server is already started")
         if self._path.exists():
@@ -192,7 +241,20 @@ class UnixControlServer:
         self._owns_path = True
 
     def serve_once(self) -> bool:
-        """接続を最大1件処理する。timeoutならFalseを返す。"""
+        """接続を最大1件処理する。timeoutならFalseを返す。
+
+        Args:
+            なし。
+
+        Returns:
+            接続をacceptして1要求を処理した場合True、accept
+            timeoutの場合False。server未起動は例外。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         if self._server is None:
             raise RuntimeError("control server is not started")
         try:
@@ -205,7 +267,14 @@ class UnixControlServer:
         return True
 
     def close(self) -> None:
-        """listen socketと自分が作成したpathを閉じる。"""
+        """listen socketと自分が作成したpathを閉じる。
+
+        Args:
+            なし。
+
+        Returns:
+            None。listen socketを閉じ、自分が作成したsocket pathを削除する。
+        """
         server = self._server
         self._server = None
         if server is not None:
@@ -222,14 +291,37 @@ class UnixControlClient:
     """Web側からloggerdへ1要求を送る同期client。"""
 
     def __init__(self, path: str | os.PathLike[str], *, timeout: float = 1.0) -> None:
-        """接続先Unix socket pathを受け取る。"""
+        """接続先Unix socket pathを受け取る。
+
+        Args:
+            path: 対象fileまたはUnix socketのfilesystem path。
+            timeout: 通信操作のtimeout（秒）。
+
+        Returns:
+            None。
+        """
         self._path = Path(path)
         self._timeout = timeout
 
     def request(
         self, request: ControlRequest, *, timeout: float | None = None
     ) -> Mapping[str, object]:
-        """要求を送信し、成功時のdata mappingを返す。"""
+        """要求を送信し、成功時のdata mappingを返す。
+
+        Args:
+            request: 検証済みのloggerd制御要求。
+            timeout: 通信操作のtimeout（秒）。
+
+        Returns:
+            成功したloggerd応答のdata
+            mapping。遠隔拒否とprotocol不整合は例外で通知する。
+
+        Raises:
+            IpcProtocolError: IPC
+                JSON、size、request/response
+                schemaが規約に合わない場合。
+            IpcRemoteError: loggerdがcontrol requestを明示的に拒否した場合。
+        """
         encoded = _encode_message(request.to_mapping())
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
             connection.settimeout(self._timeout if timeout is None else timeout)
@@ -254,7 +346,18 @@ class UnixControlClient:
 
 
 def _serve_connection(connection: socket.socket, handler: ControlHandler) -> None:
-    """接続1本を読み、成功・拒否レスポンスを必ず返す。"""
+    """接続1本を読み、成功・拒否レスポンスを必ず返す。
+
+    Args:
+        connection: この関数が使うSQLite connection。
+        handler: 検証済みControlRequestを処理する関数。
+
+    Returns:
+        None。1接続の要求を処理し、可能なら成功または拒否応答を書き込む。
+
+    Raises:
+        IpcProtocolError: IPC JSON、size、request/response schemaが規約に合わない場合。
+    """
     try:
         payload = _read_message(connection)
         if not isinstance(payload, dict):
@@ -288,7 +391,17 @@ def _serve_connection(connection: socket.socket, handler: ControlHandler) -> Non
 
 
 def _read_message(connection: socket.socket) -> Any:
-    """改行終端のJSONを最大サイズまで読み取る。"""
+    """改行終端のJSONを最大サイズまで読み取る。
+
+    Args:
+        connection: この関数が使うSQLite connection。
+
+    Returns:
+        最初のnewlineまでのJSON値。
+
+    Raises:
+        IpcProtocolError: IPC JSON、size、request/response schemaが規約に合わない場合。
+    """
     buffer = bytearray()
     while True:
         chunk = connection.recv(4096)
@@ -309,7 +422,17 @@ def _read_message(connection: socket.socket) -> Any:
 
 
 def _encode_message(payload: Mapping[str, object]) -> bytes:
-    """JSON objectをサイズ検証付きnewline messageへ変換する。"""
+    """JSON objectをサイズ検証付きnewline messageへ変換する。
+
+    Args:
+        payload: 受信または送信するJSON object mapping。
+
+    Returns:
+        サイズ検証済みnewline終端UTF-8 JSON bytes。
+
+    Raises:
+        IpcProtocolError: IPC JSON、size、request/response schemaが規約に合わない場合。
+    """
     try:
         encoded = (
             json.dumps(
@@ -327,7 +450,18 @@ def _encode_message(payload: Mapping[str, object]) -> bytes:
 
 
 def _optional_int(value: object, field_name: str) -> int | None:
-    """JSON値をintへ変換する。boolはintとして扱わない。"""
+    """JSON値をintへ変換する。boolはintとして扱わない。
+
+    Args:
+        value: 論理状態。ONはTrue/1、OFFはFalse/0。
+        field_name: 入力検証エラーで示すfield名。
+
+    Returns:
+        Noneまたはboolではない整数。
+
+    Raises:
+        IpcProtocolError: IPC JSON、size、request/response schemaが規約に合わない場合。
+    """
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int):
@@ -336,7 +470,17 @@ def _optional_int(value: object, field_name: str) -> int | None:
 
 
 def _counter_widget(payload: object) -> Widget:
-    """固定スキーマのcounter設定だけをwriterへ渡せる形へ変換する。"""
+    """固定スキーマのcounter設定だけをwriterへ渡せる形へ変換する。
+
+    Args:
+        payload: 受信または送信するJSON object mapping。
+
+    Returns:
+        reset型event counterとして正規化済みのWidget。
+
+    Raises:
+        IpcProtocolError: IPC JSON、size、request/response schemaが規約に合わない場合。
+    """
     if not isinstance(payload, dict) or set(payload) != {
         "id",
         "type",

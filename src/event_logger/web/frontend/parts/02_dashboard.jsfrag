@@ -1,3 +1,7 @@
+  /**
+   * 直近eventをDashboard領域へ描画する。
+   * @returns {void} 直近eventの一覧DOMを置換する。
+   */
   function renderRecentEvents() {
     const card = document.querySelector('[data-widget="recent-events"]');
     const list = document.querySelector("#recent-events");
@@ -23,20 +27,39 @@
     `).join("") || '<p class="custom-widget-empty">対象期間の記録はありません。</p>';
   }
 
+  /**
+   * 現在のtimeline表示期間の開始・終了を返す。
+   * @returns {Object} startMs/endMsを持つ現在選択期間の半開範囲（millisecond）。
+   */
   function timelinePeriodBounds() {
     const card = document.querySelector('[data-widget="timeline"]');
     return periodBounds(periodKeyForWidget(card.dataset.widgetPeriod || "follow"));
   }
 
+  /**
+   * timeline軸用の日時labelへ変換する。
+   * @param {number} timestampMs - UTC Unix epoch millisecond。
+   * @returns {string} 入力を画面またはAPIで使う形式へ変換した文字列。
+   */
   function formatTimelineTime(timestampMs) {
     return formatLocalDateTime(timestampMs, true);
   }
 
   // 表示だけを丸め、記録時刻や集計値の精度は変更しない。
+  /**
+   * millisecond値を表示用文字列へ変換する。
+   * @param {string} value - 変換対象の値。
+   * @returns {string} 入力を画面またはAPIで使う形式へ変換した文字列。
+   */
   function formatMilliseconds(value) {
     return Number(value).toFixed(1);
   }
 
+  /**
+   * 経過時間を読みやすい表示へ変換する。
+   * @param {number} durationMs - 期間長（millisecond）。
+   * @returns {string} 経過millisecondを人向け時間表示へ整形した文字列。
+   */
   function formatDuration(durationMs) {
     if (durationMs < 1000) return `${formatMilliseconds(durationMs)}ミリ秒`;
     const totalSeconds = Math.round(durationMs / 1000);
@@ -48,6 +71,12 @@
     return `${seconds}秒`;
   }
 
+  /**
+   * 経過時間を指定単位の文字列へ変換する。
+   * @param {number} durationMs - 期間長（millisecond）。
+   * @param {string} unit - 期間表示に使う単位。
+   * @returns {string} 経過millisecondを指定unitで丸めた数値付き文字列。
+   */
   function formatDurationForUnit(durationMs, unit = "human") {
     if (unit === "minutes") return `${Math.round(durationMs / 60000)}分`;
     if (unit === "hours_decimal") return `${(durationMs / 3600000).toFixed(2)}時間`;
@@ -61,6 +90,14 @@
     return formatDuration(durationMs);
   }
 
+  /**
+   * 現在状態cardに表示する論理状態と文言を決める。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {boolean} onLabel - 論理ONに対応する表示文言。
+   * @param {string} offLabel - 論理OFFに対応する表示文言。
+   * @param {string} widgetId - widget ID。
+   * @returns {Object} state、label、elapsed value、UNKNOWN表示をまとめた現在状態model。
+   */
   function currentStateValues(channelId, onLabel, offLabel, widgetId) {
     const channel = fixtures.channels.find((item) => `IN${item.id}` === channelId);
     if (liveMode) {
@@ -90,6 +127,12 @@
     };
   }
 
+  /**
+   * 現在状態cardの値と表示を更新する。
+   * @param {HTMLElement} card - 対象card element。
+   * @param {Object} config - widget config。
+   * @returns {void} cardのstate、ON/OFF表示、elapsed表示を更新する。
+   */
   function updateCurrentStateCard(card, config) {
     const values = currentStateValues(config.channelId, config.onLabel, config.offLabel, config.id);
     card.dataset.widgetType = "現在状態";
@@ -107,6 +150,11 @@
     card.querySelector("small").textContent = config.channelId;
   }
 
+  /**
+   * 現在状態widgetのHTMLを組み立てる。
+   * @param {Object} config - widget config。
+   * @returns {string} 表示labelと現在値を含むcurrent-state card HTML。
+   */
   function currentStateCardHtml(config) {
     const values = currentStateValues(config.channelId, config.onLabel, config.offLabel, config.id);
     const hiddenClass = config.enabled === false ? " is-hidden-widget" : "";
@@ -120,6 +168,11 @@
     `;
   }
 
+  /**
+   * 現在状態widgetの設定rowを組み立てる。
+   * @param {Object} config - widget config。
+   * @returns {string} 設定一覧へ追加するcurrent-state row HTML。
+   */
   function currentStateSettingRowHtml(config) {
     const enabled = config.enabled !== false;
     return `
@@ -134,6 +187,11 @@
     `;
   }
 
+  /**
+   * widget sizeの選択optionを組み立てる。
+   * @param {string} selectedSize - 選択済みサイズ。
+   * @returns {string} サイズ選択option一覧のHTML。
+   */
   function sizeOptionsHtml(selectedSize) {
     const labels = { small: "小", medium: "中", large: "大" };
     return Object.entries(labels).map(([value, label]) => (
@@ -141,6 +199,10 @@
     )).join("");
   }
 
+  /**
+   * 現在状態widget cardを最新fixture値で更新する。
+   * @returns {void} DOM上の有効なcurrent-state cardを順に更新する。
+   */
   function refreshCurrentStateCards() {
     document.querySelectorAll("#dashboard-realtime-grid [data-widget-type='現在状態']").forEach((card) => {
       updateCurrentStateCard(card, {
@@ -154,10 +216,21 @@
     });
   }
 
+  /**
+   * widget期間設定を計算用period keyへ変換する。
+   * @param {string} periodSetting - 保存期間設定。
+   * @returns {string} widget設定をfollow/customまたは許可済み固定period keyへ正規化した値。
+   */
   function periodKeyForWidget(periodSetting) {
     return periodSetting === "follow" ? currentPeriod : periodSetting;
   }
 
+  /**
+   * period keyから表示対象時間境界を計算する。
+   * @param {string} periodKey - 期間key。
+   * @param {number} durationOverrideMs - 期間上書きmillisecond。
+   * @returns {Object} startMs/endMsを持つ半開期間範囲。
+   */
   function periodBounds(periodKey, durationOverrideMs = 0) {
     const period = fixtures.dashboardPeriods[periodKey];
     const endMs = period.endAt ? Date.parse(period.endAt) : demoNowMs();
@@ -168,10 +241,21 @@
     return { startMs, endMs };
   }
 
+  /**
+   * event timestampをUnix epoch millisecondへ変換する。
+   * @param {Object} event - fixture event。
+   * @returns {number} event時刻のUTC Unix epoch millisecond。
+   */
   function eventTimeMs(event) {
     return event.timestamp ? Date.parse(event.timestamp) : Date.parse(`2026-09-12T${event.time}+09:00`);
   }
 
+  /**
+   * 日時inputの値を検証し、カスタム期間を適用する。
+   * @param {string} fromInput - 開始日時input。
+   * @param {string} toInput - 終了日時input。
+   * @returns {boolean} from/toを検証して期間適用できた時true。不正な入力ではfalse。
+   */
   function applyCustomPeriod(fromInput, toInput) {
     const startMs = parseLocalDateTime(fromInput.value);
     const endMs = parseLocalDateTime(toInput.value);
@@ -184,6 +268,12 @@
     return true;
   }
 
+  /**
+   * 信号と期間に一致するeventを抽出する。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {string} periodKey - 期間key。
+   * @returns {Array<Object>} 指定signalと半開期間に入るevent fixture列。
+   */
   function channelEventsInPeriod(channelId, periodKey) {
     const { startMs, endMs } = periodBounds(periodKey);
     return fixtures.events.filter((event) => {
@@ -192,12 +282,27 @@
     });
   }
 
+  /**
+   * 期間内で対象状態が継続した時間を合計する。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {string} periodKey - 期間key。
+   * @param {string} targetState - 対象論理状態。
+   * @param {number} durationOverrideMs - 期間上書きmillisecond。
+   * @returns {number} 対象論理状態が占める期間長（millisecond）。
+   */
   function stateDurationInPeriod(channelId, periodKey, targetState = "ON", durationOverrideMs = 0) {
     return timelineIntervals(channelId, periodKey, durationOverrideMs)
       .filter((interval) => interval.state === targetState)
       .reduce((total, interval) => total + interval.endMs - interval.startMs, 0);
   }
 
+  /**
+   * event列から状態・UNKNOWN区間を構成する。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {string} periodKey - 期間key。
+   * @param {number} durationOverrideMs - 期間上書きmillisecond。
+   * @returns {Array<Object>} 状態区間とUNKNOWN区間を時刻順に並べたtimeline配列。
+   */
   function timelineIntervals(channelId, periodKey, durationOverrideMs = 0) {
     const bounds = periodBounds(periodKey, durationOverrideMs);
     const observedEndMs = Math.max(bounds.startMs, Math.min(bounds.endMs, loggingStoppedAtMs || demoNowMs()));
@@ -244,6 +349,13 @@
     return result;
   }
 
+  /**
+   * 状態と幅に対応するtimeline CSS classを返す。
+   * @param {string} classPrefix - CSS prefix。
+   * @param {boolean} unknown - 区間がUNKNOWNかを表す真偽値。
+   * @param {number} widthPercent - 全幅に対するpercentage。
+   * @returns {string} 状態・UNKNOWN・幅に対応するCSS class文字列。
+   */
   function timelineMarkClass(classPrefix, unknown, widthPercent) {
     // 長い期間では短い区間の幅が0px相当になり、hover/clickできなくなる。
     // 1%未満は時間幅を誇張せず、詳細を開ける固定マーカーで示す。
@@ -254,6 +366,15 @@
     return `${classPrefix}-${isNarrow ? "marker" : "segment"}`;
   }
 
+  /**
+   * timeline intervalを表示するHTMLへ変換する。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {string} periodKey - 期間key。
+   * @param {string} classPrefix - CSS prefix。
+   * @param {number} durationOverrideMs - 期間上書きmillisecond。
+   * @param {string} domainIntervals - API計算済みintervals。
+   * @returns {string} 各timeline区間を示すHTML片。
+   */
   function timelineMarksHtml(
     channelId,
     periodKey,
@@ -286,6 +407,14 @@
     }).join("");
   }
 
+  /**
+   * 小型timelineのHTMLを構成する。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {string} periodKey - 期間key。
+   * @param {number} durationOverrideMs - 期間上書きmillisecond。
+   * @param {Object|null} dashboardValue - APIが返したtimeline interval集計。nullならfixtureからintervalを作る。
+   * @returns {string} 小型timelineのlabelとintervalを含むHTML片。
+   */
   function miniTimelineHtml(channelId, periodKey, durationOverrideMs = 0, dashboardValue = null) {
     const domainIntervals = dashboardValue?.channels?.find((item) => item.signal === channelId)?.intervals;
     const marks = timelineMarksHtml(
@@ -298,6 +427,11 @@
     return `<div class="custom-mini-timeline"><div class="custom-mini-track" data-mini-timeline-track>${marks}</div></div>`;
   }
 
+  /**
+   * 履歴widgetの種類に応じた本文HTMLを構成する。
+   * @param {Object} config - widget config。
+   * @returns {string} 履歴widget種別ごとの本文HTML。
+   */
   function historyWidgetBodyHtml(config) {
     if (liveMode && fixtures.dashboardWarning) {
       return `<p class="custom-widget-empty" role="status">${escapeHtml(fixtures.dashboardWarning.message)}</p>`;

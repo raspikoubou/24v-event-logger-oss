@@ -22,7 +22,14 @@ class CounterResetRepository:
     """ウィジェット別counter resetの基準を保存・取得する。"""
 
     def __init__(self, connection: sqlite3.Connection) -> None:
-        """接続を受け取る。"""
+        """接続を受け取る。
+
+        Args:
+            connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+        Returns:
+            None。 依存値を保持して利用可能なinstanceを初期化する。
+        """
         self._connection = connection
 
     def create(
@@ -32,7 +39,20 @@ class CounterResetRepository:
         reset_at_ms: int,
         after_event_id: int | None = None,
     ) -> CounterReset:
-        """最新event IDを基準にcounter resetをcommitする。"""
+        """最新event IDを基準にcounter resetをcommitする。
+
+        Args:
+            widget_id: 対象widgetの永続ID。 関連データと監査記録のkeyに使う。
+            reset_at_ms: counter reset記録の時刻（UTC epoch ms）。
+            after_event_id: このIDより大きいeventだけを数える排他的reset境界。
+
+        Returns:
+            CounterReset型の結果。 戻り値の型に応じ、
+                該当なしはNoneまたは空collectionとなる。
+
+        Raises:
+            ValueError: widget_idが空の場合。 after_event_idが負の場合。
+        """
         if not widget_id:
             raise ValueError("widget_id must not be empty")
         self._connection.execute("BEGIN IMMEDIATE")
@@ -78,7 +98,14 @@ class CounterResetRepository:
         )
 
     def latest(self, widget_id: str) -> CounterReset | None:
-        """ウィジェットの最新resetを返す。"""
+        """ウィジェットの最新resetを返す。
+
+        Args:
+            widget_id: 対象widgetの永続ID。 関連データと監査記録のkeyに使う。
+
+        Returns:
+            widgetの最新CounterReset。 未登録ならNone。
+        """
         row = self._connection.execute(
             """
             SELECT * FROM counter_resets
@@ -91,7 +118,19 @@ class CounterResetRepository:
         return _counter_reset_from_row(row) if row is not None else None
 
     def count_total(self, *, reset_id: int, channel_id: int, value: int) -> int:
-        """同じ読取りsnapshotでcarryと残存edgeを合算する。"""
+        """同じ読取りsnapshotでcarryと残存edgeを合算する。
+
+        Args:
+            reset_id: counter reset rowの永続ID。
+            channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+            value: 論理入力/出力値。 ONはTrueまたは1、 OFFはFalseまたは0。
+
+        Returns:
+            条件に一致するevent/row件数。 該当がない場合は0。
+
+        Raises:
+            ValueError: 「reset id or edge value is invalid」に該当すると判定した場合。
+        """
         _validate_channel_ids([channel_id])
         if reset_id < 1 or value not in (0, 1):
             raise ValueError("reset id or edge value is invalid")
@@ -116,7 +155,14 @@ class RetentionRepository:
     """retentionのcarry + DELETE + vacuumをtransaction境界へ閉じ込める。"""
 
     def __init__(self, connection: sqlite3.Connection) -> None:
-        """接続を受け取る。"""
+        """接続を受け取る。
+
+        Args:
+            connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+        Returns:
+            None。 依存値を保持して利用可能なinstanceを初期化する。
+        """
         self._connection = connection
 
     def delete_old_batch(
@@ -125,7 +171,21 @@ class RetentionRepository:
         cutoff_ms: int | None,
         batch_size: int,
     ) -> tuple[int, int, int] | None:
-        """古いIN/OUTを最大batch件ずつ削除する。"""
+        """古いIN/OUTを最大batch件ずつ削除する。
+
+        Args:
+            cutoff_ms: retentionで削除対象とする時刻のUTC epoch ms境界。
+            batch_size: 一回のretention deleteで処理する最大row件数。
+
+        Returns:
+            削除対象なしならNone。 それ以外は(IN削除row数, OUT削除row数,
+                counterへ繰越加算したedge合計数)。 batch_sizeはIN/OUT各々の上限。
+                cutoff_ms=Noneなら時刻制限なし、 指定時はts_utc_ms <
+                cutoff_msを古い順に削除する。
+
+        Raises:
+            ValueError: batch_sizeが0以下の場合。
+        """
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
         self._connection.execute("BEGIN IMMEDIATE")
@@ -186,9 +246,19 @@ class RetentionRepository:
     def incremental_vacuum(self) -> bool:
         """空きpageとWALを可能な範囲で段階的に返す。
 
-        容量保護はDB本体だけでなくWAL/SHMも監視するため、vacuumだけでは
-        観測対象のファイルサイズが下がらない。checkpointを同じ保守境界で
-        行い、loggerdが短時間書込みを止めている間にWALを縮小する。
+        容量保護はDB本体だけでなくWAL/SHMも監視するため、 vacuumだけでは
+        観測対象のファイルサイズが下がらない。 checkpointを同じ保守境界で
+        行い、 loggerdが短時間書込みを止めている間にWALを縮小する。
+
+        Args:
+            なし。
+
+        Returns:
+            判定対象が条件を満たす場合True、 その他はFalse。
+
+        Raises:
+            RuntimeError: 「incremental auto_vacuum is not enabled; run database
+                migration」に該当すると判定した場合。
         """
         mode_row = self._connection.execute("PRAGMA auto_vacuum").fetchone()
         mode = int(mode_row[0]) if mode_row is not None else 0
@@ -229,7 +299,17 @@ class RetentionRepository:
         return True
 
     def record_audit(self, *, action: str, details_json: str, ts_utc_ms: int) -> None:
-        """maintenance結果をaudit_logへ保存する。"""
+        """maintenance結果をaudit_logへ保存する。
+
+        Args:
+            action: 監査記録に保存する操作名。
+            details_json: 監査記録へ保存するdetails JSON文字列。
+            ts_utc_ms: 保存時のUTC Unix epoch timestamp（ms）。
+                画面表示/検索の時間軸に使う。
+
+        Returns:
+            None。 渡されたSQLite接続へ変更を適用し、 接続のcloseは呼出元に残す。
+        """
         self._connection.execute(
             """
             INSERT INTO audit_log (ts_utc_ms, action, details_json)
@@ -240,7 +320,15 @@ class RetentionRepository:
         self._connection.commit()
 
     def _counter_carry(self, event_rows: Sequence[sqlite3.Row]) -> dict[int, int]:
-        """削除対象eventを各widgetの条件へ照合してcarry件数を求める。"""
+        """削除対象eventを各widgetの条件へ照合してcarry件数を求める。
+
+        Args:
+            event_rows: retention対象となる入力event row列。
+                counter繰越値の算出にも使う。
+
+        Returns:
+            結果値を識別keyへ対応させたdict。 入力mappingを変更しない。
+        """
         rows = self._connection.execute(
             """
             SELECT counter_resets.*, widgets.config_json

@@ -1,3 +1,8 @@
+  /**
+   * OUTと条件ruleの設定を画面へ描画する。
+   * @param {boolean} preserveForm - 保存後も既存の編集form内容を保持するか。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderOutputSettings(preserveForm = false) {
     const heartbeat = fixtures.settings.heartbeat;
     if (!preserveForm) {
@@ -32,6 +37,11 @@
     }).join("") || '<p class="empty-rule-list">条件ルールはありません。</p>';
   }
 
+  /**
+   * ruleの有効状態を切り替えて保存する。
+   * @param {number} ruleId - rule ID。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   async function toggleOutputRule(ruleId) {
     const rule = fixtures.outputRules.find((item) => item.id === ruleId);
     if (!rule) return;
@@ -80,6 +90,12 @@
     showToast(enabled ? `${rule.name}を有効にしました` : `${rule.name}を無効にしました`);
   }
 
+  /**
+   * 入力channel selectにoptionを入れ、指定値を選択する。
+   * @param {HTMLSelectElement} select - select element。
+   * @param {string|number} selectedId - 初期選択ID。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function populateInputSelect(select, selectedId) {
     select.innerHTML = fixtures.channels.map((channel) => (
       `<option value="IN${channel.id}">${escapeHtml(channelLabel(channel))}</option>`
@@ -87,12 +103,21 @@
     select.value = selectedId || "IN1";
   }
 
+  /**
+   * 選択したrule kindに応じた条件項目を表示する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function updateRuleConditionFields() {
     const absence = document.querySelector("#rule-condition").value === "event_absence";
     document.querySelector("#rule-value-field").hidden = absence;
     document.querySelector("#rule-edge-field").hidden = !absence;
   }
 
+  /**
+   * 新規または既存ruleの編集dialogを開く。
+   * @param {number} ruleId - rule ID。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function openOutputRuleDialog(ruleId = null) {
     editingOutputRuleId = ruleId;
     const rule = fixtures.outputRules.find((item) => item.id === ruleId);
@@ -115,6 +140,12 @@
     document.querySelector("#output-rule-dialog").showModal();
   }
 
+  /**
+   * 同じOUTを別ruleが所有する競合を判定する。
+   * @param {number} outputId - 出力番号。
+   * @param {number} ignoredRuleId - 除外するrule ID。
+   * @returns {boolean} 指定OUTを別ruleがすでに所有する場合true。
+   */
   function outputConflict(outputId, ignoredRuleId = null) {
     const heartbeat = fixtures.settings.heartbeat;
     if (heartbeat.enabled && heartbeat.outputId === outputId) return "Heartbeat";
@@ -122,11 +153,20 @@
     return rule?.name || "";
   }
 
+  /**
+   * rule継続時間の入力が許可範囲か判定する。
+   * @param {string} value - 変換対象の値。
+   * @returns {boolean} rule durationが整数かつ実装で許可した範囲内ならtrue。
+   */
   function validRuleDuration(value) {
     const duration = Number(value);
     return Number.isInteger(duration) && duration >= 1 && duration <= 86400;
   }
 
+  /**
+   * dialog入力を検証し、条件ruleをAPIへ保存する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   async function saveOutputRule() {
     const error = document.querySelector("#rule-error");
     const name = document.querySelector("#rule-name").value.trim();
@@ -202,6 +242,11 @@
     editingOutputRuleId = null;
   }
 
+  /**
+   * loggerdへロギング開始・停止要求を送信する。
+   * @param {string} nextLogging - 次にするロギング状態。
+   * @returns {Promise<void>} start/stop要求のACK後にlive stateを再取得する。loggerd拒否・通信失敗はrejectする。
+   */
   async function setLoggingState(nextLogging) {
     if (liveMode) {
       try {
@@ -260,6 +305,14 @@
     showToast(logging ? "記録を再開しました" : "記録を停止してメンテナンス状態へ移行しました");
   }
 
+  /**
+   * 利用者確認dialogを開き、確定後にactionを実行する。
+   * @param {string} title - dialog title。
+   * @param {string} message - 利用者向け説明。
+   * @param {string} confirmLabel - 確認button文言。
+   * @param {Function} action - 確認後のaction。
+   * @returns {void} dialogへtitle/message/button文言を設定して開き、確定時にactionを呼び出す。
+   */
   function openConfirmation(title, message, confirmLabel, action) {
     const dialog = document.querySelector("#confirm-dialog");
     document.querySelector("#dialog-title").textContent = title;
@@ -269,6 +322,10 @@
     dialog.showModal();
   }
 
+  /**
+   * 現在の検索条件でCSVを取得し、downloadを開始する。
+   * @returns {Promise<void>} CSV responseをbrowser downloadとして保存する。非成功responseではerror通知する。
+   */
   function downloadCsv() {
     if (liveMode) {
       const anchor = document.createElement("a");
@@ -292,6 +349,11 @@
     showToast(`${rows.length}件のイベントを書き出しました`);
   }
 
+  /**
+   * 指定した設定sectionを表示する。
+   * @param {string} sectionId - 設定section ID。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function openSettingsSection(sectionId) {
     switchView("settings");
     document.querySelectorAll(".settings-section").forEach((section) => {
@@ -303,6 +365,11 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  /**
+   * widget wizardの指定stepを表示する。
+   * @param {number} step - wizard step番号。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function showWidgetStep(step) {
     currentWidgetStep = step;
     document.querySelectorAll("[data-widget-step]").forEach((panel) => {
@@ -314,6 +381,12 @@
     document.querySelector("#confirm-add-widget").classList.toggle("is-hidden", step !== 3);
   }
 
+  /**
+   * groupに適用可能なwidget type選択肢を設定する。
+   * @param {string} group - widget group。
+   * @param {string} selectedType - 選択type。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function setWidgetTypeOptions(group, selectedType) {
     const types = group === "realtime"
       ? ["現在状態"]
@@ -324,6 +397,10 @@
     document.querySelector("#widget-type-help").textContent = widgetTypeHelp[typeSelect.value];
   }
 
+  /**
+   * widget用channel選択肢を描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderWidgetChannelOptions() {
     const select = document.querySelector("#new-widget-channel");
     select.innerHTML = fixtures.channels.map((channel) => (
@@ -338,6 +415,11 @@
     document.querySelector("#widget-channel-checks").innerHTML = [...inputs, ...outputs].join("");
   }
 
+  /**
+   * 選択channel群を画面状態へ設定する。
+   * @param {string} value - 変換対象の値。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function setWidgetChannels(value) {
     const ids = signalIds(value);
     document.querySelector("#new-widget-channel").value = ids[0] || "IN1";
@@ -346,6 +428,10 @@
     });
   }
 
+  /**
+   * 現在選択されているwidget channel群を返す。
+   * @returns {Array<string>} widget画面で現在選択中のIN/OUT signal ID列。
+   */
   function selectedWidgetChannels() {
     const type = document.querySelector("#new-widget-type").value;
     if (!["タイムライン", "イベント一覧"].includes(type)) return document.querySelector("#new-widget-channel").value;

@@ -15,6 +15,11 @@
     Object.entries(apiWidgetTypes).map(([apiType, uiType]) => [uiType, apiType])
   );
 
+  /**
+   * API widgetの期間をUIで使う期間keyへ変換する。
+   * @param {Object} widget - widget設定。
+   * @returns {string} follow、許可済みperiod key、customのいずれか。
+   */
   function widgetPeriodFromApi(widget) {
     const config = widget.config || {};
     const explicitPeriod = config.ui_period;
@@ -40,6 +45,11 @@
     return periodByDuration.get(duration) || "custom";
   }
 
+  /**
+   * API widget payloadを画面設定形式へ変換する。
+   * @param {Object} widget - widget設定。
+   * @returns {Object} API widgetから画面編集用の標準field群へ正規化した設定object。
+   */
   function widgetConfigFromApi(widget) {
     const rawConfig = widget.config && typeof widget.config === "object" ? widget.config : {};
     const type = apiWidgetTypes[widget.type];
@@ -80,6 +90,12 @@
     };
   }
 
+  /**
+   * UI期間選択をAPI用時間範囲へ変換する。
+   * @param {string} period - 期間選択値。
+   * @param {number} durationMs - 期間長（millisecond）。
+   * @returns {Object} dashboard連動またはfixed period/duration_ms time_range設定。
+   */
   function widgetTimeRangeFromUi(period, durationMs = 0) {
     if (!period || period === "follow") return { mode: "dashboard" };
     if (["1h", "8h", "24h", "7d", "30d"].includes(period)) {
@@ -97,6 +113,14 @@
     return { mode: "fixed", duration_ms: durationByPeriod[period] || 8 * 3_600_000 };
   }
 
+  /**
+   * UI widget設定を保存API payloadへ変換する。
+   * @param {Object} uiConfig - 画面用設定。
+   * @param {number} sortOrder - 保存表示順。
+   * @param {boolean} enabled - widgetを有効にするか。
+   * @param {string} widgetSource - 元widget種別。
+   * @returns {Object} ID/type/title/config/size/sort_order/enabledを持つAPI保存payload。
+   */
   function widgetPayloadFromConfig(uiConfig, sortOrder, enabled, widgetSource) {
     const apiType = uiWidgetTypes[uiConfig.type];
     if (!apiType) throw new Error(`未対応のウィジェット種別です: ${uiConfig.type}`);

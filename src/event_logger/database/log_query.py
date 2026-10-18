@@ -21,7 +21,28 @@ def _build_log_query(
     offset: int,
     descending: bool | None,
 ) -> tuple[str, list[object]]:
-    """IN/OUTを索引順に結合し、安全なbind parameter付きqueryを作る。"""
+    """IN/OUTを索引順に結合し、安全なbind parameter付きqueryを作る。
+
+    Args:
+        start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+        end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+        signals: 対象信号名列。 INn/OUTn表記からsignal種別と番号を判定する。
+        values: queryに含める論理値の列。 値は0または1で、 未指定なら両状態を含める。
+        kinds: queryに含めるevent kindの集合。
+        sources: queryに含める出力変更元の集合。
+        limit: query結果の最大row数。
+        offset: query結果の先頭から除外するrow数。
+        descending: Trueなら新しい記録を先にする並び順指定。
+
+    Returns:
+        parameterized SQL文字列と、 そのplaceholderへ渡す順序付きbind値列。
+
+    Raises:
+        ValueError: 期間開始が終了未満でない場合。 「values must contain only 0 or
+            1」に該当すると判定した場合。 「kinds must contain edge, snapshot, or
+            output」に該当すると判定した場合。 「sources contains an unsupported output
+            source」に該当すると判定した場合。
+    """
     if start_ms >= end_ms:
         raise ValueError("start_ms must be before end_ms")
     input_channels, output_channels = _split_signals(signals)
@@ -119,7 +140,19 @@ def _build_log_query(
 
 
 def _split_signals(signals: Sequence[str] | None) -> tuple[list[int], list[int]]:
-    """IN1/OUT1表記を検証し、入力・出力チャンネルへ分離する。"""
+    """IN1/OUT1表記を検証し、入力・出力チャンネルへ分離する。
+
+    Args:
+        signals: 対象信号名列。 INn/OUTn表記からsignal種別と番号を判定する。
+
+    Returns:
+        注釈に示す順序の集計値tuple。
+
+    Raises:
+        ValueError: 「signals must contain IN1..IN6 or
+            OUT1..OUT6」に該当すると判定した場合。 signal channelが1〜6の範囲外の場合。
+            「signal channel must be numeric」に該当すると判定した場合。
+    """
     if signals is None:
         return [], []
     input_channels: list[int] = []
@@ -149,7 +182,15 @@ def _split_signals(signals: Sequence[str] | None) -> tuple[list[int], list[int]]
 
 
 def _channel_clause(column: str, channels: Sequence[int]) -> tuple[str, list[object]]:
-    """チャンネル絞り込みSQLをbind parameterで作成する。"""
+    """チャンネル絞り込みSQLをbind parameterで作成する。
+
+    Args:
+        column: 内部queryで参照する固定column名。
+        channels: 入力channel設定列。 daemonの比較ではchannel ID順に正規化される。
+
+    Returns:
+        parameterized SQL文字列と、 そのplaceholderへ渡す順序付きbind値列。
+    """
     if not channels:
         return "", []
     placeholders = ", ".join("?" for _ in channels)

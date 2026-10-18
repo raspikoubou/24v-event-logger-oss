@@ -10,7 +10,14 @@ from event_logger.database.migrations import migrate_database
 
 
 def main() -> None:
-    """指定DBを明示的に最新schemaへ移行する。"""
+    """指定DBを明示的に最新schemaへ移行する。
+
+    Args:
+        なし。
+
+    Returns:
+        None。
+    """
     parser = argparse.ArgumentParser(description="event logger database migration")
     parser.add_argument(
         "--database",

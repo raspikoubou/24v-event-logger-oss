@@ -13,6 +13,9 @@ UNIT_NAMES=(
   event-logger-update.service
 )
 
+# 引数: 1個以上の診断文。標準エラーへprefix付きで出力する。
+# 戻り値: 戻らない。status 1で現在のscriptを終了する。
+# 副作用: stdout/stderrへの出力とprocess終了のみ。
 die() {
   printf 'private SQLite services: %s\n' "$*" >&2
   exit 1

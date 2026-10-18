@@ -52,7 +52,18 @@ class CounterReset:
     carried_count: int
 
     def __post_init__(self) -> None:
-        """counter resetの正値制約を検証する。"""
+        """counter resetの正値制約を検証する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。 制約を検証するだけで、 永続状態や入力値は変更しない。
+
+        Raises:
+            ValueError: counter reset idが0以下の場合。 widget_idが空の場合。 counter
+                reset valuesが負の場合。
+        """
         if self.id < 1:
             raise ValueError("counter reset id must be positive")
         if not self.widget_id:
@@ -74,7 +85,18 @@ class ChannelConfig:
     updated_at_ms: int
 
     def __post_init__(self) -> None:
-        """チャンネル設定のDB境界を検証する。"""
+        """チャンネル設定のDB境界を検証する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。 制約を検証するだけで、 永続状態や入力値は変更しない。
+
+        Raises:
+            ValueError: channel idが1〜6の範囲外の場合。
+                debounce_msが0〜5000の範囲外の場合。
+        """
         if not 1 <= self.id <= 6:
             raise ValueError("channel id must be between 1 and 6")
         if not 0 <= self.debounce_ms <= 5000:
@@ -95,7 +117,18 @@ class OutputEvent:
     clock_synced: bool
 
     def __post_init__(self) -> None:
-        """出力履歴のDB境界を検証する。"""
+        """出力履歴のDB境界を検証する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。 制約を検証するだけで、 永続状態や入力値は変更しない。
+
+        Raises:
+            ValueError: output event idが0以下の場合。 session idが0以下の場合。
+                output_channelが1〜6の範囲外の場合。 論理値が0または1以外の場合。
+        """
         if self.id < 1:
             raise ValueError("output event id must be positive")
         if self.session_id is not None and self.session_id < 1:
@@ -121,7 +154,23 @@ class LogRecord:
     clock_synced: bool
 
     def __post_init__(self) -> None:
-        """統合ログが入力・出力どちらの制約も満たすことを確認する。"""
+        """統合ログが入力・出力どちらの制約も満たすことを確認する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。 制約を検証するだけで、 永続状態や入力値は変更しない。
+
+        Raises:
+            ValueError: log record idが0以下の場合。 「record_type must be input or
+                output」に該当すると判定した場合。 channel_idが1〜6の範囲外の場合。
+                論理値が0または1以外の場合。 「unsupported log
+                kind」に該当すると判定した場合。 「input log record cannot have output
+                kind」に該当すると判定した場合。 「output log record requires output
+                kind and source」に該当すると判定した場合。 「input log record cannot
+                have output source」に該当すると判定した場合。
+        """
         if self.id < 1:
             raise ValueError("log record id must be positive")
         if self.record_type not in ("input", "output"):
@@ -155,7 +204,19 @@ class InputEvent:
     clock_synced: bool
 
     def __post_init__(self) -> None:
-        """DBから復元した値がDomainの制約を満たすことを確認する。"""
+        """DBから復元した値がDomainの制約を満たすことを確認する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。 制約を検証するだけで、 永続状態や入力値は変更しない。
+
+        Raises:
+            ValueError: event idが0以下の場合。 session idが0以下の場合。
+                channel_idが1〜6の範囲外の場合。 論理値が0または1以外の場合。 event
+                timestampsが負の場合。
+        """
         if self.id < 1:
             raise ValueError("event id must be positive")
         if self.session_id < 1:
@@ -180,7 +241,18 @@ class StateInterval:
     duration_ms: int | None = None
 
     def __post_init__(self) -> None:
-        """空区間や不正なチャンネルを受け付けない。"""
+        """空区間や不正なチャンネルを受け付けない。
+
+        Args:
+            なし。
+
+        Returns:
+            None。 制約を検証するだけで、 永続状態や入力値は変更しない。
+
+        Raises:
+            ValueError: channel_idが1〜6の範囲外の場合。 「state interval must have
+                positive duration」に該当すると判定した場合。 duration_msが負の場合。
+        """
         if not 1 <= self.channel_id <= 6:
             raise ValueError("channel_id must be between 1 and 6")
         if self.start_ms >= self.end_ms:

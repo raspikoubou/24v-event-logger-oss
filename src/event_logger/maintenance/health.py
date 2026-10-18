@@ -23,7 +23,18 @@ class HealthCheckError(RuntimeError):
 
 
 def check_database_ready(database_path: str | Path) -> None:
-    """SQLite schemaとintegrityが製品の利用条件を満たすか検査する。"""
+    """SQLite schemaとintegrityが製品の利用条件を満たすか検査する。
+
+    Args:
+        database_path: SQLite databaseのfilesystem path。
+
+    Returns:
+        None。
+
+    Raises:
+        HealthCheckError: database、loggerd
+            IPCまたはHTTP readiness条件を満たさない場合。
+    """
     path = Path(database_path)
     if not path.is_file():
         raise HealthCheckError(f"database is missing: {path}")
@@ -38,7 +49,18 @@ def check_database_ready(database_path: str | Path) -> None:
 
 
 def check_control_ready(socket_path: str | Path) -> None:
-    """loggerdのstatus応答と監視状態を検査する。"""
+    """loggerdのstatus応答と監視状態を検査する。
+
+    Args:
+        socket_path: 接続先またはlistenするUnix socket path。
+
+    Returns:
+        None。
+
+    Raises:
+        HealthCheckError: database、loggerd
+            IPCまたはHTTP readiness条件を満たさない場合。
+    """
     try:
         data = UnixControlClient(socket_path, timeout=2.0).request(
             ControlRequest(ControlCommand.STATUS)
@@ -51,7 +73,18 @@ def check_control_ready(socket_path: str | Path) -> None:
 
 
 def check_http_ready(url: str) -> None:
-    """認証前でも到達できるWeb endpointのHTTP応答を検査する。"""
+    """認証前でも到達できるWeb endpointのHTTP応答を検査する。
+
+    Args:
+        url: 接続先HTTP/HTTPS URL。
+
+    Returns:
+        None。
+
+    Raises:
+        HealthCheckError: database、loggerd
+            IPCまたはHTTP readiness条件を満たさない場合。
+    """
     request = Request(url, headers={"User-Agent": "event-logger-health"})
     try:
         with urlopen(request, timeout=2.0) as response:
@@ -75,7 +108,24 @@ def run_health_check(
     attempts: int = 1,
     interval_seconds: float = 1.0,
 ) -> None:
-    """全health checkを実行し、起動直後の一時的な未準備を再試行する。"""
+    """全health checkを実行し、起動直後の一時的な未準備を再試行する。
+
+    Args:
+        database_path: SQLite databaseのfilesystem path。
+        socket_path: 接続先またはlistenするUnix socket path。
+        url: 接続先HTTP/HTTPS URL。
+        attempts: health checkの最大試行回数。
+        interval_seconds: health check再試行間隔（秒）。
+
+    Returns:
+        None。
+
+    Raises:
+        HealthCheckError: database、loggerd
+            IPCまたはHTTP readiness条件を満たさない場合。
+        ValueError: 引数の形式・範囲が仕様外、または現在
+            の状態では要求を適用できない場合。
+    """
     if attempts < 1:
         raise ValueError("attempts must be positive")
     if interval_seconds < 0:
@@ -97,7 +147,14 @@ def run_health_check(
 
 
 def main() -> None:
-    """環境変数・CLI引数からhealth checkを実行する。"""
+    """環境変数・CLI引数からhealth checkを実行する。
+
+    Args:
+        なし。
+
+    Returns:
+        None。
+    """
     parser = argparse.ArgumentParser(description="event logger health check")
     parser.add_argument(
         "--database",

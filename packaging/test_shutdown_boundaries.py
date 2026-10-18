@@ -31,24 +31,57 @@ class ManualTimer:
     def __init__(
         self, interval: float, function: Callable[..., None], args: tuple[object, ...]
     ) -> None:
-        """起床処理を試験から呼べるよう保存する。"""
+        """起床処理を試験から呼べるよう保存する。
+
+    Args:
+        interval: 試験timerが保持する待機秒数。
+        function: 試験timer期限時に呼び出すcallback。
+        args: 試験timer callbackへ位置引数として渡す値。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
         self.function = function
         self.args = args
         self.daemon = True
 
     def start(self) -> None:
-        """試験から明示的にfireするまで待つ。"""
+        """試験から明示的にfireするまで待つ。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
 
     def cancel(self) -> None:
-        """取消済みcallbackもfireできるようにする。"""
+        """取消済みcallbackもfireできるようにする。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
 
     def fire(self) -> None:
-        """保存済みの期限callbackを実行する。"""
+        """保存済みの期限callbackを実行する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
         self.function(*self.args)
 
 
 def _daemon(tmp_path: Path) -> tuple[LoggerDaemon, FakeGPIO, FakeClock]:
-    """実GPIOを使わずに、終了経路のwriterとdaemonを開始する。"""
+    """実GPIOを使わずに、終了経路のwriterとdaemonを開始する。
+
+        Args:
+            tmp_path: pytestが用意するテスト専用一時directory。
+
+        Returns:
+            (LoggerDaemon, FakeGPIO, FakeClock) tuple。shutdown境界試験用の初期daemon。
+    """
     path = tmp_path / "logger.db"
     initialize_database(path)
     with closing(connect_database(path)) as connection:
@@ -69,7 +102,13 @@ def _daemon(tmp_path: Path) -> tuple[LoggerDaemon, FakeGPIO, FakeClock]:
 
 @pytest.mark.parametrize("value", [0, 1])
 def test_output_timeline_keeps_unknown_before_first_history(value: InputState) -> None:
-    """期間途中からOUT履歴が始まる場合、先頭の不明区間を残す。"""
+    """期間途中からOUT履歴が始まる場合、先頭の不明区間を残す。
+
+    Args:
+        value: OUT状態を表す論理boolean。FakeGPIOが保持する出力値として検証する。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     widget = Widget(
         id="timeline",
         widget_type=WidgetType.TIMELINE,
@@ -114,7 +153,14 @@ def test_maintenance_shutdown_finishes_test_and_cancels_timer(
     tmp_path: Path,
     expired: bool,
 ) -> None:
-    """maintenance中の終了もTESTのOFFを保存し、閉じたGPIOへの期限処理を止める。"""
+    """maintenance中の終了もTESTのOFFを保存し、閉じたGPIOへの期限処理を止める。
+
+    Args:
+        tmp_path: pytestが用意するテスト専用一時directory。
+        expired: timer期限callbackを呼び出すかを表す試験条件。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     daemon, gpio, clock = _daemon(tmp_path)
     with patch("event_logger.loggerd.outputs.threading.Timer", ManualTimer):
         daemon._handle_control(ControlRequest(ControlCommand.STOP_LOGGING))
@@ -145,7 +191,13 @@ def test_maintenance_shutdown_finishes_test_and_cancels_timer(
 
 @pytest.mark.parametrize("failure", ["off", "input_close", "output_close"])
 def test_hat_close_releases_all_devices_after_one_failure(failure: str) -> None:
-    """一つのGPIO例外で、残りOUTのOFFや全deviceの解放を中断しない。"""
+    """一つのGPIO例外で、残りOUTのOFFや全deviceの解放を中断しない。
+
+    Args:
+        failure: 再現する例外または失敗条件。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     inputs = {index: Mock() for index in range(1, 7)}
     outputs = {index: Mock() for index in range(1, 7)}
     trace = Mock()
@@ -167,7 +219,13 @@ def test_hat_close_releases_all_devices_after_one_failure(failure: str) -> None:
 
 @pytest.mark.parametrize("location", ["header", "form"])
 def test_non_ascii_csrf_is_rejected_without_server_error(location: str) -> None:
-    """文字列比較が受け付けない文字をCSRFへ渡されても400で拒否する。"""
+    """文字列比較が受け付けない文字をCSRFへ渡されても400で拒否する。
+
+    Args:
+        location: 検証対象のHTTP locationまたは設定位置。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     app = create_app({"TESTING": True})
     try:
         client = app.test_client()
@@ -185,7 +243,13 @@ def test_non_ascii_csrf_is_rejected_without_server_error(location: str) -> None:
 
 @pytest.mark.parametrize("completed", [True, False])
 def test_body_is_received_before_configuration_lock(completed: bool) -> None:
-    """本文が揃う前に設定lockを占有せず、不足本文では変更を実行しない。"""
+    """本文が揃う前に設定lockを占有せず、不足本文では変更を実行しない。
+
+    Args:
+        completed: 並行処理の完了を示す同期eventまたは状態。
+
+    Returns:
+        なし。呼出元は副作用の完了をもって処理結果を扱う。"""
     application = Mock(return_value=[b"ok"])
     middleware = _ConfigurationRequestMiddleware(application)
 
@@ -193,9 +257,25 @@ def test_body_is_received_before_configuration_lock(completed: bool) -> None:
         """受信中に設定lockを別の要求が使えるか確認する。"""
 
         def read(self, size: int | None = -1) -> bytes:
+            """readの役割を説明する。
+
+                Args:
+                    size: 読み込み要求のbyte数。
+
+                Returns:
+                    指定sizeまでsocket body bytesを返す。
+                        期限または切断時は対応するsocket例外。
+            """
             acquired: list[bool] = []
 
             def inspect_lock() -> None:
+                """inspect_lockの役割を説明する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
                 locked = middleware._lock.acquire(blocking=False)
                 acquired.append(locked)
                 if locked:
@@ -229,7 +309,13 @@ def test_body_is_received_before_configuration_lock(completed: bool) -> None:
 
 
 def test_body_deadline_cannot_close_a_reused_socket() -> None:
-    """起床済み旧timerも完了後にはsocketへ作用せず、期限超過時だけ拒否する。"""
+    """起床済み旧timerも完了後にはsocketへ作用せず、期限超過時だけ拒否する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     application = Mock(return_value=[b"ok"])
     middleware = _ConfigurationRequestMiddleware(application)
     transport = Mock()

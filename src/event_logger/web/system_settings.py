@@ -25,7 +25,18 @@ def _system_settings_payload(
     app: Flask,
     auth: SharedPasswordAuth,
 ) -> dict[str, object]:
-    """本体・データ設定をDBと起動時defaultから組み立てる。"""
+    """本体・データ設定をDBと起動時defaultから組み立てる。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            app: 対象のFlask application。設定値、extension、route登録先として使う。
+            auth: 共有パスワード認証の状態を管理するオブジェクト。
+
+        Returns:
+            password hashを除いたdevice name、hostname、timezone、auth enabled、
+                retention等の表示用設定dict。
+    """
     configured_hostname = app.config.get("HOSTNAME")
     default_hostname = (
         str(configured_hostname)
@@ -65,7 +76,20 @@ def _validated_system_settings(
     auth: SharedPasswordAuth,
     payload: Mapping[str, object],
 ) -> dict[str, object]:
-    """system設定payloadを検証し、保存用password hashを含めて返す。"""
+    """system設定payloadを検証し、保存用password hashを含めて返す。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            app: 対象のFlask application。設定値、extension、route登録先として使う。
+            auth: 共有パスワード認証の状態を管理するオブジェクト。
+            payload: HTTP JSON bodyまたは保存対象の設定値。
+                呼出元で形式を検証している場合はその検証済み値。
+
+        Returns:
+            型・文字数・hostname・timezoneを検証したsystem設定dict。
+                新passwordがある場合はhashだけを含み、平文は返さない。
+    """
     current = _system_settings_payload(context, app, auth)
     device_name = _json_text(
         payload.get("device_name", current["device_name"]), "device_name"
@@ -114,7 +138,16 @@ def _save_system_settings(
     system: Mapping[str, object],
     retention_days: int | None = None,
 ) -> None:
-    """検証済みsystem設定を一貫したaudit付きで保存する。"""
+    """検証済みsystem設定を一貫したaudit付きで保存する。
+
+Args:
+    context: 現在のWebContext。関数が使うRepository、Clock、
+        設定値や制御clientを所有する。
+    system: 検証済みsystem設定値。
+    retention_days: event保持期間を表す日数。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     timestamp_ms = context.clock.now_utc_ms()
     values: dict[str, object] = {
         "device_name": system["device_name"],
@@ -136,7 +169,17 @@ def _parse_setup_channels(
     context: WebContext,
     raw_channels: object,
 ) -> list[dict[str, object]]:
-    """初回設定の入力6点を検証し、保存引数へ変換する。"""
+    """初回設定の入力6点を検証し、保存引数へ変換する。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            raw_channels: 初回設定用のchannel入力列。
+
+        Returns:
+            6 channel分の検証済み保存値dict列。
+                件数・名前・debounce・enabled型が仕様外ならValueError。
+    """
     if not isinstance(raw_channels, list):
         raise ValueError("channels must be an array")
     existing = {channel.id: channel for channel in context.channels.list_all()}
@@ -177,7 +220,15 @@ def _parse_setup_channels(
 
 
 def _effective_timezone(context: WebContext) -> str:
-    """DB保存済みtimezoneを検証して返す。"""
+    """DB保存済みtimezoneを検証して返す。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+
+        Returns:
+            保存値が有効ならそのIANA timezone名、未保存・不正ならAsia/Tokyo。
+    """
     raw_timezone = context.settings.get_json("timezone", context.timezone_name)
     if not isinstance(raw_timezone, str):
         return context.timezone_name
@@ -189,12 +240,26 @@ def _effective_timezone(context: WebContext) -> str:
 
 
 def _validate_hostname(hostname: str) -> None:
-    """OS hostnameへ渡せる単一ラベルを検証する。"""
+    """OS hostnameへ渡せる単一ラベルを検証する。
+
+Args:
+    hostname: OSへ設定する候補hostname。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     validate_hostname(hostname)
 
 
 def _safe_default_hostname() -> str:
-    """設定未保存時の端末固有hostnameを返す。"""
+    """設定未保存時の端末固有hostnameを返す。
+
+        Args:
+            なし。
+
+        Returns:
+            OSから取得したhostnameが安全な単一labelならそれ、
+                そうでなければ event-logger。
+    """
     return default_hostname()
 
 

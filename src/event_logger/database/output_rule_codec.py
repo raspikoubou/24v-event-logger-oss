@@ -14,7 +14,19 @@ from event_logger.domain.rules import (
 
 
 def _output_rule_from_row(row: sqlite3.Row) -> OutputRule:
-    """output_rules rowを検証付きDomain ruleへ変換する。"""
+    """output_rules rowを検証付きDomain ruleへ変換する。
+
+    Args:
+        row: SQLite row mapping。 column値を検査してdomain valueへ移す。
+
+    Returns:
+        OutputRule型の結果。 戻り値の型に応じ、 該当なしはNoneまたは空collectionとなる。
+
+    Raises:
+        ValueError: 「rule config must be an object」に該当すると判定した場合。 「rule
+            channel and duration must be integers」に該当すると判定した場合。
+            boolean設定値がbool型でない場合。
+    """
     try:
         config = json.loads(str(row["config_json"]))
         if not isinstance(config, dict):
@@ -58,7 +70,14 @@ def _output_rule_from_row(row: sqlite3.Row) -> OutputRule:
 
 
 def _output_rule_config(condition: ConditionRule) -> dict[str, object]:
-    """ConditionRuleを仕様書のconfig_jsonへ変換する。"""
+    """ConditionRuleを仕様書のconfig_jsonへ変換する。
+
+    Args:
+        condition: OutputRuleに含まれる評価条件値。
+
+    Returns:
+        widget APIへ返す表示field/value mapping。
+    """
     config: dict[str, object] = {
         "channel_id": condition.input_channel,
         "duration_ms": condition.duration_ms,

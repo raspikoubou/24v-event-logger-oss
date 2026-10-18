@@ -28,7 +28,15 @@ if TYPE_CHECKING:
 
 
 def _register_log_routes(app: Flask, context: WebContext) -> None:
-    """検索ログとCSV出力のrouteをappへ登録する。"""
+    """検索ログとCSV出力のrouteをappへ登録する。
+
+        Args:
+            app: Flask application。
+            context: requestごとのRepository、Clock、設定値を保持するWebContext。
+
+        Returns:
+            None。関数の概要に記したroute登録・状態更新を行う。
+    """
 
     from event_logger.web.app import (
         Response,
@@ -44,7 +52,17 @@ def _register_log_routes(app: Flask, context: WebContext) -> None:
 
     @app.get("/api/logs")
     def logs() -> Response:
-        """期間・チャンネルで絞った入力eventをJSONで返す。"""
+        """期間・チャンネルで絞った入力eventをJSONで返す。
+
+            Args:
+                なし。
+
+            Returns:
+                成功時はitemsと半開期間境界、limit/offset/has_next、
+                    timezoneローカル日時を含むJSON 200を返す。
+                    include_total_count=1の場合のみ一致総数を追加する。
+                    期間・filter検証失敗はINVALID_FILTER/400。
+        """
         try:
             timezone_name = _effective_timezone(context)
             filters = _parse_log_filters(context.clock, timezone_name)
@@ -86,7 +104,15 @@ def _register_log_routes(app: Flask, context: WebContext) -> None:
 
     @app.get("/api/logs.csv")
     def logs_csv() -> Response:
-        """現在の検索条件に一致するIN/OUTログをUTF-8 BOM付きCSVで返す。"""
+        """現在の検索条件に一致するIN/OUTログをUTF-8 BOM付きCSVで返す。
+
+            Args:
+                なし。
+
+            Returns:
+                一致する行をCSVとして逐次返し、Content-Dispositionをevents.csvにする。
+                filter検証失敗はINVALID_FILTER/400で、streamを開始する前に拒否する。
+        """
         try:
             timezone_name = _effective_timezone(context)
             filters = _parse_log_filters(context.clock, timezone_name)
@@ -122,7 +148,17 @@ def _register_status_routes(
     context: WebContext,
     auth: SharedPasswordAuth,
 ) -> None:
-    """診断状態を返すrouteをappへ登録する。"""
+    """診断状態を返すrouteをappへ登録する。
+
+        Args:
+            app: 対象のFlask application。設定値、extension、route登録先として使う。
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            auth: 共有パスワード認証の状態を管理するオブジェクト。
+
+        Returns:
+            None。関数の概要に記したroute登録・状態更新を行う。
+    """
 
     from event_logger.web.app import (
         Any,
@@ -142,7 +178,17 @@ def _register_status_routes(
 
     @app.get("/api/status")
     def status() -> Response:
-        """診断画面用の現在状態を返す。"""
+        """診断画面用の現在状態を返す。
+
+            Args:
+                なし。
+
+            Returns:
+                logger status、version、clock、記録件数、channel、IN/OUT、Heartbeat、
+                    retention、
+                    Dashboard期間、system、storage情報を含むJSON 200を返す。
+                    storage読取失敗はcritical状態とstorage_errorをpayloadへ含める。
+        """
         channels = context.channels.list_all()
         daemon_status, daemon_error, daemon_data = _daemon_status(context)
         event_count = context.events.count_all()
@@ -240,7 +286,16 @@ def _register_status_routes(
 
 
 def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
-    """Dashboard計算値を返すrouteをappへ登録する。"""
+    """Dashboard計算値を返すrouteをappへ登録する。
+
+        Args:
+            app: 対象のFlask application。設定値、extension、route登録先として使う。
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+
+        Returns:
+            None。関数の概要に記したroute登録・状態更新を行う。
+    """
 
     from event_logger.web.app import (
         _DASHBOARD_TIMELINE_MAX_JSON_BYTES,
@@ -261,7 +316,18 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
 
     @app.get("/api/dashboard")
     def dashboard() -> Response:
-        """保存済みwidgetをDomain計算値付きで返す。"""
+        """保存済みwidgetをDomain計算値付きで返す。
+
+            Args:
+                なし。
+
+            Returns:
+                成功時は計算済みwidget値、
+                    event/timeline等のDashboard payloadをJSON 200で返す。
+                    期間値が不正・過去範囲でない場合はINVALID_FILTER/400。
+                        timeline件数が上限を超える場合は全計算をせず、
+                    期間を絞る案内payloadをJSON 200で返す。
+        """
         now_ms = context.clock.now_utc_ms()
         timezone_name = _effective_timezone(context)
         period = request.args.get("period")

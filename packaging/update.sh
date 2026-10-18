@@ -17,6 +17,9 @@ VERSION=""
 UPDATE_ATTEMPT_ID="${EVENT_LOGGER_UPDATE_ATTEMPT_ID:-$(date -u +%Y%m%dT%H%M%S)-$$}"
 SOURCE_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# 引数: state、message。VERSIONとUPDATE_ATTEMPT_IDは呼出元のscript状態を使う。
+# 戻り値: status 0なら一時fileからstatus fileへの置換完了。失敗時は呼出元へ非zeroを返す。
+# 副作用: status directory/fileを作成・所有者/権限設定し、renameで更新する。
 write_status() {
   local state="$1"
   local message="$2"
@@ -32,6 +35,9 @@ write_status() {
   mv -f -- "$temporary" "$UPDATE_STATUS_FILE"
 }
 
+# 引数: 1個以上の診断文。標準エラーへprefix付きで出力する。
+# 戻り値: 戻らない。status 1でscriptを終了し、EXIT trapにrollback処理を委ねる。
+# 副作用: 標準エラー出力とprocess終了。
 die() {
   printf 'event-logger update: %s\n' "$*" >&2
   exit 1
@@ -125,6 +131,9 @@ for unit in "${UNIT_NAMES[@]}"; do
 done
 mkdir -p "$STAGING" "$DATA_ROOT/backups"
 
+# 引数: unit file群を読むrelease root directory。
+# 戻り値: 全unitを配置してdaemon-reloadが成功すれば0、最初の欠落/失敗で1。
+# 副作用: /etc/systemd/system配下のunit fileを置換し、systemd managerをreloadする。
 install_release_units() {
   local release_root="$1"
   local unit
@@ -136,6 +145,9 @@ install_release_units() {
   systemctl daemon-reload
 }
 
+# 引数: なし。保存済みsnapshotを使って全unit fileを復元する。
+# 戻り値: 全復元とdaemon-reloadが成功すれば0、最初の復元失敗で1。
+# 副作用: unit fileをsnapshotから復元または削除し、systemd managerをreloadする。
 restore_product_units() {
   local unit
   local restore_path
@@ -151,6 +163,9 @@ restore_product_units() {
   systemctl daemon-reload
 }
 
+# 引数: なし。起動前に記録した各unitのenabled状態を使う。
+# 戻り値: 全unitの有効状態を復元できれば0、1つ以上失敗した場合は1。
+# 副作用: systemctl enable/disableでunitの次回起動設定を変更する。
 restore_product_enabled_states() {
   local unit
   local failed=0
@@ -164,6 +179,9 @@ restore_product_enabled_states() {
   return "$failed"
 }
 
+# 引数: なし。起動前に記録したruntime unitのactive状態を使う。
+# 戻り値: 全unitの稼働状態を復元できれば0、1つ以上失敗した場合は1。
+# 副作用: systemctl start/stopを実行する。timerはこの関数の対象外。
 restore_product_active_states() {
   local unit
   local failed=0
@@ -179,6 +197,9 @@ restore_product_active_states() {
   return "$failed"
 }
 
+# 引数: なし。呼出時点の直前statusとscript全体のrollback flagを使う。
+# 戻り値: EXIT trapから呼ばれた元のstatusを返す。
+# 副作用: 必要に応じservice停止、current/venv/DB/unit復元、status記録、staging削除を行う。
 cleanup_update() {
   local exit_status=$?
   if [[ "$exit_status" -ne 0 ]]; then
@@ -342,6 +363,9 @@ systemctl start event-loggerd.service event-logger-web.service
 # 別の通常shellから遅延・非同期でrestart要求だけをsystemdへ渡し、この処理が
 # 終了してからcurrent symlink先の新releaseを常駐agentへ読み込ませる。
 
+# 引数: なし。今回のNEW_RELEASEと固定loopback health endpointを検査する。
+# 戻り値: 最大15回の確認で必須unitとhealth checkが全て通れば0、期限後も未準備なら1。
+# 副作用: health CLIを起動し、失敗間に1秒ずつ待機する。
 health_check() {
   local attempt
   for attempt in $(seq 1 15); do

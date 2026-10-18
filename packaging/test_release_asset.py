@@ -8,7 +8,13 @@ from create_release_asset import _archive_entries
 
 
 def test_regression_tools_are_not_distributed() -> None:
-    """開発用の追加試験をアプリarchiveへ入れない。"""
+    """開発用の追加試験をアプリarchiveへ入れない。
+
+Args:
+    なし。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     names = {path.as_posix() for path, _, _ in _archive_entries()}
     assert "packaging/test_auth_sessions.py" not in names
     assert "packaging/test_auth_sessions.cjs" not in names
@@ -23,7 +29,13 @@ def test_regression_tools_are_not_distributed() -> None:
 
 
 def test_sqlite_notice_contains_source_and_compatibility_only() -> None:
-    """同梱ライブラリの出典・互換情報と作業記録を区別する。"""
+    """同梱ライブラリの出典・互換情報と作業記録を区別する。
+
+Args:
+    なし。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     root = Path(__file__).resolve().parents[1]
     body = (root / "packaging/private-runtime/sqlite/BUILD_INFO.md").read_text()
     assert "sqlite.org/2026/sqlite-autoconf-3530400.tar.gz" in body

@@ -18,7 +18,25 @@ from event_logger.web.dashboard_periods import _dashboard_range_ms
 
 
 def _parse_log_filters(clock: Clock, timezone_name: str) -> dict[str, Any]:
-    """HTTP queryをRepository filterへ変換する。"""
+    """HTTP queryをRepository filterへ変換する。
+
+        Args:
+            clock: requestにperiodがなければ現在時刻。
+                期間省略時はnowから過去24時間を開始値、
+                now+1 msを排他的終端として使うClock。
+            timezone_name:
+                ローカルdatetimeやtoday/yesterday/this_week境界を解釈するIANA
+                timezone名。
+
+        Returns:
+            Repositoryへ渡すfilter mapping。start_msはUTC millisecondの包含開始、
+                end_msは排他的終端。
+                省略時は直近24時間からnow+1 msまで。
+                    signals/values/kinds/sourcesは未指定ならNone、
+                limitは100（許可値50/100/500）、offsetは0。期間の重複指定、範囲外IN、
+                    未許可選択肢、
+                負offset等はValueError。
+    """
     now_ms = clock.now_utc_ms()
     period = request.args.get("period")
     if period is not None:
@@ -103,7 +121,19 @@ def _parse_log_filters(clock: Clock, timezone_name: str) -> dict[str, Any]:
 
 
 def _parse_local_input(value: str, timezone_name: str) -> int:
-    """設定timezoneのdatetime-local文字列をUTCミリ秒へ変換する。"""
+    """設定timezoneのdatetime-local文字列をUTCミリ秒へ変換する。
+
+        Args:
+            value:
+                ブラウザdatetime-local形式の年月日時分（秒があれば秒も含む）を表す文字列
+                。
+                timezone情報がなければ指定timezoneの壁時計として解釈する。
+            timezone_name: 入力値をローカル時刻として解釈するIANA timezone名。
+
+        Returns:
+            指定timezoneで解釈したUTC Unix epoch millisecond整数。
+                無効なISO datetimeやtimezoneはValueError。
+    """
     try:
         parsed = datetime.fromisoformat(value)
         timezone = ZoneInfo(timezone_name)
@@ -117,7 +147,15 @@ def _parse_local_input(value: str, timezone_name: str) -> int:
 
 
 def _format_local_input(timestamp_ms: int, timezone_name: str) -> str:
-    """UTCミリ秒を設定timezoneのdatetime-local文字列へ変換する。"""
+    """UTCミリ秒を設定timezoneのdatetime-local文字列へ変換する。
+
+        Args:
+            timestamp_ms: UTC Unix epochからの経過millisecond。
+            timezone_name: 出力日時を表示するIANA timezone名。
+
+        Returns:
+            指定timezoneのYYYY-MM-DDTHH:MM:SS文字列。未知timezoneはUTCを使う。
+    """
     try:
         timezone = ZoneInfo(timezone_name)
     except KeyError:
@@ -128,7 +166,14 @@ def _format_local_input(timestamp_ms: int, timezone_name: str) -> str:
 
 
 def _parse_log_values(value: str | None) -> list[int] | None:
-    """ON/OFF filterを0/1のbind値へ変換する。"""
+    """ON/OFF filterを0/1のbind値へ変換する。
+
+        Args:
+            value: カンマ区切りのON/OFF、1/0 query値。未指定または空ならfilterなし。
+
+        Returns:
+            ON/OFFを0/1へ変換した重複なしlist。未指定・空はNone。不許可値はValueError。
+    """
     if not value:
         return None
     values: list[int] = []
@@ -151,7 +196,16 @@ def _parse_log_choices(
     allowed: set[str],
     field_name: str,
 ) -> list[str] | None:
-    """カンマ区切りの固定選択filterを検証する。"""
+    """カンマ区切りの固定選択filterを検証する。
+
+        Args:
+            value: カンマ区切りのkind/source選択値。未指定ならfilterなし。
+            allowed: 呼出元がこのfieldに許可する固定値の集合。
+            field_name: 不正値時のerror文に使うquery field名。
+
+        Returns:
+            許可値だけからなる重複なしlist。未指定・空はNone。不許可値はValueError。
+    """
     if not value:
         return None
     choices: list[str] = []
@@ -165,7 +219,16 @@ def _parse_log_choices(
 
 
 def _query_int(name: str, default: int) -> int:
-    """整数query parameterを検証する。"""
+    """整数query parameterを検証する。
+
+        Args:
+            name: 整数として読むrequest query parameter名。
+            default: parameterが省略された場合の整数既定値。
+
+        Returns:
+            query parameterの符号付き64-bit範囲内整数。省略時はdefault。
+                不正形式・範囲外はValueError。
+    """
     value = request.args.get(name)
     if value is None:
         return default

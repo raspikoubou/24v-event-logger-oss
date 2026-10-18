@@ -33,11 +33,24 @@ def _dashboard_events(
 ) -> list[InputEvent]:
     """Dashboardに必要なeventだけを取得する。
 
-    以前の実装は現在時刻までのeventとactive session全件を毎回読み込んでいた。
-    ここではwidgetの実効期間内event、開始直前状態、現在値計算に必要な最新edge
-    だけを取得する。reset型counterの件数は別のSQL COUNTで集計し、長期保存
-    された生ログをメモリへ展開しない。live inputの経過時間はdaemon snapshotを
-    使い、DBへ退避した場合もsessionごとの最後のeventだけを読む。
+            以前の実装は現在時刻までのeventとactive session全件を毎回読み込んでいた。
+            ここではwidgetの実効期間内event、開始直前状態、現在値計算に必要な最新edge
+            だけを取得する。reset型counterの件数は別のSQL COUNTで集計し、長期保存
+            された生ログをメモリへ展開しない。live inputの経過時間はdaemon snapshotを
+            使い、DBへ退避した場合もsessionごとの最後のeventだけを読む。
+
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            widgets: Dashboard計算対象となるwidget設定の順序付き集合。
+            widget_ranges: widget IDごとの集計時間範囲。
+            current_before_ms: 現在以前を含む上限時刻（UTC Unix epoch millisecond）。
+            active_session_id: 対象logger sessionの識別子。
+
+        Returns:
+            選択widget rangeに必要なInputEvent列。
+                期間外や監視対象外の入力eventは取得しない。
     """
     channel_ranges: dict[int, tuple[int, int]] = {}
     lookup_ranges: dict[int, tuple[int, int]] = {}
@@ -142,7 +155,18 @@ def _dashboard_period_counts(
     widgets: list[Widget],
     widget_ranges: Mapping[str, tuple[int, int]],
 ) -> dict[str, int]:
-    """period型event_countをRepositoryの範囲集計で計算する。"""
+    """period型event_countをRepositoryの範囲集計で計算する。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            widgets: Dashboard計算対象となるwidget設定の順序付き集合。
+            widget_ranges: widget IDごとの集計時間範囲。
+
+        Returns:
+            period型event_count widget IDから件数へのdict。
+                Repository aggregateを使い個別event rowsを展開しない。
+    """
     counts: dict[str, int] = {}
     cache: dict[tuple[int, int, int, int], int] = {}
     for widget in widgets:
@@ -186,7 +210,15 @@ def _merge_channel_range(
     channel_id: int,
     time_range: tuple[int, int],
 ) -> None:
-    """同じchannelのwidget期間を、必要な最小の包含windowへまとめる。"""
+    """同じchannelのwidget期間を、必要な最小の包含windowへまとめる。
+
+Args:
+    channel_ranges: チャンネルごとの時間範囲。複数widgetの問い合わせを統合する際に使う。
+    channel_id: 対象チャンネルの製品上の番号。
+    time_range: widgetが集計するUTC millisecondの(start_ms, end_ms)半開範囲。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     current = channel_ranges.get(channel_id)
     if current is None:
         channel_ranges[channel_id] = time_range
@@ -202,7 +234,18 @@ def _dashboard_reset_counts(
     widgets: list[Widget],
     resets: Mapping[str, CounterReset | None],
 ) -> dict[str, int]:
-    """reset型counterをSQLのCOUNTだけで集計する。"""
+    """reset型counterをSQLのCOUNTだけで集計する。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            widgets: Dashboard計算対象となるwidget設定の順序付き集合。
+            resets: widgetごとのcounter reset基準情報。
+
+        Returns:
+            reset型counter widget IDからreset基準以降の件数へのdict。
+                基準event IDより後だけを数える。
+    """
     counts: dict[str, int] = {}
     for widget in widgets:
         if widget.widget_type is not WidgetType.EVENT_COUNT:
@@ -237,7 +280,17 @@ def _dashboard_output_events(
     *,
     widget_ranges: Mapping[str, tuple[int, int]],
 ) -> list[OutputEvent]:
-    """DashboardのOUT widgetごとに必要な期間履歴だけを取得する。"""
+    """DashboardのOUT widgetごとに必要な期間履歴だけを取得する。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            widgets: Dashboard計算対象となるwidget設定の順序付き集合。
+            widget_ranges: widget IDごとの集計時間範囲。
+
+        Returns:
+            Dashboard OUT widgetの表示範囲に必要なOutputEvent列。
+    """
     output_ranges: dict[int, tuple[int, int]] = {}
     events_by_id: dict[int, OutputEvent] = {}
     for widget in widgets:
@@ -307,7 +360,20 @@ def _dashboard_timeline_event_count_exceeds_limit(
     now_ms: int,
     fixed_calendar_ranges: Mapping[str, tuple[int, int]],
 ) -> bool:
-    """巨大timelineをevent payloadへ展開する前にDB countで検出する。"""
+    """巨大timelineをevent payloadへ展開する前にDB countで検出する。
+
+Args:
+    context: 現在のWebContext。関数が使うRepository、Clock、
+        設定値や制御clientを所有する。
+    widgets: Dashboard計算対象となるwidget設定の順序付き集合。
+    start_ms: 期間の開始を表すUTC Unix epoch millisecond。
+    period_end_ms: 期間の排他的な終端を表すUTC Unix epoch millisecond。
+    now_ms: 処理時点のUTC Unix epoch millisecond。
+    fixed_calendar_ranges: 暦境界を解決済みのwidget range mapping。
+
+Returns:
+    判定結果。条件を満たす場合はTrueを返し、
+        満たさない場合はFalse（または注釈に示すNone）を返す。"""
     candidate_count = 0
     for widget in widgets:
         if widget.widget_type is not WidgetType.TIMELINE:
@@ -359,7 +425,14 @@ def _dashboard_timeline_event_count_exceeds_limit(
 
 
 def _timeline_widget_signals(widget: Widget) -> list[str]:
-    """検証済みtimeline設定からIN/OUT信号名を取り出す。"""
+    """検証済みtimeline設定からIN/OUT信号名を取り出す。
+
+        Args:
+            widget: 対象のDashboard widget設定。
+
+        Returns:
+            widget configの検証済みINn/OUTn signal ID列。
+    """
     raw_signals = widget.config.get("signals")
     if isinstance(raw_signals, list):
         return [signal.upper() for signal in raw_signals if isinstance(signal, str)]
@@ -370,7 +443,14 @@ def _timeline_widget_signals(widget: Widget) -> list[str]:
 
 
 def _dashboard_timeline_interval_count(items: list[dict[str, object]]) -> int:
-    """timeline群のinterval合計数を返す。"""
+    """timeline群のinterval合計数を返す。
+
+        Args:
+            items: 描画・集計対象となる順序付き項目。
+
+        Returns:
+            指定timeline payload内のinterval総数。
+    """
     count = 0
     for item in items:
         if item.get("type") != WidgetType.TIMELINE.value:
@@ -393,7 +473,17 @@ def _dashboard_timeline_limit_warning(
     period: str,
     timezone_name: str,
 ) -> dict[str, object]:
-    """上限超過時に部分timelineを返さず、絞り込み方法を案内する。"""
+    """上限超過時に部分timelineを返さず、絞り込み方法を案内する。
+
+        Args:
+            start_ms: 期間の開始を表すUTC Unix epoch millisecond。
+            end_ms: 期間の終端を表すUTC Unix epoch millisecond。
+            period: Dashboardまたは検索で選択された期間キー。
+            timezone_name: 日時表示・暦境界計算に使うIANA timezone名。
+
+        Returns:
+            timeline過大時の警告dict。部分timelineは含めず、選択期間・絞込み案内を含む。
+    """
     return {
         "from_ms": start_ms,
         "to_ms": end_ms,
@@ -410,7 +500,14 @@ def _dashboard_timeline_limit_warning(
 
 
 def _widget_input_channels(widget: Widget) -> set[int]:
-    """widget設定からDashboardが参照するIN番号だけを取り出す。"""
+    """widget設定からDashboardが参照するIN番号だけを取り出す。
+
+        Args:
+            widget: 対象のDashboard widget設定。
+
+        Returns:
+            widget configが参照するIN channel IDのset。OUT signalは含めない。
+    """
     raw_channels = widget.config.get("channels")
     if isinstance(raw_channels, list):
         return {
@@ -439,7 +536,17 @@ def _widget_input_channels(widget: Widget) -> set[int]:
 
 
 def _stored_widget_count(context: WebContext, widget: Widget) -> int:
-    """保存期間内累計widgetを全保存eventから数える。"""
+    """保存期間内累計widgetを全保存eventから数える。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            widget: 対象のDashboard widget設定。
+
+        Returns:
+            counter reset値を差し引かずに数えた保存event総数。
+                retention済みの現存eventを対象とする。
+    """
     raw_channels = widget.config.get("channels")
     if not isinstance(raw_channels, list) or len(raw_channels) != 1:
         return 0

@@ -22,7 +22,7 @@ def connect_database(
     """SQLiteへ接続し、製品共通のPRAGMAを設定する。
 
     Args:
-        database_path: 接続するDBのパス。`:memory:`も指定できる。
+        database_path: 接続するDBのパス。 `:memory:`も指定できる。
         allow_empty_create: 明示的に新規DBを作る呼出元だけTrueにする。
 
     Returns:
@@ -30,7 +30,7 @@ def connect_database(
 
     Raises:
         SchemaVersionError: 既存の0 byte fileを初期DBと誤認しそうな場合。
-        sqlite3.Error: DBを開く、またはPRAGMAを設定できない場合。
+        sqlite3.Error: DBを開く、 またはPRAGMAを設定できない場合。
     """
     path = str(database_path)
     if path != ":memory:":
@@ -74,9 +74,15 @@ def connect_database(
 def initialize_database(database_path: str | Path) -> None:
     """新規DBへ最新schemaを作成する。
 
-    既存DBへ通常起動時に黙ってschema変更を行わないよう、既存テーブルと
-    user_versionが混在する状態はエラーにする。更新処理から呼ぶmigrationは
+    既存DBへ通常起動時に黙ってschema変更を行わないよう、 既存テーブルと
+    user_versionが混在する状態はエラーにする。 更新処理から呼ぶmigrationは
     将来この関数とは別の明示的な経路へ追加する。
+
+    Args:
+        database_path: 読み書きまたは検査対象のSQLite database file path。
+
+    Returns:
+        None。 最新schemaを新規DBへ作成し、 接続を閉じる。
     """
     # 新規DBを明示的に作る入口だけは、既存0 byte fileを許可する。
     with closing(
@@ -87,7 +93,18 @@ def initialize_database(database_path: str | Path) -> None:
 
 
 def initialize_connection(connection: sqlite3.Connection) -> None:
-    """開いた接続へ最新schemaを明示的に適用する。"""
+    """開いた接続へ最新schemaを明示的に適用する。
+
+    Args:
+        connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+    Returns:
+        None。 渡されたSQLite接続へ変更を適用し、 接続のcloseは呼出元に残す。
+
+    Raises:
+        SchemaVersionError: 「existing tables have no schema version; explicit migration
+            is required」に該当すると判定した場合。
+    """
     current_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
     has_tables = _has_user_tables(connection)
     if current_version > LATEST_SCHEMA_VERSION:
@@ -108,7 +125,15 @@ def initialize_connection(connection: sqlite3.Connection) -> None:
 
 
 def _create_schema_latest(connection: sqlite3.Connection) -> None:
-    """空のSQLite databaseへ最新schemaを作成する。"""
+    """空のSQLite databaseへ最新schemaを作成する。
+
+    Args:
+        connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+    Returns:
+        None。 schema・channel seed・user_versionを一つの明示transactionで作成し、
+            受け取ったconnectionは閉じない。
+    """
     schema = _SCHEMA_PATH.read_text(encoding="utf-8")
     seed_statements = "\n".join(
         "INSERT INTO channels (id, enabled, name, debounce_ms, updated_at_ms) "
@@ -134,7 +159,14 @@ def _create_schema_latest(connection: sqlite3.Connection) -> None:
 
 
 def _has_user_tables(connection: sqlite3.Connection) -> bool:
-    """SQLite内部テーブル以外が存在するか確認する。"""
+    """SQLite内部テーブル以外が存在するか確認する。
+
+    Args:
+        connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+    Returns:
+        判定対象が条件を満たす場合True、 その他はFalse。
+    """
     row = connection.execute(
         """
         SELECT 1
@@ -147,7 +179,14 @@ def _has_user_tables(connection: sqlite3.Connection) -> bool:
 
 
 def _seed_channels(connection: sqlite3.Connection) -> None:
-    """初回設定前のIN1〜IN6をすべて無効で作成する。"""
+    """初回設定前のIN1〜IN6をすべて無効で作成する。
+
+    Args:
+        connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+    Returns:
+        None。 渡されたSQLite接続へ変更を適用し、 接続のcloseは呼出元に残す。
+    """
     connection.executemany(
         """
         INSERT INTO channels (id, enabled, name, debounce_ms, updated_at_ms)

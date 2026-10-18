@@ -12,7 +12,14 @@ _WRITER_YIELD_SECONDS = 0.1
 
 
 def _yield_for_database_writer() -> None:
-    """段階削除のtransaction間でloggerd writerへDB取得機会を渡す。"""
+    """段階削除のtransaction間でloggerd writerへDB取得機会を渡す。
+
+    Args:
+        なし。
+
+    Returns:
+        None。
+    """
     # SQLiteは複数writerを直列化する。maintenanceが10,000件batchを
     # 連続取得すると、待機中のloggerdが次batchに負け続けてbusy timeoutへ
     # 達するPi実測があった。commit後に短いscheduler yieldを入れ、一次入力の
@@ -38,14 +45,33 @@ class RetentionService:
         *,
         batch_size: int = 10_000,
     ) -> None:
-        """retention repositoryとbatch sizeを受け取る。"""
+        """retention repositoryとbatch sizeを受け取る。
+
+        Args:
+            repository: この処理が利用する保存・照会Repository。
+            batch_size: 一度のretention transactionで削除する最大row数。
+
+        Returns:
+            None。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
         self._repository = repository
         self._batch_size = batch_size
 
     def run(self, *, cutoff_ms: int) -> RetentionResult:
-        """cutoffより古いIN/OUT eventを削除し、最後にincremental vacuumする。"""
+        """cutoffより古いIN/OUT eventを削除し、最後にincremental vacuumする。
+
+        Args:
+            cutoff_ms: これより古いeventを削除対象にするUTC epoch境界（ms）。
+
+        Returns:
+            cutoff以前の削除数とvacuum所要時間を示すRetentionResult。
+        """
         deleted_input = 0
         deleted_output = 0
         carried = 0
@@ -75,7 +101,14 @@ class RetentionService:
         *,
         should_continue: Callable[[], bool],
     ) -> RetentionResult:
-        """容量閾値を回復するまで古いeventを追加でbatch削除する。"""
+        """容量閾値を回復するまで古いeventを追加でbatch削除する。
+
+        Args:
+            should_continue: 容量保護の次batchを続けるか判定する関数。
+
+        Returns:
+            容量条件解消まで削除したevent数のRetentionResult。
+        """
         deleted_input = 0
         deleted_output = 0
         carried = 0

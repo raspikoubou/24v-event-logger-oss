@@ -15,7 +15,14 @@ _KEY_ASSIGNMENT = re.compile(r"^[ \t]*EVENT_LOGGER_SECRET_KEY[ \t]*=(.*)$")
 
 
 def _configured_assignment(contents: str) -> str | None:
-    """既存の非空キー設定を返す。空設定は初回生成の対象にする。"""
+    """既存の非空キー設定を返す。空設定は初回生成の対象にする。
+
+        Args:
+            contents: 読み込んだ設定・本文のテキスト。
+
+        Returns:
+            非空の署名鍵設定行。空・未設定ならNone。
+    """
     for line in contents.splitlines():
         match = _KEY_ASSIGNMENT.match(line)
         if match is None:
@@ -83,7 +90,14 @@ def ensure_web_secret(env_path: Path) -> str:
 
 
 def main() -> int:
-    """Parse arguments and provision the shared web signing key."""
+    """Parse arguments and provision the shared web signing key.
+
+        Args:
+            なし。
+
+        Returns:
+            CLI終了code。secret維持/作成成功は0、file/設定errorは非0。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("env_file", type=Path)
     arguments = parser.parse_args()

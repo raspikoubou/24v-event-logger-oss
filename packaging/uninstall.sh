@@ -6,6 +6,9 @@ DATA_ROOT="${EVENT_LOGGER_DATA_ROOT:-/var/lib/event-logger}"
 CONFIG_ROOT="${EVENT_LOGGER_CONFIG_ROOT:-/etc/event-logger}"
 SERVICE_USER="event-logger"
 
+# 引数: 1個以上の診断文。標準エラーへprefix付きで出力する。
+# 戻り値: 戻らない。status 1でuninstallを終了する。
+# 副作用: 標準エラー出力とprocess終了。
 die() {
   printf 'event-logger uninstall: %s\n' "$*" >&2
   exit 1

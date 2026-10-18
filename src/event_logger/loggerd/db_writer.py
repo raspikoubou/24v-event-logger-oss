@@ -55,14 +55,30 @@ class WriteLatencyMonitor:
     """SQLite commit完了時間の直近5分だけを記録する。"""
 
     def __init__(self) -> None:
-        """イベント時刻ではなくmonotonic時計で監視窓を管理する。"""
+        """イベント時刻ではなくmonotonic時計で監視窓を管理する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。測定履歴と警告状態を初期化する。
+        """
         self._delays: deque[tuple[int, int]] = deque()
         self._last_commit_ms: int | None = None
         self._warning = False
         self._healthy_since_ns: int | None = None
 
     def record(self, *, completed_ns: int, elapsed_ns: int) -> None:
-        """500ms以上のcommitを記録し、古い測定値を破棄する。"""
+        """500ms以上のcommitを記録し、古い測定値を破棄する。
+
+        Args:
+            completed_ns: 測定完了時点のmonotonic
+                時計値（ns）。遅延を直近時間窓へ登録する基準時刻。
+            elapsed_ns: commitに要したmonotonic経過時間（ns）。
+
+        Returns:
+            None。直近commit時間を更新し、500ms以上のcommitだけを遅延履歴へ記録する。
+        """
         self._last_commit_ms = elapsed_ns // 1_000_000
         self._expire(completed_ns)
         if elapsed_ns >= _WRITE_DELAY_NS:
@@ -78,7 +94,21 @@ class WriteLatencyMonitor:
         capacity: int = 10_000,
         failed: bool = False,
     ) -> WriteLatencySnapshot:
-        """未保存の危険度を判定し、回復10秒で警告を解除する。"""
+        """未保存の危険度を判定し、回復10秒で警告を解除する。
+
+        Args:
+            now_ns: 判定時点のmonotonic時計値（ns）。
+            in_progress_ms: 現在commit中の経過時間（ms）。処理中でなければ0。
+            oldest_pending_ms: 最古の未commit eventの待ち時間（ms）。
+            pending_count: Queue待機中とcommit中を合わせたevent数。
+            capacity: 未commit eventを保持する上限件数。
+            failed: writerが保存不能状態かどうか。
+
+        Returns:
+            WriteLatencySnapshot。直近5分の遅延co
+            mmit、最長遅延、直近commit、処理中時間、警
+            告状態を表す。
+        """
         self._expire(now_ns)
         # 5秒は正常負荷の最大保存追従時間。容量80%では残り20%を
         # 回復余地として残す。commit回数だけでは欠損とは判断しない。
@@ -125,7 +155,14 @@ class WriteLatencyMonitor:
         )
 
     def _expire(self, now_ns: int) -> None:
-        """表示と警告を過去のカード状態へ固定しない。"""
+        """表示と警告を過去のカード状態へ固定しない。
+
+        Args:
+            now_ns: 判定時点のmonotonic時計値（ns）。
+
+        Returns:
+            None。5分より古い遅延測定を履歴先頭から除く。
+        """
         while self._delays and now_ns - self._delays[0][0] >= _WRITE_DELAY_WINDOW_NS:
             self._delays.popleft()
 
@@ -134,13 +171,34 @@ class EventWriterPort(Protocol):
     """loggerdがeventを投入・flushするwriter境界。"""
 
     def enqueue_input(self, event: PendingInputEvent) -> None:
-        """入力eventをcommit Queueへ入れる。"""
+        """入力eventをcommit Queueへ入れる。
+
+        Args:
+            event: FIFOへ追加、保存、または型変換する確定event。
+
+        Returns:
+            None。入力eventを共有Queueへ追加する。
+        """
 
     def drain_all(self) -> int:
-        """writerの状態を確認し、完了済み件数を返す。"""
+        """writerの状態を確認し、完了済み件数を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            この呼出しでcommit済みとして回収したevent件数。
+        """
 
     def wait_until_drained(self) -> None:
-        """Queue内のeventがcommitされるまで待つ。"""
+        """Queue内のeventがcommitされるまで待つ。
+
+        Args:
+            なし。
+
+        Returns:
+            None。Queueが空になりwriter処理中eventも完了するまで待つ。
+        """
 
 
 class EventWriter:
@@ -156,17 +214,41 @@ class EventWriter:
 
         LoggerServiceの単体テストで接続を直接注入するときに使う。
         実daemonはBackgroundEventWriterを使い、制御loopからDB I/Oを分離する。
+
+        Args:
+            event_repository: 入力eventの保存先Repository。
+            event_queue: producerとwriterで共有する有界FIFO Queue。
+            output_repository: 出力eventの保存先
+                Repository。未指定時は同期writerから
+                出力保存できない。
+
+        Returns:
+            None。測定履歴と警告状態を初期化する。
         """
         self._event_repository = event_repository
         self._event_queue = event_queue
         self._output_repository = output_repository
 
     def enqueue_input(self, event: PendingInputEvent) -> None:
-        """入力eventをQueueへ投入する。"""
+        """入力eventをQueueへ投入する。
+
+        Args:
+            event: FIFOへ追加、保存、または型変換する確定event。
+
+        Returns:
+            None。入力eventを共有Queueへ追加する。
+        """
         self._event_queue.put(event)
 
     def enqueue_output(self, event: PendingOutputEvent) -> None:
-        """出力eventをQueueへ投入する。"""
+        """出力eventをQueueへ投入する。
+
+        Args:
+            event: FIFOへ追加、保存、または型変換する確定event。
+
+        Returns:
+            None。出力eventを共有Queueへ追加する。
+        """
         self._event_queue.put(event)
 
     def drain_once(self) -> bool:
@@ -176,8 +258,11 @@ class EventWriter:
             eventを1件処理した場合はTrue、Queueが空ならFalse。
 
         Raises:
-            sqlite3.Error: eventの保存に失敗した場合。呼び出し側がCriticalへ
+                sqlite3.Error: eventの保存に失敗した場合。呼び出し側がCriticalへ
                 遷移し、Heartbeatを停止する責務を持つ。
+
+        Args:
+            なし。
         """
         try:
             pending = self._event_queue.get()
@@ -192,18 +277,45 @@ class EventWriter:
         return True
 
     def drain_all(self) -> int:
-        """現在Queueにあるeventを順番に保存する。"""
+        """現在Queueにあるeventを順番に保存する。
+
+        Args:
+            なし。
+
+        Returns:
+            この呼出しでcommit済みとして回収したevent件数。
+        """
         count = 0
         while self.drain_once():
             count += 1
         return count
 
     def wait_until_drained(self) -> None:
-        """同期writerではQueueをその場で空にする。"""
+        """同期writerではQueueをその場で空にする。
+
+        Args:
+            なし。
+
+        Returns:
+            None。Queueが空になりwriter処理中eventも完了するまで待つ。
+        """
         self.drain_all()
 
     def append_pending(self, pending: PendingDatabaseEvent) -> None:
-        """event種別に対応するRepositoryへ1件commitする。"""
+        """event種別に対応するRepositoryへ1件commitする。
+
+        Args:
+            pending: Queue上の位置に保存する未commit event。
+
+        Returns:
+            None。event種別に対応するrepositoryへ1件保存する。
+
+        Raises:
+            TypeError: 受け取った値の型またはevent種別がこの処理の契約に合わない場合。
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         if isinstance(pending, PendingCounterReset):
             raise TypeError("counter reset requires the background writer")
         if isinstance(pending, PendingInputEvent):
@@ -239,7 +351,15 @@ class BackgroundEventWriter:
         database_path: str | Path,
         event_queue: EventQueue,
     ) -> None:
-        """DB pathと共有Queueを受け取る。threadはstart()まで作成しない。"""
+        """DB pathと共有Queueを受け取る。threadはstart()まで作成しない。
+
+        Args:
+            database_path: SQLite databaseのfilesystem path。
+            event_queue: producerとwriterで共有する有界FIFO Queue。
+
+        Returns:
+            None。測定履歴と警告状態を初期化する。
+        """
         self._database_path = str(database_path)
         self._event_queue = event_queue
         self._stop_requested = threading.Event()
@@ -253,7 +373,14 @@ class BackgroundEventWriter:
         self._commit_started_ns: int | None = None
 
     def latency_snapshot(self) -> WriteLatencySnapshot:
-        """writer threadと共有する遅延測定値を安全に返す。"""
+        """writer threadと共有する遅延測定値を安全に返す。
+
+        Args:
+            なし。
+
+        Returns:
+            遅延、最古eventの滞留、未commit数を同時点で観測したWriteLatencySnapshot。
+        """
         with self._state_lock:
             now_ns = monotonic_ns()
             in_progress_ms = (
@@ -271,7 +398,20 @@ class BackgroundEventWriter:
             )
 
     def start(self) -> None:
-        """thread内でSQLite接続を作ってからwriterを有効にする。"""
+        """thread内でSQLite接続を作ってからwriterを有効にする。
+
+        Args:
+            なし。
+
+        Returns:
+            None。SQLite接続準備を確認してからbackground writerを稼働状態にする。
+
+        Raises:
+            TimeoutError: 指定timeout内にworkerまたはserviceの準備が完了しない場合。
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         with self._state_lock:
             if self._started:
                 raise RuntimeError("event writer is already started")
@@ -287,12 +427,26 @@ class BackgroundEventWriter:
         self.raise_if_failed()
 
     def enqueue_input(self, event: PendingInputEvent) -> None:
-        """入力eventを待たずにQueueへ追加する。"""
+        """入力eventを待たずにQueueへ追加する。
+
+        Args:
+            event: FIFOへ追加、保存、または型変換する確定event。
+
+        Returns:
+            None。入力eventを共有Queueへ追加する。
+        """
         self.raise_if_failed()
         self._event_queue.put(event)
 
     def enqueue_output(self, event: PendingOutputEvent) -> None:
-        """出力eventを待たずにQueueへ追加する。"""
+        """出力eventを待たずにQueueへ追加する。
+
+        Args:
+            event: FIFOへ追加、保存、または型変換する確定event。
+
+        Returns:
+            None。出力eventを共有Queueへ追加する。
+        """
         self.raise_if_failed()
         self._event_queue.put(event)
 
@@ -301,6 +455,12 @@ class BackgroundEventWriter:
 
         このmethodはQueueを待たない。loggerd loopから呼んでもSQLite latencyで
         Heartbeatの周期を止めないための境界である。
+
+        Args:
+            なし。
+
+        Returns:
+            この呼出しでcommit済みとして回収したevent件数。
         """
         self.raise_if_failed()
         with self._state_lock:
@@ -309,20 +469,46 @@ class BackgroundEventWriter:
         return completed
 
     def wait_until_drained(self) -> None:
-        """停止処理向けに全eventのcommitを待つ。"""
+        """停止処理向けに全eventのcommitを待つ。
+
+        Args:
+            なし。
+
+        Returns:
+            None。Queueが空になりwriter処理中eventも完了するまで待つ。
+        """
         while not self._event_queue.wait_until_idle(timeout_s=0.1):
             self.raise_if_failed()
         self.raise_if_failed()
 
     def raise_if_failed(self) -> None:
-        """workerが保存不能になった場合、loggerdへ失敗を返す。"""
+        """workerが保存不能になった場合、loggerdへ失敗を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            None。失敗がなければ復帰し、保存不能ならRuntimeErrorを送出する。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         with self._state_lock:
             failure = self._failure
         if failure is not None:
             raise RuntimeError("SQLite event writer failed") from failure
 
     def stop(self) -> None:
-        """残eventを処理してworkerを終了する。"""
+        """残eventを処理してworkerを終了する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。残eventの処理完了後にwriter threadをjoinする。
+        """
         with self._state_lock:
             thread = self._thread
         if thread is None:
@@ -335,7 +521,14 @@ class BackgroundEventWriter:
         self.raise_if_failed()
 
     def _run(self) -> None:
-        """thread所有のSQLite接続でeventをFIFO保存する。"""
+        """thread所有のSQLite接続でeventをFIFO保存する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。専用connectionでFIFO batchをcommitし、障害時は失敗状態を保存する。
+        """
         connection: sqlite3.Connection | None = None
         try:
             connection = connect_database(self._database_path)
@@ -389,7 +582,15 @@ class BackgroundEventWriter:
     def _commit_event_batch(
         self, repository: EventBatchRepository, events: list[PendingDatabaseEvent]
     ) -> None:
-        """resetをまたがないevent batchを保存し、未commit数と遅延を更新する。"""
+        """resetをまたがないevent batchを保存し、未commit数と遅延を更新する。
+
+        Args:
+            repository: この処理が利用する保存・照会Repository。
+            events: FIFO順で保存または差し戻す未commit event列。
+
+        Returns:
+            None。batch commit後にQueue件数、遅延測定、完了件数を更新する。
+        """
         started_ns = monotonic_ns()
         with self._state_lock:
             self._commit_started_ns = started_ns
@@ -414,7 +615,15 @@ class BackgroundEventWriter:
     def _apply_counter_reset(
         connection: sqlite3.Connection, pending: PendingCounterReset
     ) -> None:
-        """FIFOの位置でresetをcommitし、対象変更時はwidgetも原子的に保存する。"""
+        """FIFOの位置でresetをcommitし、対象変更時はwidgetも原子的に保存する。
+
+        Args:
+            connection: この関数が使うSQLite connection。
+            pending: Queue上の位置に保存する未commit event。
+
+        Returns:
+            None。FIFO位置でresetを保存し、結果または要求失敗をpendingへ通知する。
+        """
         try:
             repository = CounterResetRepository(connection)
             if pending.widget is None:
@@ -436,7 +645,14 @@ class BackgroundEventWriter:
             pending.completed.set()
 
     def _set_failure(self, error: Exception) -> None:
-        """失敗を保持し、daemon側の次回loopでCriticalへ伝える。"""
+        """失敗を保持し、daemon側の次回loopでCriticalへ伝える。
+
+        Args:
+            error: worker threadが保存不能になった原因例外。
+
+        Returns:
+            None。最初のwriter障害を保持してloggerdへ後続通知できるようにする。
+        """
         with self._state_lock:
             if self._failure is None:
                 self._failure = error
@@ -450,7 +666,20 @@ def _log_slow_commit(
     pending_count: int,
     batch_count: int = 1,
 ) -> None:
-    """DB workerで遅れたcommitを記録する。"""
+    """DB workerで遅れたcommitを記録する。
+
+    Args:
+        event: FIFOへ追加、保存、または型変換する確定event。
+        elapsed_ns: commitに要したmonotonic経過時間（ns）。
+        pending_count: Queue待機中とcommit中を合わせたevent数。
+        batch_count: 一回のcommit batchに含めたevent件数。
+
+    Returns:
+        None。
+
+    Raises:
+        TypeError: 受け取った値の型またはevent種別がこの処理の契約に合わない場合。
+    """
     if isinstance(event, PendingCounterReset):
         raise TypeError("counter reset is not an input/output event")
     if isinstance(event, PendingInputEvent):
@@ -475,7 +704,17 @@ def _log_slow_commit(
 
 
 def _event_write(event: PendingDatabaseEvent) -> EventWrite:
-    """Queue eventをDB writer向けの不変値へ変換する。"""
+    """Queue eventをDB writer向けの不変値へ変換する。
+
+    Args:
+        event: FIFOへ追加、保存、または型変換する確定event。
+
+    Returns:
+        入力または出力eventに対応する不変DB write値。
+
+    Raises:
+        TypeError: 受け取った値の型またはevent種別がこの処理の契約に合わない場合。
+    """
     if isinstance(event, PendingCounterReset):
         raise TypeError("counter reset is not an input/output event")
     if isinstance(event, PendingInputEvent):

@@ -4,6 +4,9 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="${1:-}"
 
+# 引数: 1個以上の診断文。標準エラーへprefix付きで出力する。
+# 戻り値: 戻らない。status 1でscriptを終了する。
+# 副作用: 標準エラー出力とprocess終了。
 die() {
   printf 'private SQLite build: %s\n' "$*" >&2
   exit 1
@@ -21,6 +24,9 @@ done
 )
 
 WORK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/event-logger-sqlite-build.XXXXXX")"
+# 引数: なし。build scriptのWORK_ROOTを参照する。
+# 戻り値: rmのstatusを返す（EXIT trapでは後続処理へ影響しない）。
+# 副作用: 一時build directoryを再帰削除する。
 cleanup() {
   rm -rf -- "$WORK_ROOT"
 }

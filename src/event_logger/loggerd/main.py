@@ -55,16 +55,44 @@ class GPIOPort(Protocol):
 
     @property
     def output_ports(self) -> Mapping[int, OutputPort]:
-        """論理OUT portを返す。"""
+        """論理OUT portを返す。
+
+        Args:
+            なし。
+
+        Returns:
+            論理OUT番号をadapter portへ対応づけたmapping。
+        """
 
     def input_values(self) -> dict[int, bool]:
-        """全INの論理状態を返す。"""
+        """全INの論理状態を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            全channel IDを論理入力値へ対応づけたmapping。
+        """
 
     def attach_input_callbacks(self, callback: Callable[[int, bool], None]) -> None:
-        """入力callbackを接続する。"""
+        """入力callbackを接続する。
+
+        Args:
+            callback: 入力確定時に呼ぶ関数。
+
+        Returns:
+            None。
+        """
 
     def close(self) -> None:
-        """GPIO resourcesを閉じる。"""
+        """GPIO resourcesを閉じる。
+
+        Args:
+            なし。
+
+        Returns:
+            None。出力停止を試み、session・socket・GPIO・DBを順に解放する。
+        """
 
 
 class LoggerDaemon:
@@ -81,7 +109,20 @@ class LoggerDaemon:
         clock: Clock | None = None,
         queue_maxsize: int = 10_000,
     ) -> None:
-        """daemon構成を注入し、まだGPIO listenやthreadを開始しない。"""
+        """daemon構成を注入し、まだGPIO listenやthreadを開始しない。
+
+        Args:
+            database_path: SQLite databaseのfilesystem path。
+            socket_path: 接続先またはlistenするUnix socket path。
+            app_version: 稼働中ソフトウェアのversion文字列。
+            boot_id: OS起動単位の識別値。
+            gpio: GPIO hardware adapter。pin割当と電気極性はadapter内で解決する。
+            clock: UTC/monotonic時刻と同期状態を提供するClock。
+            queue_maxsize: 未commit event Queueの上限件数。
+
+        Returns:
+            None。
+        """
         self._connection = connect_database(database_path)
         try:
             initialize_connection(self._connection)
@@ -180,16 +221,44 @@ class LoggerDaemon:
 
     @property
     def service(self) -> LoggerService:
-        """テスト・監視用のLoggerServiceを返す。"""
+        """テスト・監視用のLoggerServiceを返す。
+
+        Args:
+            なし。
+
+        Returns:
+            このdaemonが利用するLoggerService。
+        """
         return self._service
 
     @property
     def output_manager(self) -> OutputManager:
-        """テスト・監視用のOutputManagerを返す。"""
+        """テスト・監視用のOutputManagerを返す。
+
+        Args:
+            なし。
+
+        Returns:
+            このdaemonが利用するOutputManager。
+        """
         return self._outputs
 
     def start(self) -> None:
-        """GPIO callbackとcontrol socketを開始して監視sessionを作る。"""
+        """GPIO callbackとcontrol socketを開始して監視sessionを作る。
+
+        Args:
+            なし。
+
+        Returns:
+            None。依存serviceとsocketを準備し、session・watchdogを開始する。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         if self._started:
             raise RuntimeError("logger daemon is already started")
         try:
@@ -219,6 +288,16 @@ class LoggerDaemon:
 
         旧DBの未設定は従来どおり通常起動を許す。破損した型をFalseへ
         丸めると意図せず記録/OUTが動くため、boolean以外は起動を拒否する。
+
+        Args:
+            なし。
+
+        Returns:
+            DBに保存されたpause flagがTrueならTrue。未設定の場合だけFalseとする。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
         """
         value = self._settings.get_json("logging_paused", False)
         if not isinstance(value, bool):
@@ -226,7 +305,19 @@ class LoggerDaemon:
         return value
 
     def run_once(self) -> None:
-        """Queue、Heartbeat、OUT test、control requestを1回進める。"""
+        """Queue、Heartbeat、OUT test、control requestを1回進める。
+
+        Args:
+            なし。
+
+        Returns:
+            None。各処理の状態更新を完了する。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         if not self._started:
             raise RuntimeError("logger daemon is not started")
         self._complete_watchdog_trip_if_needed()
@@ -275,7 +366,14 @@ class LoggerDaemon:
             self._complete_watchdog_trip_if_needed()
 
     def _watchdog_check(self) -> None:
-        """DB/IPC停止中でも、ON中のOUTを物理OFFへ戻す。"""
+        """DB/IPC停止中でも、ON中のOUTを物理OFFへ戻す。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
+        """
         with self._watchdog_state_lock:
             if self._watchdog_tripped.is_set():
                 return
@@ -295,7 +393,15 @@ class LoggerDaemon:
                 self._watchdog_tripped.set()
 
     def _set_loop_phase(self, phase: str) -> bool:
-        """現在の制御段階をwatchdogと共有する。trip後の段階変更は拒否する。"""
+        """現在の制御段階をwatchdogと共有する。trip後の段階変更は拒否する。
+
+        Args:
+            phase: watchdogと共有するlogger loop段階名。
+
+        Returns:
+            watchdog
+            trip前にphaseを更新できた場合True、trip済みで更新を拒否した場合False。
+        """
         with self._watchdog_state_lock:
             if self._watchdog_tripped.is_set():
                 return False
@@ -303,7 +409,14 @@ class LoggerDaemon:
             return True
 
     def _refresh_loop_progress(self, phase: str) -> bool:
-        """trip前にだけloop checkpointと段階を同期更新する。"""
+        """trip前にだけloop checkpointと段階を同期更新する。
+
+        Args:
+            phase: watchdogと共有するlogger loop段階名。
+
+        Returns:
+            watchdog trip前にcheckpointとphaseを同期更新できた場合True。
+        """
         with self._watchdog_state_lock:
             if self._watchdog_tripped.is_set():
                 return False
@@ -312,14 +425,28 @@ class LoggerDaemon:
             return True
 
     def _complete_watchdog_trip_if_needed(self) -> bool:
-        """watchdogが物理OFFした場合、制御loop側のCritical処理を完了する。"""
+        """watchdogが物理OFFした場合、制御loop側のCritical処理を完了する。
+
+        Args:
+            なし。
+
+        Returns:
+            watchdog tripがあれば制御loop側の後処理を完了してTrue、なければFalse。
+        """
         if not self._watchdog_tripped.is_set():
             return False
         self._complete_watchdog_trip()
         return True
 
     def _watchdog_loop(self) -> None:
-        """SQLite待ちに巻き込まれないthreadでloopの停止を検出する。"""
+        """SQLite待ちに巻き込まれないthreadでloopの停止を検出する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
+        """
         while not self._watchdog_stop.wait(0.05):
             try:
                 self._watchdog_check()
@@ -327,7 +454,14 @@ class LoggerDaemon:
                 _LOGGER.exception("output loop watchdog failed")
 
     def _complete_watchdog_trip(self) -> None:
-        """物理OFFの後、履歴とCritical状態を制御loop側で確定する。"""
+        """物理OFFの後、履歴とCritical状態を制御loop側で確定する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
+        """
         if not self._watchdog_reported:
             self._watchdog_reported = True
             _LOGGER.error(
@@ -346,7 +480,14 @@ class LoggerDaemon:
             _LOGGER.exception("failed to record watchdog output OFF events")
 
     def run(self, stop_event: threading.Event) -> None:
-        """stop_eventが立つまでdaemon loopを回す。"""
+        """stop_eventが立つまでdaemon loopを回す。
+
+        Args:
+            stop_event: daemon loopの終了を通知するthreading.Event。
+
+        Returns:
+            None。終了通知後にdaemon資源を解放する。
+        """
         try:
             self.start()
         except Exception:
@@ -373,7 +514,14 @@ class LoggerDaemon:
             self.close()
 
     def close(self) -> None:
-        """出力OFF、session終了、socket/GPIO/DB解放を順に行う。"""
+        """出力OFF、session終了、socket/GPIO/DB解放を順に行う。
+
+        Args:
+            なし。
+
+        Returns:
+            None。出力停止を試み、session・socket・GPIO・DBを順に解放する。
+        """
         stop_error: Exception | None = None
         was_logging = self._service.status is LoggerStatus.LOGGING
         if self._started or self._service.status not in {
@@ -414,7 +562,15 @@ class LoggerDaemon:
             raise stop_error
 
     def _on_input(self, channel_id: int, value: bool) -> None:
-        """GPIO callbackではserviceへ値を渡すだけにする。"""
+        """GPIO callbackではserviceへ値を渡すだけにする。
+
+        Args:
+            channel_id: 論理IN/OUT番号（1〜6）。GPIO pin番号ではない。
+            value: 論理状態。ONはTrue/1、OFFはFalse/0。
+
+        Returns:
+            None。
+        """
         try:
             with self._input_callback_lock:
                 self._input_sequences[channel_id] = (
@@ -428,7 +584,14 @@ class LoggerDaemon:
             self._mark_critical()
 
     def _mark_critical(self) -> None:
-        """記録不能時にHeartbeatと全OUTを可能な範囲でOFFにする。"""
+        """記録不能時にHeartbeatと全OUTを可能な範囲でOFFにする。
+
+        Args:
+            なし。
+
+        Returns:
+            None。Criticalへ移行しHeartbeatとOUTの停止を試みる。
+        """
         self._service.mark_critical()
         try:
             self._outputs.heartbeat_tick(healthy=False)
@@ -446,7 +609,15 @@ class LoggerDaemon:
         action: str,
         details: Mapping[str, object] | None = None,
     ) -> None:
-        """操作auditをbest effortで保存し、DB障害時も安全停止を優先する。"""
+        """操作auditをbest effortで保存し、DB障害時も安全停止を優先する。
+
+        Args:
+            action: auditに記録する操作名。
+            details: audit recordへ保存する追加情報mapping。
+
+        Returns:
+            None。
+        """
         try:
             self._audit.record(
                 action=action,
@@ -457,7 +628,22 @@ class LoggerDaemon:
             _LOGGER.exception("failed to write audit action %s", action)
 
     def _handle_control(self, request: ControlRequest) -> Mapping[str, object]:
-        """allowlist済みcontrol commandをdaemon状態へ適用する。"""
+        """allowlist済みcontrol commandをdaemon状態へ適用する。
+
+        Args:
+            request: 検証済みのloggerd制御要求。
+
+        Returns:
+            成功したloggerd応答のdata
+            mapping。遠隔拒否とprotocol不整合は例外で通知する。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         if request.command is ControlCommand.STATUS:
             return self._status_payload()
         if request.command is ControlCommand.RESET_COUNTER:
@@ -531,14 +717,33 @@ class LoggerDaemon:
         raise ValueError(f"unsupported control command: {request.command}")
 
     def _stop_logging(self) -> None:
-        """受付を先に閉じ、1つの停止障害でも残りのOUT停止とflag保存を試す。"""
+        """受付を先に閉じ、1つの停止障害でも残りのOUT停止とflag保存を試す。
+
+        Args:
+            なし。
+
+        Returns:
+            None。入力受付を閉じ、OUT停止、Queue保存、pause永続化を行う。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         if self._service.status is not LoggerStatus.LOGGING:
             raise RuntimeError("logger is not logging")
         stop_error: Exception | None = None
         pause_attempted = False
 
         def persist_pause() -> None:
-            """入力・OUT停止後、queue保存待ちより前に永続pauseを保存する。"""
+            """入力・OUT停止後、queue保存待ちより前に永続pauseを保存する。
+
+            Args:
+                なし。
+
+            Returns:
+                None。
+            """
             nonlocal stop_error, pause_attempted
             pause_attempted = True
             try:
@@ -578,7 +783,22 @@ class LoggerDaemon:
             raise stop_error
 
     def _reset_counter(self, request: ControlRequest) -> Mapping[str, object]:
-        """resetをFIFOへ一度だけ投入し、loopを塞がず同じ要求IDで結果を返す。"""
+        """resetをFIFOへ一度だけ投入し、loopを塞がず同じ要求IDで結果を返す。
+
+        Args:
+            request: 検証済みのloggerd制御要求。
+
+        Returns:
+            成功したloggerd応答のdata
+            mapping。遠隔拒否とprotocol不整合は例外で通知する。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         if request.request_id is None or request.widget_id is None:
             raise ValueError("counter reset requires request_id and widget_id")
         self._event_writer.raise_if_failed()
@@ -634,7 +854,14 @@ class LoggerDaemon:
         }
 
     def _start_logging_session(self) -> None:
-        """現在入力のsnapshotを保存し、callbackを接続して監視を開始する。"""
+        """現在入力のsnapshotを保存し、callbackを接続して監視を開始する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。入力snapshotを保存してcallbackを有効化し、新sessionを開始する。
+        """
         # session開始とrule evaluator開始で異なるsnapshotを読むと、同時に
         # 変化した入力だけが片方へ反映されるため、一つのsnapshotを共有する。
         input_values = self._gpio.input_values()
@@ -683,7 +910,19 @@ class LoggerDaemon:
             raise
 
     def _reload_config(self) -> None:
-        """チャンネル設定を読み直し、次回再開時に適用する。"""
+        """チャンネル設定を読み直し、次回再開時に適用する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。DB設定を読み直し、停止中のdaemon設定へ反映する。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         channels = self._channels.list_all()
         rules = self._rule_repository.list_all()
         heartbeat = self._heartbeat_settings()
@@ -723,7 +962,14 @@ class LoggerDaemon:
         )
 
     def _apply_heartbeat_settings(self) -> None:
-        """app_settingsのHeartbeat設定を検証してOutputManagerへ反映する。"""
+        """app_settingsのHeartbeat設定を検証してOutputManagerへ反映する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
+        """
         enabled, channel, interval = self._heartbeat_settings()
         self._rule_runner.validate_configuration(
             self._rule_runner.rules,
@@ -736,7 +982,18 @@ class LoggerDaemon:
         )
 
     def _heartbeat_settings(self) -> tuple[bool, int | None, int]:
-        """保存済みHeartbeat設定を型・範囲検証して返す。"""
+        """保存済みHeartbeat設定を型・範囲検証して返す。
+
+        Args:
+            なし。
+
+        Returns:
+            検証済みHeartbeat有効状態、channel ID、周期msのtuple。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         raw_settings = self._settings.get_json(
             "heartbeat",
             {"enabled": False, "channel_id": None, "interval_ms": 5_000},
@@ -761,7 +1018,14 @@ class LoggerDaemon:
         return enabled, channel, interval
 
     def _status_payload(self) -> dict[str, object]:
-        """Web診断へ返す最小状態。"""
+        """Web診断へ返す最小状態。
+
+        Args:
+            なし。
+
+        Returns:
+            loggerd状態をWeb診断へ返すJSON互換mapping。
+        """
         write_latency = self._event_writer.latency_snapshot()
         oldest_pending_ms = self._event_queue.oldest_pending_ms()
         if self._service.status is LoggerStatus.LOGGING:
@@ -810,7 +1074,15 @@ class LoggerDaemon:
 def create_demo_daemon(
     *, database_path: str | Path, socket_path: str | Path
 ) -> LoggerDaemon:
-    """GPIOなしのdaemonを作成する。"""
+    """GPIOなしのdaemonを作成する。
+
+    Args:
+        database_path: SQLite databaseのfilesystem path。
+        socket_path: 接続先またはlistenするUnix socket path。
+
+    Returns:
+        FakeGPIO、FakeClockを使うdemo用daemon。
+    """
     daemon = LoggerDaemon(
         database_path=database_path,
         socket_path=socket_path,
@@ -831,7 +1103,14 @@ def create_demo_daemon(
 
 
 def main() -> None:
-    """環境変数からdaemonを構成して常駐させる。"""
+    """環境変数からdaemonを構成して常駐させる。
+
+    Args:
+        なし。
+
+    Returns:
+        None。
+    """
     parser = argparse.ArgumentParser(description="24V event logger daemon")
     parser.add_argument("--demo", action="store_true")
     args = parser.parse_args()
@@ -858,7 +1137,14 @@ def main() -> None:
 
 
 def _read_boot_id() -> str:
-    """Linux boot_idを読み、テスト環境ではプロセス固有値へフォールバックする。"""
+    """Linux boot_idを読み、テスト環境ではプロセス固有値へフォールバックする。
+
+    Args:
+        なし。
+
+    Returns:
+        OS boot ID。Linux以外ではprocess固有fallback値。
+    """
     try:
         value = (
             Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()

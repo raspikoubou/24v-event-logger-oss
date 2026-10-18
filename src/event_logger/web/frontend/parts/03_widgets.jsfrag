@@ -1,3 +1,8 @@
+  /**
+   * 履歴widget cardの内容とevent handlerを描画する。
+   * @param {HTMLElement} card - 対象card element。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderHistoryWidgetCard(card) {
     if (card.dataset.widgetType === "タイムライン") {
       const focusedEvent = document.activeElement?.matches("[data-timeline-event]")
@@ -46,6 +51,11 @@
     bindTimelineEvents();
   }
 
+  /**
+   * 小型timelineの表示倍率を更新する。
+   * @param {HTMLElement} card - 対象card element。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function applyMiniTimelineZoom(card) {
     const label = card.querySelector("[data-mini-zoom-label]");
     if (!label) return;
@@ -60,10 +70,19 @@
     card.querySelector('[data-mini-zoom="in"]').disabled = index === timelineZoomLevels.length - 1;
   }
 
+  /**
+   * 保存済みの独自履歴widget群を描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderCustomHistoryWidgets() {
     document.querySelectorAll("[data-custom-history-widget]").forEach(renderHistoryWidgetCard);
   }
 
+  /**
+   * 履歴widget cardのHTMLを組み立てる。
+   * @param {Object} config - widget config。
+   * @returns {string} 履歴widget cardのHTML。
+   */
   function historyWidgetCardHtml(config) {
     const hiddenClass = config.enabled === false ? " is-hidden-widget" : "";
     const logLink = ["タイムライン", "イベント一覧"].includes(config.type)
@@ -77,6 +96,11 @@
     `;
   }
 
+  /**
+   * 履歴widget設定rowのHTMLを組み立てる。
+   * @param {Object} config - widget config。
+   * @returns {string} 履歴widget設定rowのHTML。
+   */
   function historyWidgetSettingRowHtml(config) {
     const summary = widgetSettingSummary(config.type, config.channelId, config.period, config);
     const enabled = config.enabled !== false;
@@ -96,6 +120,12 @@
   const { widgetConfigFromApi, widgetPayloadFromConfig } =
     window.EventLoggerWidgetConfig;
 
+  /**
+   * 編集rowの値をwidget保存API payloadへ変換する。
+   * @param {HTMLElement} row - widget row element。
+   * @param {number} sortOrder - 保存表示順。
+   * @returns {Object} widget保存API用payload。row値とsort orderを使う。
+   */
   function widgetApiPayloadFromRow(row, sortOrder) {
     // DOMの読取りはUI側、形式変換は専用モジュールに分離する。
     return widgetPayloadFromConfig(
@@ -106,6 +136,11 @@
     );
   }
 
+  /**
+   * 保存済みwidget設定を編集一覧へ反映する。
+   * @param {Array<Object>} items - APIまたはfixtureから受け取ったwidget列。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderPersistedWidgets(items) {
     const realtimeList = document.querySelector('[data-widget-group="realtime"]');
     const historyList = document.querySelector('[data-widget-group="history"]');
@@ -130,10 +165,18 @@
     renderCustomHistoryWidgets();
   }
 
+  /**
+   * widget設定に未保存変更がある状態を記録する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function markWidgetSettingsDirty() {
     if (liveMode) widgetSettingsDirty = true;
   }
 
+  /**
+   * 編集内容をwidget APIへ保存し、結果を画面へ反映する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   async function saveWidgetSettings() {
     if (!liveMode || !widgetSettingsDirty) return;
     // 途中の通信失敗で一部だけ保存された場合も、再試行時はDBの最新状態を
@@ -167,6 +210,12 @@
   }
 
   // rolling期間の境界は更新されるため、描画済み区間の詳細は絶対時刻を優先する。
+  /**
+   * timeline event群の時刻範囲を算出する。
+   * @param {DOMStringMap} dataset - DOM data属性。
+   * @param {string} periodBoundsValue - 期間境界値。
+   * @returns {Object|null} datasetから復元したevent期間のstart/end millisecond。必要な境界がなければnull。
+   */
   function timelineEventTimeBounds(dataset, periodBoundsValue) {
     const periodDurationMs = periodBoundsValue.endMs - periodBoundsValue.startMs;
     const storedStartMs = Number(dataset.startMs);
@@ -182,6 +231,11 @@
     return { eventStartMs, eventEndMs };
   }
 
+  /**
+   * buttonに対応するevent詳細を取得する。
+   * @param {HTMLElement} button - 対象button element。
+   * @returns {Object|null} button data attributeから組み立てたtimestamp、signal、value等の表示用details。
+   */
   function timelineEventDetails(button) {
     const periodBoundsValue = button.dataset.period
       ? periodBounds(button.dataset.period)
@@ -201,6 +255,11 @@
     };
   }
 
+  /**
+   * 詳細popupをviewport内で読みやすい位置へ配置する。
+   * @param {HTMLElement} button - 対象button element。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function positionTimelineDetail(button) {
     const detail = document.querySelector("#timeline-event-detail");
     const rect = button.getBoundingClientRect();
@@ -213,6 +272,12 @@
     detail.style.top = `${top}px`;
   }
 
+  /**
+   * timeline event詳細popupを表示し、必要なら固定する。
+   * @param {HTMLElement} button - 対象button element。
+   * @param {boolean} pin - 表示を固定するか。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function showTimelineDetail(button, pin = false) {
     const detail = document.querySelector("#timeline-event-detail");
     const timelineEvent = timelineEventDetails(button);
@@ -239,6 +304,11 @@
     positionTimelineDetail(button);
   }
 
+  /**
+   * timeline event詳細popupを条件に応じて閉じる。
+   * @param {boolean} force - 強制的に閉じるか。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function hideTimelineDetail(force = false) {
     if (pinnedTimelineEvent && !force) return;
     document.querySelector("#timeline-event-detail").hidden = true;
@@ -252,6 +322,10 @@
     }
   }
 
+  /**
+   * 未bindのtimeline eventへpointer、focus、click handlerを登録する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function bindTimelineEvents() {
     document.querySelectorAll("[data-timeline-event]:not([data-timeline-bound])").forEach((button) => {
       button.dataset.timelineBound = "true";
@@ -278,6 +352,10 @@
     });
   }
 
+  /**
+   * 選択信号・期間のtimeline軸と各rowを描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderTimeline() {
     const card = document.querySelector('[data-widget="timeline"]');
     const timeline = document.querySelector("#timeline");
@@ -327,6 +405,10 @@
     applyTimelineZoom();
   }
 
+  /**
+   * timeline拡大率に応じて表示範囲を更新する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function applyTimelineZoom() {
     const timeline = document.querySelector("#timeline");
     const zoomLabel = document.querySelector("#timeline-zoom-label");
@@ -342,6 +424,10 @@
     if (timelineZoomIndex === 0) timelineScroll.scrollLeft = 0;
   }
 
+  /**
+   * 選択期間に応じてdashboard集計widgetを再描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderDashboardPeriod() {
     const countCard = document.querySelector('[data-widget="cycle-count"]');
     if (countCard && document.querySelector("#cycle-count") && document.querySelector("#count-period-label")) {
@@ -380,6 +466,10 @@
     renderRecentEvents();
   }
 
+  /**
+   * ON時間集計cardを描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderOnTimeCard() {
     const timeCard = document.querySelector('[data-widget="on-time"]');
     if (timeCard && document.querySelector("#on-time-value") && document.querySelector("#on-time-period-label")) {
@@ -392,6 +482,10 @@
     renderLastEventCard();
   }
 
+  /**
+   * 最後の一致event cardを描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderLastEventCard() {
     const lastCard = document.querySelector('[data-widget="last-alarm"]');
     if (!lastCard || !document.querySelector("#last-alarm-value") || !document.querySelector("#last-alarm-period-label")) return;
@@ -405,6 +499,10 @@
     document.querySelector("#last-alarm-period-label").textContent = `${lastCard.dataset.widgetChannel}・${fixtures.dashboardPeriods[lastPeriodKey].label}`;
   }
 
+  /**
+   * 出力状態card一覧を描画する。
+   * @returns {void} output fixtureの状態・ownerを各output cardへ反映する。
+   */
   function renderDashboardOutputs() {
     const container = document.querySelector("#dashboard-outputs");
     if (!container) return;
@@ -417,12 +515,21 @@
     `).join("");
   }
 
+  /**
+   * event kindを画面用labelへ変換する。
+   * @param {Object} event - fixture event。
+   * @returns {string} event kindの画面表示label。
+   */
   function kindLabel(event) {
     if (event.kind === "output") return "出力の記録";
     if (event.kind === "snapshot") return "記録開始時の状態";
     return "入力の変化";
   }
 
+  /**
+   * 現在の検索条件に一致するeventを返す。
+   * @returns {Array<Object>} 現在のfilter条件に一致するevent fixture列。
+   */
   function filteredEvents() {
     const periodKey = document.querySelector("#log-period").value;
     const { startMs, endMs } = periodBounds(periodKey);
@@ -444,6 +551,10 @@
     ));
   }
 
+  /**
+   * ログ検索で選択可能な入力・出力signalを描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderLogSignalOptions() {
     const select = document.querySelector("#log-signal");
     const selected = select.value || "all";

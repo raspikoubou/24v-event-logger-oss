@@ -20,16 +20,37 @@ class ChannelRepository:
     """入力チャンネル設定を読み書きする。"""
 
     def __init__(self, connection: sqlite3.Connection) -> None:
-        """接続を受け取る。接続のclose責務は呼び出し側にある。"""
+        """接続を受け取る。接続のclose責務は呼び出し側にある。
+
+        Args:
+            connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+        Returns:
+            None。 依存値を保持して利用可能なinstanceを初期化する。
+        """
         self._connection = connection
 
     def list_all(self) -> list[ChannelConfig]:
-        """IN1〜IN6をチャンネル番号順に返す。"""
+        """IN1〜IN6をチャンネル番号順に返す。
+
+        Args:
+            なし。
+
+        Returns:
+            channel ID順の設定値列。
+        """
         rows = self._connection.execute("SELECT * FROM channels ORDER BY id").fetchall()
         return [_channel_from_row(row) for row in rows]
 
     def get(self, channel_id: int) -> ChannelConfig | None:
-        """指定入力チャンネルを取得する。"""
+        """指定入力チャンネルを取得する。
+
+        Args:
+            channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+
+        Returns:
+            指定channelのChannelConfig。 未登録ならNone。
+        """
         _validate_channel_ids([channel_id])
         row = self._connection.execute(
             "SELECT * FROM channels WHERE id = ?", (channel_id,)
@@ -48,7 +69,26 @@ class ChannelRepository:
         updated_at_ms: int,
         audit_action: str = "channel_updated",
     ) -> ChannelConfig:
-        """入力設定とaudit_logを同一transactionで保存する。"""
+        """入力設定とaudit_logを同一transactionで保存する。
+
+        Args:
+            channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+            enabled: channel/rule/widgetを有効にするbool値。
+            name: channel/rule/widgetの表示名。
+            debounce_ms: 論理入力を確定するまで連続安定が必要な時間（ms）。
+            on_label: 入力ON時に画面表示するuser label。
+            off_label: 入力OFF時に画面表示するuser label。
+            updated_at_ms: 設定の更新時刻（UTC epoch ms）。
+            audit_action: 設定変更と合わせて監査記録へ保存するaction名。
+
+        Returns:
+            ChannelConfig型の結果。 戻り値の型に応じ、
+                該当なしはNoneまたは空collectionとなる。
+
+        Raises:
+            ValueError: debounce_msが0〜5000の範囲外の場合。
+            RuntimeError: 「updated channel disappeared」に該当すると判定した場合。
+        """
         _validate_channel_ids([channel_id])
         _validate_channel_text(name, "name")
         _validate_channel_text(on_label, "on_label")
@@ -105,9 +145,21 @@ class ChannelRepository:
     ) -> list[ChannelConfig]:
         """複数入力設定を一つのtransactionで保存する。
 
-        初回設定では6入力をまとめて反映する必要がある。1件ずつcommitすると
-        途中のvalidation・SQLite障害で、再起動後に設定の組み合わせが壊れる。
+        初回設定では6入力をまとめて反映する必要がある。 1件ずつcommitすると
+        途中のvalidation・SQLite障害で、 再起動後に設定の組み合わせが壊れる。
         呼び出し側が渡す値をここで全件検証してから書き込む。
+
+        Args:
+            updates: channelごとの更新field mapping群。 一括更新transactionに渡す。
+            updated_at_ms: 設定の更新時刻（UTC epoch ms）。
+            audit_action: 設定変更と合わせて監査記録へ保存するaction名。
+
+        Returns:
+            channel ID順の設定値列。
+
+        Raises:
+            ValueError: boolean設定値がbool型でない場合。
+                debounce_msが0〜5000の範囲外の場合。
         """
         normalized: list[tuple[int, bool, str, int, str, str]] = []
         seen: set[int] = set()

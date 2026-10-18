@@ -36,12 +36,31 @@ FORBIDDEN_SUFFIXES = (".pyc", ".db", ".sqlite", ".sqlite3", ".pem", ".key", ".im
 
 
 def git(*arguments: str) -> bytes:
-    """shellを介さず、検査対象repositoryのGit結果を取得する。"""
+    """shellを介さず、検査対象repositoryのGit結果を取得する。
+
+        Args:
+            *arguments: Git executableの後ろへ渡す個別argv。
+                shell解析を経由せずsubprocessへ渡す。
+
+        Returns:
+            Git processのstdout bytes。
+                終了codeが0以外ならsubprocess.CalledProcessError。
+                shellを介さない。
+    """
     return subprocess.check_output(["git", "-C", str(ROOT), *arguments])
 
 
 def inspect(revision: str, approved: set[str]) -> list[str]:
-    """snapshotのfile名、mode、内容を検査し、値を含まない診断を返す。"""
+    """snapshotのfile名、mode、内容を検査し、値を含まない診断を返す。
+
+        Args:
+            revision: 検査対象のGit revisionまたはsnapshot識別子。
+            approved: 公開対象として許可する相対path文字列の集合。
+
+        Returns:
+            公開snapshot違反の診断文字列list。
+                file内容やsecret値そのものは診断へ含めない。
+    """
     errors: list[str] = []
     args = (
         ["ls-files", "--stage", "-z"]
@@ -89,7 +108,14 @@ def inspect(revision: str, approved: set[str]) -> list[str]:
 
 
 def main() -> int:
-    """公開snapshot検査、またはローカルGit hook設定を実行する。"""
+    """公開snapshot検査、またはローカルGit hook設定を実行する。
+
+        Args:
+            なし。
+
+        Returns:
+            CLI終了code。検査成功・hook操作成功は0、違反や引数errorは非0。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--staged", action="store_true")
     parser.add_argument("--history", action="store_true")

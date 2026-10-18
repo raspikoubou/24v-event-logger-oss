@@ -47,9 +47,41 @@ def evaluate_widget(
 ) -> dict[str, object]:
     """1 widgetの設定に応じた表示値を返す。
 
-    UNKNOWN区間はON/OFFへ補間しない。DBに保存されたイベントとsessionだけを
-    用いて計算し、表示層で別の集計ロジックを複製しない。暦に基づく固定期間は
+    UNKNOWN区間はON/OFFへ補間しない。 DBに保存されたイベントとsessionだけを
+    用いて計算し、 表示層で別の集計ロジックを複製しない。 暦に基づく固定期間は
     timezoneを扱うWeb adapterがUTCの開始・終了境界をまとめて渡す。
+
+    Args:
+        widget: 表示・集計対象のWidget設定。 信号と期間はconfigで決まる。
+        events: 入力event列。 event IDを保存順の基準とし、 EDGEとSNAPSHOTを区別する。
+        sessions: 監視session列。 異なるsessionをまたぐ状態継続を作らない。
+        now_ms: 現在時刻（UTC epoch ms）。 期間やwall-clock表示の基準。
+        start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+        period_end_ms: 選択期間の排他的終了時刻（UTC epoch ms）。
+        fixed_period_range: Web層で暦境界を解決済みの場合の(start_ms, end_ms)。
+            両値はUTC epoch ms、 開始包含・終了排他。
+            Noneならwidget設定から期間を決める。
+        active_session_id: 現在監視中session ID。
+            明示されたsessionだけ現在時刻まで延長する。
+        now_mono_ns: 現在monotonic timestamp（ns）。 active
+            session内の経過時間計算に使う。
+        current_inputs: IN番号ごとの現在論理状態。 widgetのlive表示に使う。
+        current_input_since_ns: IN番号から状態継続開始monotonic時刻（ns）へのmapping。
+        disabled_channel_ids: 無効状態としてwidget表示や集計から除くchannel番号集合。
+        output_events: loggerが保存したOUT履歴。 入力eventとは別のsignalとして扱う。
+        carried_count: 最新resetより後のedgeのうちretentionで削除済みの件数。
+            残存event件数へ加算してcounter totalを維持する。
+        after_event_id: このIDより大きいeventだけを数える排他的reset境界。
+        reset_at_ms: counter reset記録の時刻（UTC epoch ms）。
+        reset_count: reset後countの事前計算値。 Noneならevent ID境界から算出する。
+        period_count: 期間内edge件数の事前計算値。 Noneならevent列から算出する。
+        stored_count: DB保存済みcounter値。 Noneならevent履歴へfallbackする。
+
+    Returns:
+        widget APIへ返す表示field/value mapping。
+
+    Raises:
+        ValueError: 「start_ms must be before now_ms」に該当すると判定した場合。
     """
     effective_start_ms = (
         fixed_period_range[0]
@@ -292,7 +324,17 @@ def evaluate_widget(
 
 
 def _single_channel(widget: Widget) -> int:
-    """入力専用widgetから単一の入力チャンネルを取得する。"""
+    """入力専用widgetから単一の入力チャンネルを取得する。
+
+    Args:
+        widget: 表示・集計対象のWidget設定。 信号と期間はconfigで決まる。
+
+    Returns:
+        条件に従って算出した整数値。
+
+    Raises:
+        ValueError: 「widget channel must be an integer」に該当すると判定した場合。
+    """
     channels = widget.config.get("channels")
     if not isinstance(channels, list) or len(channels) != 1:
         raise ValueError(f"{widget.widget_type.value} requires one input channel")
@@ -303,7 +345,19 @@ def _single_channel(widget: Widget) -> int:
 
 
 def _widget_signals(widget: Widget) -> list[str]:
-    """timeline/event_listの対象信号をIN/OUT表記へ正規化する。"""
+    """timeline/event_listの対象信号をIN/OUT表記へ正規化する。
+
+    Args:
+        widget: 表示・集計対象のWidget設定。 信号と期間はconfigで決まる。
+
+    Returns:
+        指定signalを入力順に正規化したlist。
+
+    Raises:
+        ValueError: 「widget channels must be a non-empty
+            list」に該当すると判定した場合。 「widget signals must be a non-empty
+            list」に該当すると判定した場合。
+    """
     raw_signals = widget.config.get("signals")
     if raw_signals is not None:
         if not isinstance(raw_signals, list) or not raw_signals:
@@ -326,7 +380,23 @@ def _timeline_rows(
     active_session_id: int | None,
     now_mono_ns: int | None,
 ) -> list[dict[str, object]]:
-    """IN/OUT対象信号を区間へ変換する。"""
+    """IN/OUT対象信号を区間へ変換する。
+
+    Args:
+        widget: 表示・集計対象のWidget設定。 信号と期間はconfigで決まる。
+        events: 入力event列。 event IDを保存順の基準とし、 EDGEとSNAPSHOTを区別する。
+        output_events: loggerが保存したOUT履歴。 入力eventとは別のsignalとして扱う。
+        sessions: 監視session列。 異なるsessionをまたぐ状態継続を作らない。
+        start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+        end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+        active_session_id: 現在監視中session ID。
+            明示されたsessionだけ現在時刻まで延長する。
+        now_mono_ns: 現在monotonic timestamp（ns）。 active
+            session内の経過時間計算に使う。
+
+    Returns:
+        条件に一致したrowまたは表示値列。 該当なしは空list。
+    """
     rows: list[dict[str, object]] = []
     for signal in _widget_signals(widget):
         if signal.startswith("IN"):
@@ -369,7 +439,14 @@ def _timeline_rows(
 
 
 def _interval_payload(interval: StateInterval) -> dict[str, object]:
-    """StateIntervalをWeb用JSONへ変換する。"""
+    """StateIntervalをWeb用JSONへ変換する。
+
+    Args:
+        interval: Heartbeat出力の周期（ms）。
+
+    Returns:
+        widget APIへ返す表示field/value mapping。
+    """
     return {
         "start_ms": interval.start_ms,
         "end_ms": interval.end_ms,
@@ -393,8 +470,20 @@ def _output_interval_payloads(
 ) -> list[dict[str, object]]:
     """OUT eventから状態区間を作る。
 
-    OUTは入力sessionのsnapshotを持たないため、対象期間の直前に保存された
-    出力変更を初期値として使う。履歴が存在しない区間はUNKNOWNのままにする。
+    OUTは入力sessionのsnapshotを持たないため、 対象期間の直前に保存された
+    出力変更を初期値として使う。 履歴が存在しない区間はUNKNOWNのままにする。
+
+    Args:
+        output_events: loggerが保存したOUT履歴。 入力eventとは別のsignalとして扱う。
+        sessions: 監視session列。 異なるsessionをまたぐ状態継続を作らない。
+        channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+        start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+        end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+        active_session_id: 現在監視中session ID。
+            明示されたsessionだけ現在時刻まで延長する。
+
+    Returns:
+        条件に一致したrowまたは表示値列。 該当なしは空list。
     """
     channel_events = sorted(
         (event for event in output_events if event.output_channel == channel_id),
@@ -458,7 +547,15 @@ def _output_interval_payloads(
 
 
 def _same_output_session(first: OutputEvent, second: OutputEvent) -> bool:
-    """連続するOUT履歴が同じ監視区間に属するか返す。"""
+    """連続するOUT履歴が同じ監視区間に属するか返す。
+
+    Args:
+        first: 比較する先行OUT event。
+        second: 比較する後続OUT event。
+
+    Returns:
+        条件が成立している場合True、 未成立または未設定の場合False。
+    """
     # session_id=NULLはdaemon起動時・停止中などsession境界を特定できない
     # 履歴であり、NULL同士を同一と扱うと別bootの状態を誤って連結する。
     return (
@@ -474,7 +571,16 @@ def _output_session_end(
     session_by_id: dict[int, Session],
     end_ms: int,
 ) -> int:
-    """異常終了したOUT sessionの既知終端を返す。"""
+    """異常終了したOUT sessionの既知終端を返す。
+
+    Args:
+        event: 処理するevent値。 DB書込み関数では保存前のwrite modelを受け取る。
+        session_by_id: session IDからSession値を引くlookup mapping。
+        end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+
+    Returns:
+        条件に従って算出した整数値。
+    """
     if event.session_id is None:
         return event.ts_utc_ms
     session = session_by_id.get(event.session_id)
@@ -489,7 +595,16 @@ def _fill_output_unknown_gaps(
     start_ms: int,
     end_ms: int,
 ) -> list[dict[str, object]]:
-    """OUTの既知区間以外をUNKNOWNで埋める。"""
+    """OUTの既知区間以外をUNKNOWNで埋める。
+
+    Args:
+        intervals: 状態区間列。 UNKNOWNは確定ON/OFF継続時間へ加算しない。
+        start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+        end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+
+    Returns:
+        条件に一致したrowまたは表示値列。 該当なしは空list。
+    """
     result: list[dict[str, object]] = []
     cursor = start_ms
     for interval in sorted(
@@ -542,7 +657,21 @@ def _event_list_rows(
     start_ms: int,
     end_ms: int,
 ) -> list[dict[str, object]]:
-    """対象IN/OUTのイベント一覧を新しい順で返す。"""
+    """対象IN/OUTのイベント一覧を新しい順で返す。
+
+    Args:
+        widget: 表示・集計対象のWidget設定。 信号と期間はconfigで決まる。
+        events: 入力event列。 event IDを保存順の基準とし、 EDGEとSNAPSHOTを区別する。
+        output_events: loggerが保存したOUT履歴。 入力eventとは別のsignalとして扱う。
+        start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+        end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+
+    Returns:
+        条件に一致したrowまたは表示値列。 該当なしは空list。
+
+    Raises:
+        ValueError: 「event_list limit must be an integer」に該当すると判定した場合。
+    """
     raw_limit = widget.config.get("limit", 10)
     if isinstance(raw_limit, bool) or not isinstance(raw_limit, int):
         raise ValueError("event_list limit must be an integer")
@@ -616,7 +745,27 @@ def _event_count(
     period_count: int | None,
     stored_count: int | None,
 ) -> int:
-    """event_countの3モードをevent ID基準で計算する。"""
+    """event_countの3モードをevent ID基準で計算する。
+
+    Args:
+        widget: 表示・集計対象のWidget設定。 信号と期間はconfigで決まる。
+        events: 入力event列。 event IDを保存順の基準とし、 EDGEとSNAPSHOTを区別する。
+        start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+        end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+        carried_count: 最新resetより後のedgeのうちretentionで削除済みの件数。
+            残存event件数へ加算してcounter totalを維持する。
+        after_event_id: このIDより大きいeventだけを数える排他的reset境界。
+        reset_count: reset後countの事前計算値。 Noneならevent ID境界から算出する。
+        period_count: 期間内edge件数の事前計算値。 Noneならevent列から算出する。
+        stored_count: DB保存済みcounter値。 Noneならevent履歴へfallbackする。
+
+    Returns:
+        条件に一致するevent/row件数。 該当がない場合は0。
+
+    Raises:
+        ValueError: configのchannelsがlistでない、 または空listの場合。
+            channelsの先頭要素が整数でない場合。
+    """
     channels = widget.config["channels"]
     if not isinstance(channels, list) or not channels:
         raise ValueError("event count channels are missing")
@@ -650,7 +799,14 @@ def _event_count(
 
 
 def _edge_value(widget: Widget) -> int:
-    """rising/falling設定を入力値へ変換する。"""
+    """rising/falling設定を入力値へ変換する。
+
+    Args:
+        widget: 表示・集計対象のWidget設定。 信号と期間はconfigで決まる。
+
+    Returns:
+        条件に従って算出した整数値。
+    """
     return 1 if widget.config.get("edge", "rising") == "rising" else 0
 
 
@@ -664,8 +820,18 @@ def _last_edge(
 ) -> InputEvent | None:
     """指定channel・edgeの最新eventをevent ID順で返す。
 
-    `ts_utc_ms`はNTP補正で逆行する可能性があるため、同一DB内での発生順を
-    表すevent IDを正とする。表示用timestampと発生順を混同しない。
+    `ts_utc_ms`はNTP補正で逆行する可能性があるため、 同一DB内での発生順を
+    表すevent IDを正とする。 表示用timestampと発生順を混同しない。
+
+    Args:
+        events: 入力event列。 event IDを保存順の基準とし、 EDGEとSNAPSHOTを区別する。
+        channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+        value: 論理入力/出力値。 ONはTrueまたは1、 OFFはFalseまたは0。
+        start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+        end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+
+    Returns:
+        条件に一致する最新InputEvent。 該当eventがなければNone。
     """
     matched = [
         event
@@ -682,7 +848,17 @@ def _last_edge(
 def _current_interval(
     intervals: Sequence[StateInterval], now_ms: int, channel_id: int
 ) -> StateInterval:
-    """現在時刻を含むintervalを返し、なければUNKNOWN相当を返す。"""
+    """現在時刻を含むintervalを返し、なければUNKNOWN相当を返す。
+
+    Args:
+        intervals: 状態区間列。 UNKNOWNは確定ON/OFF継続時間へ加算しない。
+        now_ms: 現在時刻（UTC epoch ms）。 期間やwall-clock表示の基準。
+        channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+
+    Returns:
+        StateInterval型の結果。 戻り値の型に応じ、
+            該当なしはNoneまたは空collectionとなる。
+    """
     for interval in reversed(intervals):
         # build_state_intervalsは現在監視中の最後の区間をend_ms == now_ms
         # で閉じる。右端を含めて扱わないと、監視中でも必ずUNKNOWNになる。
@@ -707,7 +883,22 @@ def _elapsed_time(
     now_mono_ns: int | None,
     active_session_id: int | None,
 ) -> int | None:
-    """状態継続または最後のedgeからの経過時間を返す。"""
+    """状態継続または最後のedgeからの経過時間を返す。
+
+    Args:
+        widget: 表示・集計対象のWidget設定。 信号と期間はconfigで決まる。
+        events: 入力event列。 event IDを保存順の基準とし、 EDGEとSNAPSHOTを区別する。
+        intervals: 状態区間列。 UNKNOWNは確定ON/OFF継続時間へ加算しない。
+        channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+        now_ms: 現在時刻（UTC epoch ms）。 期間やwall-clock表示の基準。
+        now_mono_ns: 現在monotonic timestamp（ns）。 active
+            session内の経過時間計算に使う。
+        active_session_id: 現在監視中session ID。
+            明示されたsessionだけ現在時刻まで延長する。
+
+    Returns:
+        int | None。 該当rowまたは有効値がない場合はNone。
+    """
     if widget.config.get("source", "state") == "event":
         event = _last_edge(events, channel_id, _edge_value(widget))
         return (
@@ -736,7 +927,19 @@ def _event_elapsed_ms(
     now_mono_ns: int | None,
     active_session_id: int | None,
 ) -> int:
-    """現sessionのevent経過時間をmonotonic優先で求める。"""
+    """現sessionのevent経過時間をmonotonic優先で求める。
+
+    Args:
+        event: 処理するevent値。 DB書込み関数では保存前のwrite modelを受け取る。
+        now_ms: 現在時刻（UTC epoch ms）。 期間やwall-clock表示の基準。
+        now_mono_ns: 現在monotonic timestamp（ns）。 active
+            session内の経過時間計算に使う。
+        active_session_id: 現在監視中session ID。
+            明示されたsessionだけ現在時刻まで延長する。
+
+    Returns:
+        経過時間または継続時間（ms）。 UNKNOWNは確定時間に含めない。
+    """
     if (
         now_mono_ns is not None
         and active_session_id is not None

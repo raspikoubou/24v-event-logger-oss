@@ -51,7 +51,18 @@ class Widget:
     updated_at_ms: int
 
     def __post_init__(self) -> None:
-        """DB/API境界で設定値を検証する。"""
+        """DB/API境界で設定値を検証する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。 制約を検証するだけで、 永続状態や入力値は変更しない。
+
+        Raises:
+            ValueError: 「widget title must be 1..200
+                characters」に該当すると判定した場合。 widget sort_orderが負の場合。
+        """
         validate_widget_id(self.id)
         if not self.title.strip() or len(self.title) > 200:
             raise ValueError("widget title must be 1..200 characters")
@@ -61,7 +72,17 @@ class Widget:
 
 
 def validate_widget_id(widget_id: str) -> None:
-    """widget IDの長さだけを固定し、将来の複製方式を妨げない。"""
+    """widget IDの長さだけを固定し、将来の複製方式を妨げない。
+
+    Args:
+        widget_id: 対象widgetの永続ID。 関連データと監査記録のkeyに使う。
+
+    Returns:
+        None。 制約を検証するだけで、 永続状態や入力値は変更しない。
+
+    Raises:
+        ValueError: 「widget id must be 1..100 characters」に該当すると判定した場合。
+    """
     if not widget_id or len(widget_id) > 100:
         raise ValueError("widget id must be 1..100 characters")
 
@@ -70,8 +91,14 @@ def normalize_widget_config(payload: Mapping[str, object]) -> dict[str, object]:
     """API payloadの信号表記を固定JSONへ正規化する。
 
     既存の入力専用widgetは整数の ``channels`` をそのまま保持する。
-    タイムラインとイベント一覧だけは、OUTを含む複数信号を表せるよう
+    タイムラインとイベント一覧だけは、 OUTを含む複数信号を表せるよう
     ``signals``（``IN1`` / ``OUT1``）へ分離して保存する。
+
+    Args:
+        payload: APIから受け取ったJSON相当mapping。 正規化時は入力mappingを変更しない。
+
+    Returns:
+        widget APIへ返す表示field/value mapping。
     """
     config = dict(payload)
     if "channels" not in config and "channel_id" in config:
@@ -99,8 +126,25 @@ def validate_widget_config(
 ) -> None:
     """種別ごとの固定設定を検証する。
 
-    計算式やSQLを受け取る自由形式設定は許可しない。未使用の拡張キーは
-    将来互換性のため保持できるが、主要フィールドの型と範囲は固定する。
+    計算式やSQLを受け取る自由形式設定は許可しない。 未使用の拡張キーは
+    将来互換性のため保持できるが、 主要フィールドの型と範囲は固定する。
+
+    Args:
+        widget_type: configのschemaと評価方法を決めるWidgetType。
+        config: widgetまたはruleのJSON相当設定mapping。 式やSQLとして実行しない。
+
+    Returns:
+        None。 制約を検証するだけで、 永続状態や入力値は変更しない。
+
+    Raises:
+        ValueError: 「widget config must be an object」に該当すると判定した場合。
+            「free-form expressions are not supported」に該当すると判定した場合。
+            「widget channel_id must be an integer」に該当すると判定した場合。 「widget
+            channel_id must match channels[0]」に該当すると判定した場合。 「event_count
+            count_mode is invalid」に該当すると判定した場合。 「on_off_duration state
+            must be ON or OFF」に該当すると判定した場合。 「elapsed_time source must be
+            state or event」に該当すると判定した場合。 「elapsed_time state must be ON
+            or OFF」に該当すると判定した場合。 event_list limitが1〜100の範囲外の場合。
     """
     if not isinstance(config, Mapping):
         raise ValueError("widget config must be an object")
@@ -174,7 +218,20 @@ def validate_widget_config(
 
 
 def _channels(config: Mapping[str, object]) -> list[int]:
-    """configから重複のないIN/OUT channel番号を取得する。"""
+    """configから重複のないIN/OUT channel番号を取得する。
+
+    Args:
+        config: widgetまたはruleのJSON相当設定mapping。 式やSQLとして実行しない。
+
+    Returns:
+        条件に一致したrowまたは表示値列。 該当なしは空list。
+
+    Raises:
+        ValueError: 「widget channels must be a non-empty
+            list」に該当すると判定した場合。 「widget channel must be an
+            integer」に該当すると判定した場合。 widget channelが1〜6の範囲外の場合。
+            「widget channels must not contain duplicates」に該当すると判定した場合。
+    """
     raw_channels = config.get("channels")
     if not isinstance(raw_channels, list) or not raw_channels:
         raise ValueError("widget channels must be a non-empty list")
@@ -191,7 +248,23 @@ def _channels(config: Mapping[str, object]) -> list[int]:
 
 
 def _signals(config: Mapping[str, object]) -> list[str]:
-    """configから重複のないIN/OUT信号名を取得する。"""
+    """configから重複のないIN/OUT信号名を取得する。
+
+    Args:
+        config: widgetまたはruleのJSON相当設定mapping。 式やSQLとして実行しない。
+
+    Returns:
+        指定signalを入力順に正規化したlist。
+
+    Raises:
+        ValueError: 「widget signals must be a non-empty
+            list」に該当すると判定した場合。 「widget signal must be a
+            string」に該当すると判定した場合。 「widget signals must contain IN1..IN6 or
+            OUT1..OUT6」に該当すると判定した場合。 widget signal
+            channelが1〜6の範囲外の場合。 「widget signals must not contain
+            duplicates」に該当すると判定した場合。 「widget signal channel must be
+            numeric」に該当すると判定した場合。
+    """
     raw_signals = config.get("signals")
     if not isinstance(raw_signals, list) or not raw_signals:
         raise ValueError("widget signals must be a non-empty list")
@@ -221,7 +294,17 @@ def _signals(config: Mapping[str, object]) -> list[str]:
 
 
 def _edge(config: Mapping[str, object]) -> str:
-    """event系configのedgeを検証する。"""
+    """event系configのedgeを検証する。
+
+    Args:
+        config: widgetまたはruleのJSON相当設定mapping。 式やSQLとして実行しない。
+
+    Returns:
+        検査または正規化を通過した文字列値。
+
+    Raises:
+        ValueError: 「widget edge must be rising or falling」に該当すると判定した場合。
+    """
     edge = config.get("edge", "rising")
     if edge not in {"rising", "falling"}:
         raise ValueError("widget edge must be rising or falling")
@@ -229,21 +312,60 @@ def _edge(config: Mapping[str, object]) -> str:
 
 
 def _optional_bool(config: Mapping[str, object], key: str) -> None:
-    """任意boolean設定を検証する。"""
+    """任意boolean設定を検証する。
+
+    Args:
+        config: widgetまたはruleのJSON相当設定mapping。 式やSQLとして実行しない。
+        key: 設定項目名。 保存値の取得または更新対象を特定する。
+
+    Returns:
+        None。 指定config keyが省略またはbool型であることだけを検証し、
+            configは変更しない。
+
+    Raises:
+        ValueError: deviceまたはSQLite操作で失敗が返された場合。
+    """
     value = config.get(key)
     if value is not None and not isinstance(value, bool):
         raise ValueError(f"widget {key} must be a boolean")
 
 
 def _optional_text(config: Mapping[str, object], key: str) -> None:
-    """任意文字列設定を検証する。"""
+    """任意文字列設定を検証する。
+
+    Args:
+        config: widgetまたはruleのJSON相当設定mapping。 式やSQLとして実行しない。
+        key: 設定項目名。 保存値の取得または更新対象を特定する。
+
+    Returns:
+        None。 指定config keyが省略または200文字以下の文字列であることを検証する。
+
+    Raises:
+        ValueError: deviceまたはSQLite操作で失敗が返された場合。
+    """
     value = config.get(key)
     if value is not None and (not isinstance(value, str) or len(value) > 200):
         raise ValueError(f"widget {key} must be a string up to 200 characters")
 
 
 def _time_range(config: Mapping[str, object]) -> tuple[str, int | None]:
-    """widget期間の固定スキーマを検証して、modeと長さを返す。"""
+    """widget期間の固定スキーマを検証して、modeと長さを返す。
+
+    Args:
+        config: widgetまたはruleのJSON相当設定mapping。 式やSQLとして実行しない。
+
+    Returns:
+        注釈に示す順序の集計値tuple。
+
+    Raises:
+        ValueError: 「widget time_range must be an object」に該当すると判定した場合。
+            「widget time_range mode must be dashboard or
+            fixed」に該当すると判定した場合。 widget fixed duration_msが1 minute〜365
+            daysの範囲外の場合。 「dashboard time_range must not define a fixed
+            period」に該当すると判定した場合。 「widget fixed period is
+            invalid」に該当すると判定した場合。 「widget fixed time_range must use
+            period or duration_ms」に該当すると判定した場合。
+    """
     raw = config.get("time_range", {"mode": "dashboard"})
     if not isinstance(raw, Mapping):
         raise ValueError("widget time_range must be an object")
@@ -276,8 +398,16 @@ def _time_range(config: Mapping[str, object]) -> tuple[str, int | None]:
 def widget_start_ms(widget: Widget, *, dashboard_start_ms: int, now_ms: int) -> int:
     """widgetの実効開始時刻を返す。
 
-    Dashboardから渡された期間を標準とし、固定期間widgetだけを現在時計から
-    再計算する。開始時刻は現在時刻より前へ丸め、空の期間をDomainへ渡さない。
+    Dashboardから渡された期間を標準とし、 固定期間widgetだけを現在時計から
+    再計算する。 開始時刻は現在時刻より前へ丸め、 空の期間をDomainへ渡さない。
+
+    Args:
+        widget: 表示・集計対象のWidget設定。 信号と期間はconfigで決まる。
+        dashboard_start_ms: dashboard共通期間の開始時刻（UTC epoch ms）。
+        now_ms: 現在時刻（UTC epoch ms）。 期間やwall-clock表示の基準。
+
+    Returns:
+        経過時間または継続時間（ms）。 UNKNOWNは確定時間に含めない。
     """
     mode, duration_ms = _time_range(widget.config)
     if mode == "dashboard" or duration_ms is None:
@@ -288,9 +418,17 @@ def widget_start_ms(widget: Widget, *, dashboard_start_ms: int, now_ms: int) -> 
 def widget_end_ms(widget: Widget, *, dashboard_end_ms: int, now_ms: int) -> int:
     """widgetの実効終了時刻を返す。
 
-    固定期間widgetはDashboard共通期間の終了点に追従せず、現在時刻までを
-    表示する。追従widgetは選択された期間の終了点を使い、昨日など過去期間へ
+    固定期間widgetはDashboard共通期間の終了点に追従せず、 現在時刻までを
+    表示する。 追従widgetは選択された期間の終了点を使い、 昨日など過去期間へ
     今日のeventを混ぜない。
+
+    Args:
+        widget: 表示・集計対象のWidget設定。 信号と期間はconfigで決まる。
+        dashboard_end_ms: dashboard共通期間の排他的終了時刻（UTC epoch ms）。
+        now_ms: 現在時刻（UTC epoch ms）。 期間やwall-clock表示の基準。
+
+    Returns:
+        経過時間または継続時間（ms）。 UNKNOWNは確定時間に含めない。
     """
     mode, _ = _time_range(widget.config)
     if mode == "fixed":

@@ -14,7 +14,7 @@ const context = {
   fixtures: { channels: [{ id: 1, enabled: true, value: "OFF" }], events: [] },
   demoClockBaseMs: 0,
   loggingStartedAtMs: 0,
-  demoNowMs: () => 886.199951171875,
+  /** @returns {number} 小数ミリ秒表示を再現するdemo時刻。 */ demoNowMs: () => 886.199951171875,
 };
 vm.runInNewContext(source.slice(start, end) + "\nthis.ms=formatMilliseconds;this.duration=formatDuration;this.state=currentStateValues;", context);
 // 実画面に出た浮動小数値、丸めの両方向、ゼロ、単位境界を検証する。
@@ -35,6 +35,13 @@ assert.equal(context.duration(61000), "1分 1秒");
 assert.equal(context.state("IN1", "ON", "OFF").elapsed, "886.2ミリ秒継続");
 
 // 再読み込みで新しいJS contextを作っても、起点はサーバーのelapsed_ms。
+/**
+ * 指定状態とAPI計測値を持つ独立VMを作り、再読込直後の経過時間を再現する。
+ * @param {string} state 入力状態値。
+ * @param {number} elapsedMs サーバーが返した継続時間（ミリ秒）。
+ * @param {number} receivedAtMs snapshot受信時刻（ミリ秒）。
+ * @returns {Object} テスト対象のVMとfixtureを保持するcontext。
+ */
 function liveContext(state, elapsedMs, receivedAtMs = 100) {
   const live = {
     liveMode: true,
@@ -50,11 +57,11 @@ function liveContext(state, elapsedMs, receivedAtMs = 100) {
     },
     now: receivedAtMs,
   };
-  live.performance = { now: () => live.now };
+  live.performance = { /** @returns {number} VM内の単調時刻（ミリ秒）。 */ now: () => live.now };
   vm.runInNewContext(source.slice(start, end) + "\nthis.state=currentStateValues;", live);
   return live;
 }
-const readState = (live) => live.state("IN1", "稼働", "待機", "current");
+/** @param {Object} live liveContextの結果。 @returns {Object} current widgetの表示状態。 */ const readState = (live) => live.state("IN1", "稼働", "待機", "current");
 for (const state of ["ON", "OFF"]) {
   const live = liveContext(state, 65_000);
   assert.equal(readState(live).displayValue, state === "ON" ? "稼働" : "待機");
