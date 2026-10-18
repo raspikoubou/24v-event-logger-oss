@@ -73,6 +73,7 @@ class OutputRule:
             raise ValueError("updated_at_ms must not be negative")
 
 
+# 条件成立の判断はGPIOの生信号ではなく、確定した入力変化と単調増加時計を使う。
 class RuleEvaluator:
     """sessionごとの入力観測だけを使って条件成立を判定する。"""
 
@@ -83,6 +84,7 @@ class RuleEvaluator:
         self._last_observed_ns: dict[int, int] = {}
         self._last_matching_event_ns: dict[int, dict[EdgeDirection, int]] = {}
 
+    # 記録再開前の状態を新セッションの出発点とし、旧セッションの経過時間を引き継がない。
     def start_session(self, input_values: Mapping[int, bool], now_ns: int) -> None:
         """新sessionのsnapshotを基準に全タイマーを初期化する。"""
         _validate_now(now_ns)
@@ -102,6 +104,7 @@ class RuleEvaluator:
                 EdgeDirection.FALLING: now_ns,
             }
 
+    # 入力変化が確定した時点で条件評価用の基準時刻を更新する。
     def observe(
         self,
         channel_id: int,
@@ -127,6 +130,7 @@ class RuleEvaluator:
             direction = EdgeDirection.RISING if new_value else EdgeDirection.FALLING
             self._last_matching_event_ns[channel_id][direction] = now_ns
 
+    # 一定時間継続と一定時間イベントがない条件は、判定の基準が異なる。
     def is_active(
         self,
         rule: ConditionRule,
@@ -157,6 +161,7 @@ class RuleEvaluator:
             last_event_ns = max(last_event_ns, not_before_ns)
         return now_ns - last_event_ns >= duration_ns
 
+    # 出力制御側へ渡す条件成立結果をまとめて評価する。
     def evaluate_all(
         self,
         rules: list[ConditionRule],

@@ -30,6 +30,7 @@ class OutputEventSink(Protocol):
         """OUT履歴eventをcommit Queueへ入れる。"""
 
 
+# 物理GPIOの状態と各機能の論理的な所有権を分けて管理する。
 class OutputManager:
     """OUT所有ルールを守りながら論理出力を変更する。"""
 
@@ -74,6 +75,7 @@ class OutputManager:
         with self._physical_lock:
             return any(output.is_active for output in self._outputs.values())
 
+    # 制御ループが固まっても安全側へ倒せるよう、緊急OFFは通常処理とは別経路で実施する。
     def emergency_off(self) -> bool:
         """制御loopが停止した場合、DBを待たずに全OUTをOFFへ戻す。"""
         session_id = self._session_id_provider()
@@ -116,6 +118,7 @@ class OutputManager:
                 raise first_error
             return True
 
+    # 物理OFFを先に実行し、履歴への反映は通常ループの復帰後に試みる。
     def flush_emergency_off_events(self) -> None:
         """watchdogが物理OFFを済ませた時刻を、loop復帰後に履歴化する。"""
         while self._emergency_off_events:
@@ -274,6 +277,7 @@ class OutputManager:
         self._heartbeat_next_ns = now_ns + self._heartbeat_interval_ms * 1_000_000
         return True
 
+    # 出力テストは専有権を確保し、期限切れや停止時に確実にOFFへ戻す。
     def begin_output_test(self, channel_id: int, duration_ms: int = 5_000) -> None:
         """メンテナンス中だけ指定OUTの一時テストを開始する。"""
         if not self._maintenance_mode_provider():
@@ -452,6 +456,7 @@ class OutputManager:
         self._set_state(channel_id, False, OutputSource.RULE, force_record=False)
         self._owners.release(channel_id)
 
+    # 出力切替えの記録は物理操作と分離するが、失敗時は安全側の停止につなげる。
     def _set_state(
         self,
         channel_id: int,

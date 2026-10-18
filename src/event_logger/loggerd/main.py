@@ -188,6 +188,7 @@ class LoggerDaemon:
         """テスト・監視用のOutputManagerを返す。"""
         return self._outputs
 
+    # 初期設定未完了・明示停止時は、起動してもGPIOの記録を始めずメンテナンスへ入る。
     def start(self) -> None:
         """GPIO callbackとcontrol socketを開始して監視sessionを作る。"""
         if self._started:
@@ -225,6 +226,7 @@ class LoggerDaemon:
             raise ValueError("logging_paused setting must be boolean")
         return value
 
+    # 各段階の直後にwatchdogの停止要求を再確認し、trip後のOUT再操作を防ぐ。
     def run_once(self) -> None:
         """Queue、Heartbeat、OUT test、control requestを1回進める。"""
         if not self._started:
@@ -318,6 +320,7 @@ class LoggerDaemon:
         self._complete_watchdog_trip()
         return True
 
+    # SD書込み待ちの制御ループとは別スレッドで物理出力の停止を監視する。
     def _watchdog_loop(self) -> None:
         """SQLite待ちに巻き込まれないthreadでloopの停止を検出する。"""
         while not self._watchdog_stop.wait(0.05):
@@ -530,6 +533,7 @@ class LoggerDaemon:
             return self._status_payload()
         raise ValueError(f"unsupported control command: {request.command}")
 
+    # 記録停止フラグは再起動後の自動再開にも影響するため、例外時も保存を試みる。
     def _stop_logging(self) -> None:
         """受付を先に閉じ、1つの停止障害でも残りのOUT停止とflag保存を試す。"""
         if self._service.status is not LoggerStatus.LOGGING:
@@ -577,6 +581,7 @@ class LoggerDaemon:
         if stop_error is not None:
             raise stop_error
 
+    # カウンタresetは入力イベントと同じFIFO上の境界で確定し、順序を崩さない。
     def _reset_counter(self, request: ControlRequest) -> Mapping[str, object]:
         """resetをFIFOへ一度だけ投入し、loopを塞がず同じ要求IDで結果を返す。"""
         if request.request_id is None or request.widget_id is None:
@@ -682,6 +687,7 @@ class LoggerDaemon:
             self._service.abort_start()
             raise
 
+    # 保存済み設定の変更は現在の監視セッションへ無条件に割り込ませない。
     def _reload_config(self) -> None:
         """チャンネル設定を読み直し、次回再開時に適用する。"""
         channels = self._channels.list_all()

@@ -66,6 +66,7 @@ def validate_widget_id(widget_id: str) -> None:
         raise ValueError("widget id must be 1..100 characters")
 
 
+# UIと保存済みデータの表現差を吸収してから、共通の検証へ渡す。
 def normalize_widget_config(payload: Mapping[str, object]) -> dict[str, object]:
     """API payloadの信号表記を固定JSONへ正規化する。
 
@@ -94,6 +95,7 @@ def normalize_widget_config(payload: Mapping[str, object]) -> dict[str, object]:
     return config
 
 
+# ウィジェット種別ごとに許容設定が違うため、正規化後に個別条件を検査する。
 def validate_widget_config(
     widget_type: WidgetType, config: Mapping[str, object]
 ) -> None:
@@ -190,6 +192,7 @@ def _channels(config: Mapping[str, object]) -> list[int]:
     return channels
 
 
+# INとOUTを混在させる表示用信号IDを、設定値から組み立てる。
 def _signals(config: Mapping[str, object]) -> list[str]:
     """configから重複のないIN/OUT信号名を取得する。"""
     raw_signals = config.get("signals")
@@ -242,6 +245,7 @@ def _optional_text(config: Mapping[str, object], key: str) -> None:
         raise ValueError(f"widget {key} must be a string up to 200 characters")
 
 
+# 追従・固定期間・任意期間の扱いをここで一元化する。
 def _time_range(config: Mapping[str, object]) -> tuple[str, int | None]:
     """widget期間の固定スキーマを検証して、modeと長さを返す。"""
     raw = config.get("time_range", {"mode": "dashboard"})
@@ -273,6 +277,7 @@ def _time_range(config: Mapping[str, object]) -> tuple[str, int | None]:
     return "fixed", duration_ms
 
 
+# ウィジェット独自期間がある場合のみ共通ダッシュボードの開始境界を上書きする。
 def widget_start_ms(widget: Widget, *, dashboard_start_ms: int, now_ms: int) -> int:
     """widgetの実効開始時刻を返す。
 
@@ -285,6 +290,7 @@ def widget_start_ms(widget: Widget, *, dashboard_start_ms: int, now_ms: int) -> 
     return max(0, min(now_ms - 1, now_ms - duration_ms))
 
 
+# ローリング期間と固定の終了時刻を混同しない。
 def widget_end_ms(widget: Widget, *, dashboard_end_ms: int, now_ms: int) -> int:
     """widgetの実効終了時刻を返す。
 

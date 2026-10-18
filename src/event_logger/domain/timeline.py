@@ -13,6 +13,7 @@ from event_logger.common.models import (
 )
 
 
+# セッション境界をまたいで直前状態を引き継がない。記録のない区間はUNKNOWNとして扱う。
 def build_state_intervals(
     events: Iterable[InputEvent],
     sessions: Sequence[Session],
@@ -94,6 +95,7 @@ def total_duration_ms(
     )
 
 
+# 終了記録のないセッションは観測可能なイベントと現行セッション情報で上限を決める。
 def _known_session_end(
     session: Session,
     session_events: Sequence[InputEvent],
@@ -117,6 +119,7 @@ def _known_session_end(
     )
 
 
+# UTC時刻が補正されても、同一セッション内の長さはmonotonic時計を優先する。
 def _build_session_intervals(
     session_events: Sequence[InputEvent],
     *,
@@ -247,6 +250,7 @@ def _monotonic_duration_ms(
     return max(0, (end_ns - start_ns) // 1_000_000)
 
 
+# 表示用の時刻差と積算用の継続時間は別に扱う。
 def _duration_with_monotonic(
     start_ns: int | None,
     end_ns: int,
@@ -272,6 +276,7 @@ def _duration_with_monotonic(
     return fallback_ms
 
 
+# 確認できない時間帯を前後の状態で埋めず、明示的にUNKNOWN区間として返す。
 def _fill_unknown_gaps(
     intervals: Sequence[StateInterval],
     *,

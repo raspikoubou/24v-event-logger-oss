@@ -36,6 +36,7 @@ class OutputOwner:
             raise ValueError("only rule owner may have rule_id")
 
 
+# 一つのOUTをHeartbeatと条件ルールで重複制御しないため、占有者を一元管理する。
 class OutputOwnerRegistry:
     """OUTごとに未使用、Heartbeat、1条件ルールのいずれかを保持する。"""
 
@@ -66,6 +67,7 @@ class OutputOwnerRegistry:
         _validate_channel(channel_id)
         self._owners[channel_id] = OutputOwner(channel_id, OutputOwnerKind.UNUSED)
 
+    # 別の機能が既に使用中のOUTは暗黙に上書きせず競合として拒否する。
     def _assign(self, owner: OutputOwner) -> None:
         """既存ownerがあれば用途の上書きを拒否する。"""
         current = self._owners[owner.channel_id]
@@ -77,6 +79,7 @@ class OutputOwnerRegistry:
 
 
 @dataclass
+# テストは通常運転とは別の一時的な所有形態を持ち、期限はmonotonic時刻で判定する。
 class OutputTest:
     """メンテナンス中の最大5秒出力テスト。"""
 

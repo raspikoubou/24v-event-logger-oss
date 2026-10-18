@@ -50,6 +50,7 @@ class IpcRemoteError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+# Webからの制御命令はホワイトリスト化し、型と許容フィールドを通信境界で確認する。
 class ControlRequest:
     """検証済みのloggerd制御要求。"""
 
@@ -153,6 +154,7 @@ class ControlRequest:
 ControlHandler = Callable[[ControlRequest], Mapping[str, object]]
 
 
+# Webプロセスとloggerdを分離し、Unixソケット経由で限定した操作だけ受け取る。
 class UnixControlServer:
     """loggerd側のnewline-delimited JSON control socket server。"""
 
@@ -253,6 +255,7 @@ class UnixControlClient:
         return data
 
 
+# 1接続の要求を受信・検証し、例外は通信可能なエラー形式へ整える。
 def _serve_connection(connection: socket.socket, handler: ControlHandler) -> None:
     """接続1本を読み、成功・拒否レスポンスを必ず返す。"""
     try:
@@ -287,6 +290,7 @@ def _serve_connection(connection: socket.socket, handler: ControlHandler) -> Non
         return
 
 
+# 不正に大きい入力や終端のないメッセージを無制限に読み続けない。
 def _read_message(connection: socket.socket) -> Any:
     """改行終端のJSONを最大サイズまで読み取る。"""
     buffer = bytearray()

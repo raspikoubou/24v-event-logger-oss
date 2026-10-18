@@ -51,6 +51,7 @@ class WriteLatencySnapshot:
     severity: str
 
 
+# commitにかかった時間とQueueでの待ちを別々に保持し、遅延の要因を見分ける。
 class WriteLatencyMonitor:
     """SQLite commit完了時間の直近5分だけを記録する。"""
 
@@ -230,6 +231,7 @@ class EventWriter:
         )
 
 
+# SQLite書込みを単一スレッドへ集約して制御ループ・GPIO通知と分離する。
 class BackgroundEventWriter:
     """制御loopと別threadでWAL/FULL event commitを直列実行する。"""
 
@@ -334,6 +336,7 @@ class BackgroundEventWriter:
             self._thread = None
         self.raise_if_failed()
 
+    # resetをまたぐ一括commitは順序を壊すため、FIFOの操作種別でバッチを区切る。
     def _run(self) -> None:
         """thread所有のSQLite接続でeventをFIFO保存する。"""
         connection: sqlite3.Connection | None = None
@@ -386,6 +389,7 @@ class BackgroundEventWriter:
         finally:
             connection.close()
 
+    # DBへのcommitが成功してからだけ、Queueのin-flight件数を完了として減らす。
     def _commit_event_batch(
         self, repository: EventBatchRepository, events: list[PendingDatabaseEvent]
     ) -> None:
@@ -411,6 +415,7 @@ class BackgroundEventWriter:
             )
 
     @staticmethod
+    # reset要求の失敗は個別要求へ返し、保存基盤全体の障害と区別する。
     def _apply_counter_reset(
         connection: sqlite3.Connection, pending: PendingCounterReset
     ) -> None:

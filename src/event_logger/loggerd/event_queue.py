@@ -57,6 +57,7 @@ class EventQueueFull(RuntimeError):
     """Queueが満杯でeventを保持できなかった。"""
 
 
+# 待機中だけでなくDB書込み中の項目も未保存容量へ数える。
 class EventQueue:
     """GPIO callback・出力loopとSQLite writerの間の有界Queue。"""
 
@@ -105,6 +106,7 @@ class EventQueue:
                 return None
             return self._take_locked()
 
+    # 一定件数をまとめてcommitし、平常時に意図的なバッチ待ち時間を追加しない。
     def wait_get_batch(
         self,
         *,
@@ -144,6 +146,7 @@ class EventQueue:
         """保存失敗したin-flight eventを先頭へ戻す。"""
         self.requeue_front_many((event,))
 
+    # 保存失敗後は元のFIFO順序と投入時刻を両方戻し、待ち時間の監視を維持する。
     def requeue_front_many(self, events: Sequence[PendingDatabaseEvent]) -> None:
         """失敗したbatch全体を元のFIFO順でQueue先頭へ戻す。"""
         with self._condition:
@@ -160,6 +163,7 @@ class EventQueue:
             self._queue.extendleft(reversed(events))
             self._condition.notify_all()
 
+    # Queueが空でもcommit中の項目が残る間は完了とみなさない。
     def wait_until_idle(self, timeout_s: float | None = None) -> bool:
         """Queueとwriter処理中eventがなくなるまで待つ。"""
         deadline = None if timeout_s is None else monotonic() + timeout_s

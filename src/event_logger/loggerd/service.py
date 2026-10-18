@@ -117,6 +117,7 @@ class LoggerService:
         with self._lock:
             self.status = LoggerStatus.CRITICAL
 
+    # 監視開始時は有効入力を同じタイミングでsnapshotし、その後の変化と区別する。
     def start(self, input_values: Mapping[int, bool]) -> None:
         """新しいsessionを作成し、有効入力のsnapshotを保存する。"""
         with self._lock:
@@ -163,6 +164,7 @@ class LoggerService:
                 raise
             self.status = LoggerStatus.LOGGING
 
+    # GPIOコールバックは短時間で戻す。永続化はQueueへ渡し、SQLite待ちを持ち込まない。
     def observe_input(self, channel_id: int, value: bool) -> None:
         """GPIO callbackから論理入力変化を受け取る。
 
@@ -219,6 +221,7 @@ class LoggerService:
             pending.reset_at_ms = self._clock.now_utc_ms()
             self._event_queue.put(pending)
 
+    # 保存キューへの投入に成功してから確定状態を更新し、出力ルールへ通知する。
     def _enqueue_confirmed(
         self,
         channel_id: int,
@@ -272,6 +275,7 @@ class LoggerService:
                 self.status = LoggerStatus.CRITICAL
             raise
 
+    # 停止時刻の確定・出力OFF・Queue flush・セッション終了には明確な順序がある。
     def stop(self, *, on_quiesced: Callable[[], None] | None = None) -> None:
         """Queueを保存し、正常終了できたsessionへ終了時刻を記録する。"""
         with self._lock:
@@ -379,6 +383,7 @@ class LoggerService:
                 raise RuntimeError(f"not in maintenance: {self.status}")
             self.status = LoggerStatus.STOPPED
 
+    # 起動途中の失敗を正常なセッション終了と混同させない。
     def abort_start(self) -> None:
         """開始途中のsessionを監視不能としてmaintenanceへ戻す。
 

@@ -23,6 +23,7 @@ from event_logger.domain.widgets import (
 )
 
 
+# 各ウィジェットは同じイベント列を異なる集計方式で使う。期間と状態の扱いを種別ごとに切り分ける。
 def evaluate_widget(
     widget: Widget,
     *,
@@ -315,6 +316,7 @@ def _widget_signals(widget: Widget) -> list[str]:
     return [f"IN{channel}" for channel in raw_channels]
 
 
+# UIへ渡すタイムラインは入力・出力のセッション境界を維持した区間へ変換する。
 def _timeline_rows(
     widget: Widget,
     events: Sequence[InputEvent],
@@ -382,6 +384,7 @@ def _interval_payload(interval: StateInterval) -> dict[str, object]:
     }
 
 
+# 出力の確定区間と記録されていない区間を区別して表示データを構築する。
 def _output_interval_payloads(
     output_events: Sequence[OutputEvent],
     *,
@@ -483,6 +486,7 @@ def _output_session_end(
     return min(end_ms, max(event.ts_utc_ms, session.ended_at_ms))
 
 
+# 記録のない出力状態を直前値のまま延長しない。
 def _fill_output_unknown_gaps(
     intervals: Sequence[dict[str, object]],
     *,
@@ -604,6 +608,7 @@ def _event_list_rows(
     return [row[1] for row in rows[:raw_limit]]
 
 
+# カウンタは表示期間内・リセット後・累積を設定に応じて使い分ける。
 def _event_count(
     widget: Widget,
     events: Iterable[InputEvent],
@@ -679,6 +684,7 @@ def _last_edge(
     return max(matched, key=lambda event: event.id, default=None)
 
 
+# 現在状態の開始時刻は直近エッジだけでなく、セッション開始時のsnapshotも考慮する。
 def _current_interval(
     intervals: Sequence[StateInterval], now_ms: int, channel_id: int
 ) -> StateInterval:
@@ -697,6 +703,7 @@ def _current_interval(
     )
 
 
+# 未確定状態や時刻の基準が異なるイベントを誤って確定経過時間にしない。
 def _elapsed_time(
     widget: Widget,
     events: Sequence[InputEvent],

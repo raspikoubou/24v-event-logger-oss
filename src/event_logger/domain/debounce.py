@@ -27,6 +27,7 @@ class Debouncer:
         self._candidate_started_ns = None
         self._record_time(observed_ns)
 
+    # 入力が動いた時点ではまだエッジを確定しない。安定時間を満たした候補だけを採用する。
     def observe(self, value: bool, observed_ns: int) -> bool | None:
         """入力変化を観測し、確定した新状態だけを返す。
 
@@ -76,6 +77,7 @@ class Debouncer:
             return self._confirm_candidate(value)
         return None
 
+    # 最後のGPIO通知以降に変化がなくても、候補の安定時間を確認できるようにする。
     def poll(self, observed_ns: int) -> bool | None:
         """現在の入力候補が安定時間を満たしたか確認する。
 
@@ -105,6 +107,7 @@ class Debouncer:
         self._candidate_started_ns = None
         return value
 
+    # 監視時刻の逆行は長さ計算を壊すため、monotonic時刻の前提を確認する。
     def _record_time(self, observed_ns: int) -> None:
         """monotonic時刻の逆行を検出する。"""
         if observed_ns < 0:

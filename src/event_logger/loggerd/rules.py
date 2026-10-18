@@ -28,6 +28,7 @@ class OutputRuleConfigurationError(RuntimeError):
         super().__init__(f"owner rollback incomplete: {details}")
 
 
+# 設定切替時の出力所有権と条件評価器の状態を一括して管理する。
 class OutputRuleRunner:
     """監視可能な入力時間だけで条件ルールを評価する。"""
 
@@ -67,6 +68,7 @@ class OutputRuleRunner:
         if heartbeat_channel is not None and heartbeat_channel in output_channels:
             raise ValueError("Heartbeat and a condition rule cannot share one output")
 
+    # 競合を検証したうえで新ルールへ切り替え、途中失敗時は旧構成への復帰を試す。
     def configure(self, rules: Sequence[OutputRule]) -> None:
         """OUT重複を検証してrule ownerを再構成する。"""
         with self._lock:
@@ -176,6 +178,7 @@ class OutputRuleRunner:
             self._rules = new_rules
             self._owners_active = bool(new_owner_rules)
 
+    # 監視停止時は評価を止めるだけでなく、ルールが所有していたOUTも解放する。
     def pause(self) -> None:
         """メンテナンス移行時にrule ownerを解放する。"""
         with self._lock:
@@ -209,6 +212,7 @@ class OutputRuleRunner:
         self._owners_active = True
         self._paused_for_maintenance = False
 
+    # 再開時は旧セッションのタイマー・条件継続状態を持ち越さない。
     def start_session(self, input_values: Mapping[int, bool]) -> None:
         """新sessionのsnapshotをtimer起点としてevaluatorへ渡す。"""
         with self._lock:
@@ -252,6 +256,7 @@ class OutputRuleRunner:
         for channel_id, value in actions:
             self._output_manager.set_rule_state(channel_id, value)
 
+    # ルール編集で条件自体が変わった場合は時間計測の起点も更新する。
     def _update_reset_points(self, rules: Sequence[OutputRule]) -> None:
         """停止中のreloadでも、次session用の条件変更情報を保つ。"""
         now_ns = self._clock.now_monotonic_ns()
