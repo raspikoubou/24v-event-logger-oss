@@ -7,6 +7,7 @@
   const status = document.getElementById("restart-status");
   if (!button || !dialog || !status) return;
   let pending = false;
+  // 再起動要求前にダイアログで明示確認し、二重送信を抑止する。
   button.addEventListener("click", () => {
     if (pending || dialog.open) return;
     dialog.returnValue = "";

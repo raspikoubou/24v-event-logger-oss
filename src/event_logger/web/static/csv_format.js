@@ -2,12 +2,14 @@
 (() => {
   "use strict";
 
+  // CSVで数式として解釈され得る先頭文字を無害化し、引用符もエスケープする。
   function csvCell(value) {
     let text = String(value ?? "");
     if (/^\s*[=+\-@]|^[\t\r\n]/.test(text)) text = `'${text}`;
     return `"${text.replaceAll('"', '""')}"`;
   }
 
+  // デモ用に画面上のイベントをCSVへ変換する。実機のCSVはAPI側で生成する。
   function serializeDemoCsv(rows, { formatLocalDateTime, eventTimeMs, signalDisplayName }) {
     const header = "timestamp,signal,name,value,kind,source,clock_synced";
     const body = rows.map((event) => [

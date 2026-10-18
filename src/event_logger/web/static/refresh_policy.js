@@ -3,6 +3,7 @@
   "use strict";
 
   // API応答が1秒を超えてもtimerの呼出しを積み上げず、必要なら最後の1回だけ追従する。
+  // 並列取得の重複を避け、更新要求が競合して画面へ逆順に反映されることを防ぐ。
   function createRefreshCoordinator(refresh) {
     let activePromise = null;
     let forcedRerunRequested = false;
@@ -31,6 +32,7 @@
     };
   }
 
+  // 指定期間・表示状態・再取得間隔から重いダッシュボード更新の要否を判断する。
   function shouldRefreshDashboard({
     currentPeriod,
     customRange,
@@ -59,10 +61,12 @@
     );
   }
 
+  // 詳細表示やキーボード操作中はタイムラインDOMを作り直さない。
   function shouldDeferTimelineRender({ pinned, focused, detailVisible }) {
     return Boolean(pinned || focused || detailVisible);
   }
 
+  // 個別ウィジェットのフォーカス・詳細表示をポーリングで破壊しない。
   function shouldDeferTimelineWidgetRender({
     containsPinnedEvent,
     containsFocusedEvent,
@@ -77,6 +81,7 @@
     );
   }
 
+  // ログ画面の表示中だけ必要なタイミングで一覧を更新する。
   function shouldRefreshLogPage({
     activeView,
     liveMode,

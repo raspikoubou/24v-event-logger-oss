@@ -7,6 +7,7 @@
     return value === "" ? null : Number(value);
   }
 
+  // 設定が存在しない旧状態では既定値を使い、無期限のnullは保持する。
   function retentionDaysFromStatus(status) {
     return status.retention_days === undefined ? 365 : status.retention_days;
   }

@@ -7,6 +7,7 @@
 })(typeof globalThis === "object" ? globalThis : this, function createUpdatePanelApi() {
   const BLOCKING_UPDATE_STATES = new Set(["started", "rollback_failed"]);
 
+  // 更新操作と状態監視を画面描画から分離し、一つの状態機械として管理する。
   function createUpdatePanelController({
     checkRelease,
     applyRelease,
@@ -52,6 +53,7 @@
       onChange(snapshot());
     }
 
+    // GitHub上の候補を確認し、適用可能な版と識別情報を保存する。
     async function check() {
       if (state.checking || state.confirming || state.applying || state.processing) return snapshot();
       updateState({
@@ -120,6 +122,7 @@
       return snapshot();
     }
 
+    // 更新適用を明示的に依頼し、応答喪失時も即座に失敗扱いしない。
     async function apply() {
       if (!state.available || state.checking || state.confirming || state.applying || state.processing) {
         return snapshot();
@@ -191,6 +194,7 @@
       return snapshot();
     }
 
+    // 監視期限を越えても結果が不明ならUNKNOWNを表示し、再適用を促さない。
     function expireWatch() {
       if (!state.processing || watchStartedAt === null || now() - watchStartedAt <= 10 * 60 * 1000) return false;
       statusRequestEpoch += 1;
@@ -201,6 +205,7 @@
       return true;
     }
 
+    // 更新中のサーバー再起動・一時的な通信断を考慮し、同じ更新試行の結果だけ反映する。
     async function monitor() {
       // 状態取得が応答しない場合も、次回の定期確認で監視期限を判定する。
       if (expireWatch()) return snapshot();
@@ -259,6 +264,7 @@
     return { check, apply, monitor, getState: snapshot };
   }
 
+  // 保存された更新状態を利用者向けの文字列へ変換する。
   function formatUpdateStatus(status) {
     if (!status) return "更新状態の記録はありません。";
     const label = { started: "処理中", completed: "完了", failed: "失敗",
@@ -266,6 +272,7 @@
     return status.version ? `${label} — ${status.version}` : label;
   }
 
+  // 旧更新処理が残した状態情報との互換読み取りを行う。
   function createLegacyAwareStatusReader({ readLocal, readLegacy, isProcessing, now = () => Date.now() }) {
     let unavailableSince = null;
     let legacyRead = false;
@@ -290,6 +297,7 @@
     };
   }
 
+  // DOMへ更新パネルを接続し、操作と状態変更を画面へ反映する。
   function mount(documentRef, windowRef) {
     const panel = documentRef.getElementById("update-panel");
     if (!panel) return null;
@@ -336,6 +344,7 @@
     }
 
     const csrfToken = documentRef.querySelector('meta[name="csrf-token"]')?.content || "";
+    // 更新関連APIの通信処理を一箇所に集約する。
     async function requestUpdate(method, path = "/api/update", body = null) {
       const headers = { Accept: "application/json" };
       if (method !== "GET" && csrfToken) headers["X-CSRF-Token"] = csrfToken;

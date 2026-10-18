@@ -2,6 +2,7 @@
 (() => {
   "use strict";
 
+  // ダッシュボードの期間指定をAPIクエリに変換する。
   function dashboardApiUrl(period, customRange) {
     const query = new URLSearchParams();
     query.set("period", period || "8h");
@@ -16,6 +17,7 @@
     return `/api/dashboard?${query.toString()}`;
   }
 
+  // フィルター・時間範囲・ページ条件を一覧表示とCSVで共有する。
   function buildLogApiQuery({
     periodKey, customBounds, logSearchRange, selectedSignal, widgetLogSignals,
     selectedValue, selectedKind, selectedSource, includePaging, pageSize, logPage
@@ -46,6 +48,7 @@
     return query.toString();
   }
 
+  // 選択ウィジェットの種類からログ画面へ引き継ぐ値フィルターを決める。
   function logValueFilterForWidget(widgetType, widgetValue) {
     if (widgetType !== "イベント一覧") return "all";
     return ["ON", "OFF"].includes(widgetValue) ? widgetValue : "all";

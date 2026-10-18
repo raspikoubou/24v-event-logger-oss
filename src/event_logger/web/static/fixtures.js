@@ -1,5 +1,6 @@
 // Sites上のUI確認専用fixture。製品側のDomainや実機状態とは接続しない。
 window.DEMO_FIXTURES = {
+// デモ表示の期間・イベントは固定サンプル。実機の時計やDBとは連動しない。
   dashboardPeriods: {
     "1h": { label: "直近1時間", durationMs: 3600000, count: 8, onTime: "42分", lastAlarm: "該当なし", axis: ["10:45", "11:00", "11:15", "11:30", "11:45"] },
     "8h": { label: "直近8時間", durationMs: 28800000, count: 128, onTime: "4時間12分", lastAlarm: "10:31:22", axis: ["04:00", "06:00", "08:00", "10:00", "12:00"] },
@@ -11,6 +12,7 @@ window.DEMO_FIXTURES = {
     "this_week": { label: "今週", startAt: "2026-09-07T00:00:00+09:00", axis: ["月", "火", "水", "木", "金", "土"] },
     "custom": { label: "任意期間", startAt: "2026-09-12T08:00:00+09:00", endAt: "2026-09-12T12:00:00+09:00" }
   },
+// HAT入力6chと出力6chの画面例を提供する。
   channels: [
     { id: 1, name: "運転", enabled: true, value: "ON", debounce: 20 },
     { id: 2, name: "異常", enabled: true, value: "OFF", debounce: 50 },
@@ -43,6 +45,7 @@ window.DEMO_FIXTURES = {
     { id: 1, name: "長時間停止", condition: "state_duration", channelId: "IN1", value: "OFF", edge: "ON", duration: 30, durationUnit: "minutes", outputId: 2, enabled: true },
     { id: 2, name: "異常継続", condition: "state_duration", channelId: "IN2", value: "ON", edge: "ON", duration: 5, durationUnit: "minutes", outputId: 3, enabled: true }
   ],
+// タイムライン・ログ一覧を表示するための疑似イベント。
   events: [
     { time: "11:43:40.000", signal: "OUT1", value: "ON", kind: "output", source: "heartbeat", synced: true },
     { time: "11:43:35.000", signal: "OUT1", value: "OFF", kind: "output", source: "heartbeat", synced: true },

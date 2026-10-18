@@ -2,6 +2,7 @@
 (() => {
   "use strict";
 
+  // 保存容量の値を利用者が読みやすい単位へ変換する。
   function formatBytes(value) {
     const bytes = Number(value || 0);
     if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
@@ -9,6 +10,7 @@
     return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
   }
 
+  // 測定失敗と実際の容量逼迫を区別して警告情報を構築する。
   function storageWarningFor(storage, hasError = false) {
     const status = storage?.status;
     if (!hasError && status !== "warning" && status !== "critical") {
@@ -36,6 +38,7 @@
     };
   }
 
+  // 診断状態から利用者向けの注意文を選ぶ。
   function storageWarningMessage(warning) {
     if (warning.severity === "critical") {
       const remaining = warning.freeBytes === null
@@ -49,6 +52,7 @@
     return remaining + "空き容量が30%未満です。診断画面で確認してください。";
   }
 
+  // 警告が表示済みか・現在の状態に応じて表示の要否を判定する。
   function warningVisibilityFor({
     count,
     latencyWarning,

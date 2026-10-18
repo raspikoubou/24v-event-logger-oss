@@ -15,6 +15,7 @@
     Object.entries(apiWidgetTypes).map(([apiType, uiType]) => [uiType, apiType])
   );
 
+  // 保存済み期間を画面側の期間選択形式へ戻す。
   function widgetPeriodFromApi(widget) {
     const config = widget.config || {};
     const explicitPeriod = config.ui_period;
@@ -40,6 +41,7 @@
     return periodByDuration.get(duration) || "custom";
   }
 
+  // APIが返すウィジェット定義をフォーム・カード共通の表現へ変換する。
   function widgetConfigFromApi(widget) {
     const rawConfig = widget.config && typeof widget.config === "object" ? widget.config : {};
     const type = apiWidgetTypes[widget.type];
@@ -80,6 +82,7 @@
     };
   }
 
+  // 表示の期間指定をAPIが扱う形式へ変換する。
   function widgetTimeRangeFromUi(period, durationMs = 0) {
     if (!period || period === "follow") return { mode: "dashboard" };
     if (["1h", "8h", "24h", "7d", "30d"].includes(period)) {
@@ -97,6 +100,7 @@
     return { mode: "fixed", duration_ms: durationByPeriod[period] || 8 * 3_600_000 };
   }
 
+  // フォームの値を保存用の型とキー名へ変換する。
   function widgetPayloadFromConfig(uiConfig, sortOrder, enabled, widgetSource) {
     const apiType = uiWidgetTypes[uiConfig.type];
     if (!apiType) throw new Error(`未対応のウィジェット種別です: ${uiConfig.type}`);
