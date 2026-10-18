@@ -11,6 +11,7 @@ from event_logger.database.repositories import RetentionRepository
 _WRITER_YIELD_SECONDS = 0.1
 
 
+# 連続する保守作業がイベント書込みを長時間塞がないようにする。
 def _yield_for_database_writer() -> None:
     """段階削除のtransaction間でloggerd writerへDB取得機会を渡す。"""
     # SQLiteは複数writerを直列化する。maintenanceが10,000件batchを
@@ -29,6 +30,7 @@ class RetentionResult:
     carried_counter_events: int
 
 
+# 期限切れ履歴の段階的削除と空き容量保護を担当する。
 class RetentionService:
     """10,000件以下のbatchを繰り返して古い一次eventを削除する。"""
 
@@ -44,6 +46,7 @@ class RetentionService:
         self._repository = repository
         self._batch_size = batch_size
 
+    # 保存期限を越えたデータを短い単位で削除する。
     def run(self, *, cutoff_ms: int) -> RetentionResult:
         """cutoffより古いIN/OUT eventを削除し、最後にincremental vacuumする。"""
         deleted_input = 0
@@ -70,6 +73,7 @@ class RetentionService:
             carried_counter_events=carried,
         )
 
+    # 容量逼迫時には通常の保存期間とは別に保護処理を実行する。
     def run_capacity_protection(
         self,
         *,

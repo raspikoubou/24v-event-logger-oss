@@ -33,6 +33,7 @@ class MaintenanceResult:
     integrity: IntegrityReport
 
 
+# 保存期間に沿った削除と空き容量不足時の保護を、独立した保守処理として実行する。
 def run_once(
     *,
     database_path: str | Path,
@@ -146,6 +147,7 @@ def main() -> None:
     )
 
 
+# 無制限保存と不正な日数指定を区別する。
 def _validate_retention_days(retention_days: int | None) -> None:
     """仕様で定義した保存期間だけを受け付ける。"""
     if retention_days is not None and retention_days not in RETENTION_CHOICES:

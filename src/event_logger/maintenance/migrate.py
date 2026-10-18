@@ -9,6 +9,7 @@ import os
 from event_logger.database.migrations import migrate_database
 
 
+# 通常起動とは別の明示的なCLI操作としてスキーマ変更を実行する。
 def main() -> None:
     """指定DBを明示的に最新schemaへ移行する。"""
     parser = argparse.ArgumentParser(description="event logger database migration")

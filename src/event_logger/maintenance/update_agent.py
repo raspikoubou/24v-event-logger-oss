@@ -26,6 +26,7 @@ MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 _VERSION_PATTERN = re.compile(r"[A-Za-z0-9_.-]+")
 
 
+# root側で受理する操作を限定し、Webから任意コマンドを実行させない。
 class UpdateAgent:
     """固定work directory内の検証済みassetだけをupdaterへ渡す。"""
 
@@ -92,6 +93,7 @@ class UpdateAgent:
                         # Web側のtimeout・切断はagentの待受継続を妨げない。
                         continue
 
+    # 更新要求を検証してからrootの管理領域で処理する。
     def _handle_connection(self, connection: socket.socket) -> dict[str, object]:
         """1接続のJSON依頼を検証してupdaterを起動する。"""
         staging: Path | None = None
@@ -179,6 +181,7 @@ class UpdateAgent:
             raise ValueError("本体の再起動を予約できませんでした。") from error
         return {"ok": True, "started": True}
 
+    # パスとバージョンの許容条件を確認する。
     def _validate_request(self, request: object) -> tuple[Path, Path, str]:
         """asset path、checksum path、versionの固定境界を検証する。"""
         if not isinstance(request, dict):
@@ -220,6 +223,7 @@ class UpdateAgent:
         ):
             raise ValueError("configured update helper is not root-owned")
 
+    # 一般ユーザーに差し替え可能なディレクトリを信頼しない。
     def _prepare_verified_dir(self) -> None:
         """service userから差し替えできないroot専用stagingを作る。"""
         for ancestor in (self._verified_dir, *self._verified_dir.parents):
@@ -241,6 +245,7 @@ class UpdateAgent:
         if directory_stat.st_uid != 0 or directory_stat.st_mode & 0o077:
             raise ValueError("verified update directory is not root-only")
 
+    # Webの保存領域にある配布物を、root管理領域へ複製してから検証する。
     def _stage_trusted_archive(
         self,
         archive: Path,
@@ -276,6 +281,7 @@ class UpdateAgent:
         if actual.lower() != expected.lower():
             raise ValueError("archive does not match trusted GitHub checksum")
 
+    # checksumもWebからの申告値ではなく信頼する公開Releaseから取得する。
     def _trusted_checksum(self, version: str, archive_name: str) -> str:
         """GitHub Releaseから対象archiveのchecksumを取得する。"""
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", self._repository):
@@ -403,6 +409,7 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+# ファイル差替えの競合を避けるため、開いたfdの実体を確認してコピーする。
 def _copy_update_archive(source: Path, destination: Path) -> None:
     """検証後の差替えを想定し、開いた通常fileだけを上限付きでコピーする。"""
     # Web userのstagingはpath検証後も書換え可能。最終pathのsymlinkを辿らず、

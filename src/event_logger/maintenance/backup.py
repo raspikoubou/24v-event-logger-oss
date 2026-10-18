@@ -10,6 +10,7 @@ from pathlib import Path
 from event_logger.database.backup import backup_database, integrity_check
 
 
+# 保守CLIから整合性のあるSQLiteバックアップを取得する。
 def main() -> None:
     """DBをbackupし、作成先のintegrityを確認する。"""
     parser = argparse.ArgumentParser(description="event logger database backup")

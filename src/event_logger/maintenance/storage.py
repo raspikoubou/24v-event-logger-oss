@@ -17,6 +17,7 @@ class StorageStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+# 容量判定に必要なディスク・DBサイズを一つの計測結果にまとめる。
 class StorageSnapshot:
     """ファイルシステムとDBの容量測定結果。"""
 
@@ -34,6 +35,7 @@ class StorageSnapshot:
         return self.free_bytes / self.total_bytes
 
 
+# 空き領域を監視し、保護処理を開始するか判定する。
 class StorageMonitor:
     """空き容量閾値を仕様固定値として判定する。"""
 
@@ -70,6 +72,7 @@ class StorageMonitor:
             status=status,
         )
 
+    # 空き領域の閾値を超えていないか確認する。
     def needs_capacity_protection(self, snapshot: StorageSnapshot) -> bool:
         """仕様のDB比率または空き容量閾値に達したか返す。"""
         database_ratio = (

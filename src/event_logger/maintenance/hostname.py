@@ -16,6 +16,7 @@ from event_logger.database.repositories import SettingsRepository
 _LOGGER = logging.getLogger(__name__)
 
 
+# 保存済みのhostnameをOS側へ反映し、設定値の検証を先に行う。
 def apply_hostname(database_path: str | Path) -> bool:
     """DBのhostname設定をhostnamectlへ渡し、変更したか返す。"""
     connection = connect_database(database_path)

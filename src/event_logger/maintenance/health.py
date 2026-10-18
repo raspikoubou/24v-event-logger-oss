@@ -22,6 +22,7 @@ class HealthCheckError(RuntimeError):
     """サービスが利用可能な状態でないことを表す。"""
 
 
+# DB接続とスキーマの状態を更新後の健全性確認に使う。
 def check_database_ready(database_path: str | Path) -> None:
     """SQLite schemaとintegrityが製品の利用条件を満たすか検査する。"""
     path = Path(database_path)
@@ -37,6 +38,7 @@ def check_database_ready(database_path: str | Path) -> None:
         )
 
 
+# loggerdのUnixソケットへ通信できるか独立して検査する。
 def check_control_ready(socket_path: str | Path) -> None:
     """loggerdのstatus応答と監視状態を検査する。"""
     try:
@@ -50,6 +52,7 @@ def check_control_ready(socket_path: str | Path) -> None:
         raise HealthCheckError(f"loggerd is not ready: status={logger_status!r}")
 
 
+# Webが実際にHTTP要求へ応答することを確認する。
 def check_http_ready(url: str) -> None:
     """認証前でも到達できるWeb endpointのHTTP応答を検査する。"""
     request = Request(url, headers={"User-Agent": "event-logger-health"})
@@ -67,6 +70,7 @@ def check_http_ready(url: str) -> None:
         raise HealthCheckError(f"Web health check returned HTTP {status}")
 
 
+# DB・daemon・Webそれぞれをチェックして部分的な起動を見分ける。
 def run_health_check(
     *,
     database_path: str | Path,

@@ -55,6 +55,7 @@ class ReleaseInfo:
     checksums: ReleaseAsset
 
 
+# GitHub Releaseのタグと配布物を確認し、更新候補を取得する。
 class GitHubReleaseClient:
     """許可したrepositoryのlatest Releaseだけを取得する。"""
 
@@ -65,6 +66,7 @@ class GitHubReleaseClient:
         self._repository = repository
         self._timeout = timeout
 
+    # 配布された最新版の情報を確認する。
     def latest(self) -> ReleaseInfo:
         """GitHub APIからdraft/prereleaseを除く最新Releaseを取得する。"""
         url = f"https://api.github.com/repos/{self._repository}/releases/latest"
@@ -133,6 +135,7 @@ def is_newer_version(current: str, latest: str) -> bool:
     return _version_key(latest) > _version_key(current)
 
 
+# 適用可能なバージョン・配布形式か検証する。
 def validate_update_candidate(
     installed_pyproject_path: str | os.PathLike[str],
     candidate_pyproject_path: str | os.PathLike[str],
@@ -181,6 +184,7 @@ def _project_version(pyproject_path: str | os.PathLike[str]) -> str:
     return version
 
 
+# ダウンロード後のアーカイブをchecksumで検証してから適用へ進む。
 def download_and_verify(
     release: ReleaseInfo,
     *,
@@ -224,6 +228,7 @@ def download_and_verify(
         raise
 
 
+# Web自体にroot権限を与えず専用agentへ適用を依頼する。
 def launch_updater(
     *,
     helper_path: str | os.PathLike[str],
@@ -279,6 +284,7 @@ def launch_updater(
     return attempt_id
 
 
+# 失敗時の配布ファイルを削除し、再試行での誤用を防ぐ。
 def discard_update_download(archive_path: Path, checksum_path: Path) -> bool:
     """当該downloadの2ファイルだけを回収する。実行中helperの元fileには使わない。"""
     staging = archive_path.parent
@@ -302,6 +308,7 @@ def discard_update_download(archive_path: Path, checksum_path: Path) -> bool:
     return True
 
 
+# 通信先とダウンロードサイズの制約を守る。
 def _download(url: str, destination: Path, timeout: float, *, max_bytes: int) -> None:
     """HTTPS assetを上限付きstreamとして保存する。"""
     request = Request(
@@ -343,6 +350,7 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+# 通信途絶時の適用結果不明を成功・失敗と即断しない。
 def _request_update_agent(
     socket_path: str | os.PathLike[str],
     *,
@@ -471,6 +479,7 @@ def _is_github_asset_url(url: str, repository: str) -> bool:
     )
 
 
+# 本製品が採用する限定的なバージョン表記のみ比較する。
 def _version_key(version: str) -> tuple[tuple[int, ...], int, int]:
     """本製品のnumeric release/alpha/beta/rc Versionを比較用へ変換する。
 
