@@ -25,10 +25,27 @@ def build_state_intervals(
 ) -> list[StateInterval]:
     """指定期間の確定状態を返す。
 
-    session間、入力無効区間、異常終了したsessionの最後の保存event以降は
-    UNKNOWNとする。前後の状態をつないで監視できなかった時間を補間しない。
+    session間、 入力無効区間、 異常終了したsessionの最後の保存event以降は
+    UNKNOWNとする。 前後の状態をつないで監視できなかった時間を補間しない。
     現在監視中のsessionだけは `active_session_id` として明示された場合に限り
     `end_ms` まで状態を延長する。
+
+    Args:
+        events: 入力event列。 event IDを保存順の基準とし、 EDGEとSNAPSHOTを区別する。
+        sessions: 監視session列。 異なるsessionをまたぐ状態継続を作らない。
+        channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+        start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+        end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+        active_session_id: 現在監視中session ID。
+            明示されたsessionだけ現在時刻まで延長する。
+        end_mono_ns: active session終端のmonotonic timestamp（ns）。
+
+    Returns:
+        時間順に並んだ状態区間。 未観測期間はUNKNOWNとして含み、
+            未確定時間を補間しない。
+
+    Raises:
+        ValueError: channel_idが1〜6の範囲外の場合。 期間開始が終了未満でない場合。
     """
     if not 1 <= channel_id <= 6:
         raise ValueError("channel_id must be between 1 and 6")
@@ -82,7 +99,19 @@ def total_duration_ms(
     *,
     state: DisplayState,
 ) -> int:
-    """指定状態の確定区間だけを合計する。UNKNOWNは加算しない。"""
+    """指定状態の確定区間だけを合計する。UNKNOWNは加算しない。
+
+    Args:
+        intervals: 状態区間列。 UNKNOWNは確定ON/OFF継続時間へ加算しない。
+        state: 判定・集計するON/OFF表示状態。
+
+    Returns:
+        経過時間または継続時間（ms）。 UNKNOWNは確定時間に含めない。
+
+    Raises:
+        ValueError: 「UNKNOWN duration is not a confirmed ON/OFF
+            duration」に該当すると判定した場合。
+    """
     if state == "UNKNOWN":
         raise ValueError("UNKNOWN duration is not a confirmed ON/OFF duration")
     return sum(
@@ -101,7 +130,18 @@ def _known_session_end(
     end_ms: int,
     active_session_id: int | None,
 ) -> int:
-    """sessionの状態を確定できるwall clock上の終端を返す。"""
+    """sessionの状態を確定できるwall clock上の終端を返す。
+
+    Args:
+        session: 監視区間を表すSession値。 イベント補間と状態区間の境界に使う。
+        session_events: 単一sessionに属する入力event群。 event ID順で解釈する。
+        end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+        active_session_id: 現在監視中session ID。
+            明示されたsessionだけ現在時刻まで延長する。
+
+    Returns:
+        条件に従って算出した整数値。
+    """
     if session.id == active_session_id:
         return end_ms
     if session.ended_at_ms is not None:
@@ -125,7 +165,19 @@ def _build_session_intervals(
     end_ms: int,
     end_mono_ns: int | None,
 ) -> list[StateInterval]:
-    """1 session内のON/OFF区間を作る。"""
+    """1 session内のON/OFF区間を作る。
+
+    Args:
+        session_events: 単一sessionに属する入力event群。 event ID順で解釈する。
+        session: 監視区間を表すSession値。 イベント補間と状態区間の境界に使う。
+        start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+        end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+        end_mono_ns: active session終端のmonotonic timestamp（ns）。
+
+    Returns:
+        時間順に並んだ状態区間。 未観測期間はUNKNOWNとして含み、
+            未確定時間を補間しない。
+    """
     state: DisplayState | None = None
     cursor_ms = start_ms
     state_started_mono_ns: int | None = None
@@ -241,7 +293,16 @@ def _monotonic_duration_ms(
     *,
     fallback_ms: int,
 ) -> int:
-    """同一session内の状態継続時間をmonotonic優先で求める。"""
+    """同一session内の状態継続時間をmonotonic優先で求める。
+
+    Args:
+        start_ns: 計測区間の開始monotonic timestamp（ns）。
+        end_ns: 計測区間の終端monotonic timestamp（ns）。
+        fallback_ms: monotonic時刻を使えない場合のwall-clock経過時間（ms）。
+
+    Returns:
+        経過時間または継続時間（ms）。 UNKNOWNは確定時間に含めない。
+    """
     if start_ns is None or end_ns < start_ns:
         return fallback_ms
     return max(0, (end_ns - start_ns) // 1_000_000)
@@ -253,7 +314,16 @@ def _duration_with_monotonic(
     *,
     fallback_ms: int,
 ) -> int:
-    """monotonic値が実時間として妥当な場合だけ区間へ適用する。"""
+    """monotonic値が実時間として妥当な場合だけ区間へ適用する。
+
+    Args:
+        start_ns: 計測区間の開始monotonic timestamp（ns）。
+        end_ns: 計測区間の終端monotonic timestamp（ns）。
+        fallback_ms: monotonic時刻を使えない場合のwall-clock経過時間（ms）。
+
+    Returns:
+        経過時間または継続時間（ms）。 UNKNOWNは確定時間に含めない。
+    """
     if start_ns is None or end_ns < start_ns:
         return fallback_ms
     monotonic_ms = _monotonic_duration_ms(
@@ -279,7 +349,18 @@ def _fill_unknown_gaps(
     start_ms: int,
     end_ms: int,
 ) -> list[StateInterval]:
-    """確定区間の間をUNKNOWNで埋め、隣接同状態をまとめる。"""
+    """確定区間の間をUNKNOWNで埋め、隣接同状態をまとめる。
+
+    Args:
+        intervals: 状態区間列。 UNKNOWNは確定ON/OFF継続時間へ加算しない。
+        channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+        start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+        end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+
+    Returns:
+        時間順に並んだ状態区間。 未観測期間はUNKNOWNとして含み、
+            未確定時間を補間しない。
+    """
     result: list[StateInterval] = []
     cursor_ms = start_ms
     for interval in sorted(intervals, key=lambda item: (item.start_ms, item.end_ms)):
@@ -321,7 +402,16 @@ def _fill_unknown_gaps(
 
 
 def _append_interval(intervals: list[StateInterval], interval: StateInterval) -> None:
-    """同じ状態の隣接区間を結合する。"""
+    """同じ状態の隣接区間を結合する。
+
+    Args:
+        intervals: 状態区間列。 UNKNOWNは確定ON/OFF継続時間へ加算しない。
+        interval: 新たに追加するStateInterval。 末尾区間と連続する場合は結合候補にする。
+
+    Returns:
+        None。 同状態かつ同sessionの隣接区間なら末尾を結合し、
+            それ以外は新しい区間を末尾へ追加する。
+    """
     if intervals:
         previous = intervals[-1]
         if (
@@ -345,7 +435,15 @@ def _merged_duration(
     previous: StateInterval,
     current: StateInterval,
 ) -> int | None:
-    """隣接区間を結合したときのmonotonic durationを合算する。"""
+    """隣接区間を結合したときのmonotonic durationを合算する。
+
+    Args:
+        previous: 結合前の先行StateInterval。 duration_msがNoneなら合計も不明になる。
+        current: 結合する後続StateInterval。 duration_msがNoneなら合計も不明になる。
+
+    Returns:
+        int | None。 該当rowまたは有効値がない場合はNone。
+    """
     if previous.duration_ms is None or current.duration_ms is None:
         return None
     return previous.duration_ms + current.duration_ms

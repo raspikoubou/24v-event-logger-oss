@@ -30,7 +30,14 @@ from event_logger.web.csv_export import generate_csv
 def test_download_uses_the_confirmed_asset_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """同名の再アップロード先へ切り替わらず、固有IDから本体とchecksumを取る。"""
+    """同名の再アップロード先へ切り替わらず、固有IDから本体とchecksumを取る。
+
+    Args:
+        tmp_path: pytestが用意するテスト専用一時directory。
+        monkeypatch: pytestが提供する一時的な属性・環境差し替えfixture。
+
+    Returns:
+        なし。呼出元は副作用の完了をもって処理結果を扱う。"""
     body = b"confirmed release"
     payload = {
         "tag_name": "v1.0.2",
@@ -63,6 +70,17 @@ def test_download_uses_the_confirmed_asset_id(
         headers: dict[str, str] = {}
 
     def open_response(request: Request, **_kwargs: object) -> Response:
+        """open_responseの役割を説明する。
+
+            Args:
+                request: WSGI/HTTP request、または制御clientへ送る要求。
+                **_kwargs: urllib openerが渡す任意keyword arguments。
+                    fixtureでは使わず無視する。
+
+            Returns:
+                次の固定response bodyを包んだHTTP Response。
+                    responses枯渇時はStopIteration。
+        """
         requests.append(request)
         response = Response(next(responses))
         return response
@@ -85,7 +103,14 @@ def test_download_uses_the_confirmed_asset_id(
 def test_counter_dashboard_does_not_materialize_event_rows(
     mode: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """カウンタだけなら件数に関係なくCOUNTで集計し、履歴行を読まない。"""
+    """カウンタだけなら件数に関係なくCOUNTで集計し、履歴行を読まない。
+
+    Args:
+        mode: 検査や表示の動作を選ぶmode値。
+        monkeypatch: pytestが提供する一時的な属性・環境差し替えfixture。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     app = create_app(
         {
             "TESTING": True,
@@ -129,6 +154,15 @@ def test_counter_dashboard_does_not_materialize_event_rows(
         )
 
     def reject_rows(*_args: object, **_kwargs: object) -> None:
+        """reject_rowsの役割を説明する。
+
+    Args:
+        *_args: list_betweenへ渡される検索引数。
+            呼び出し禁止を検出するため値を参照しない。
+        **_kwargs: urllib openerが渡す任意keyword arguments。fixtureでは使わず無視する。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
         raise AssertionError("counter must not read event rows")
 
     monkeypatch.setattr(EventRepository, "list_between", reject_rows)
@@ -147,13 +181,26 @@ def test_counter_dashboard_does_not_materialize_event_rows(
     ],
 )
 def test_log_numeric_bounds_return_400(path: str, query: str) -> None:
-    """不正な巨大数はSQL bindingやCSV streamへ届く前に拒否する。"""
+    """不正な巨大数はSQL bindingやCSV streamへ届く前に拒否する。
+
+    Args:
+        path: 読み書きするfileのpath。呼出元で認可・配置を限定した値。
+        query: 検証する検索文字列またはrequest query値。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     app = create_app({"TESTING": True, "DEMO": True})
     assert app.test_client().get(f"{path}?{query}").status_code == 400
 
 
 def test_widget_sort_order_outside_sqlite_range_returns_400() -> None:
-    """JSON整数がPythonで表せても、SQLiteの範囲外なら保存しない。"""
+    """JSON整数がPythonで表せても、SQLiteの範囲外なら保存しない。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     app = create_app({"TESTING": True, "CSRF_ENABLED": False})
     response = app.test_client().post(
         "/api/widgets",
@@ -171,7 +218,13 @@ def test_widget_sort_order_outside_sqlite_range_returns_400() -> None:
     "name", ["=1+1", "+123", "-123", "@text", "  =1+1", "\ttext", "\r=1+1"]
 )
 def test_csv_names_are_exported_as_text(name: str) -> None:
-    """入力名とルール名の両方を保護し、保存値や列構成は変えない。"""
+    """入力名とルール名の両方を保護し、保存値や列構成は変えない。
+
+    Args:
+        name: 項目名、選択肢名、または表示用の文字列。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     event = LogRecord(
         id=1,
         record_type="input",
@@ -204,7 +257,14 @@ def test_csv_names_are_exported_as_text(name: str) -> None:
 
 
 def _release() -> ReleaseInfo:
-    """外部通信しない更新確認用Releaseを返す。"""
+    """外部通信しない更新確認用Releaseを返す。
+
+        Args:
+            なし。
+
+        Returns:
+            外部通信を行わないReleaseInfo fixture。指定versionとasset metadataを持つ。
+    """
     return ReleaseInfo(
         "v1.0.2",
         "1.0.2",
@@ -219,7 +279,14 @@ def _release() -> ReleaseInfo:
 def test_update_rejects_a_changed_confirmation(
     changed_field: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """版だけでなく同じ版のasset情報が変わっても再確認させる。"""
+    """版だけでなく同じ版のasset情報が変わっても再確認させる。
+
+    Args:
+        changed_field: 確認済み更新内容から変化させるfield名。
+        monkeypatch: pytestが提供する一時的な属性・環境差し替えfixture。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     release = _release()
     latest = Mock(return_value=release)
     monkeypatch.setattr(
@@ -268,7 +335,14 @@ def test_update_rejects_a_changed_confirmation(
 def test_update_unknown_acknowledgement_keeps_monitoring(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """送信後の応答消失は開始失敗と断定せず、直前結果を除外して監視する。"""
+    """送信後の応答消失は開始失敗と断定せず、直前結果を除外して監視する。
+
+    Args:
+        tmp_path: pytestが用意するテスト専用一時directory。
+        monkeypatch: pytestが提供する一時的な属性・環境差し替えfixture。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     release = _release()
     monkeypatch.setattr(
         "event_logger.web.routes_updates.GitHubReleaseClient.latest", lambda _: release

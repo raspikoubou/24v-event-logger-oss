@@ -15,6 +15,9 @@ PYTHON_BIN="${EVENT_LOGGER_PYTHON:-python3}"
 WHEELHOUSE="${EVENT_LOGGER_WHEELHOUSE:-}"
 CONTROL_SOCKET_PATH="${EVENT_LOGGER_SOCKET:-/run/event-logger/control.sock}"
 
+# 引数: 1個以上の診断文。標準エラーへprefix付きで出力する。
+# 戻り値: 戻らない。status 1でscriptを終了し、EXIT trapにcleanup/rollbackを委ねる。
+# 副作用: 標準エラー出力とprocess終了。
 die() {
   printf 'event-logger install: %s\n' "$*" >&2
   exit 1
@@ -127,6 +130,9 @@ for unit in "${PRODUCT_UNITS[@]}"; do
   fi
 done
 
+# 引数: なし。PRODUCT_UNITSのうちsystemdへ登録済みのunitを対象にする。
+# 戻り値: 全stopが成功すれば0、systemctl失敗はset -e経由でscriptへ伝播する。
+# 副作用: SERVICES_STOPPEDを先に立て、登録済み製品unitを停止する。
 stop_product_services() {
   local unit
   SERVICES_STOPPED=1
@@ -137,6 +143,9 @@ stop_product_services() {
   done
 }
 
+# 引数: なし。PRODUCT_UNITSと起動前に保存したactive/enabled状態を使う。
+# 戻り値: 復元処理に1つでも失敗があれば1、全て成功なら0。
+# 副作用: unitごとにenable/disableとstart/stopを実行する。
 restore_product_services() {
   local unit
   local failed=0
@@ -159,6 +168,9 @@ restore_product_services() {
   return "$failed"
 }
 
+# 引数: なし。保存済みunit snapshotとPREVIOUS_OVERRIDE_EXISTSを使う。
+# 戻り値: 全file復元とdaemon-reload成功で0、途中のfile操作失敗で1。
+# 副作用: /etc/systemd/systemのunitを復元または削除し、systemd managerをreloadする。
 restore_product_units() {
   local unit
   for unit in "${PRODUCT_UNITS[@]}"; do
@@ -171,6 +183,9 @@ restore_product_units() {
   systemctl daemon-reload
 }
 
+# 引数: なし。EXIT trapが設定した直前statusとinstall状態flagを参照する。
+# 戻り値: install本体の終了statusを返す。
+# 副作用: rollback条件に応じservice停止、link/DB/unit復旧、temporary file削除を行う。
 cleanup_install() {
   local exit_status=$?
   local rollback_failed=0

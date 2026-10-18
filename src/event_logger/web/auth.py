@@ -13,7 +13,14 @@ class SharedPasswordAuth:
     """ユーザー管理を持たない共有パスワード認証。"""
 
     def __init__(self, *, enabled: bool, password_hash: str | None) -> None:
-        """認証有効状態とscrypt hashを受け取る。"""
+        """認証有効状態とscrypt hashを受け取る。
+
+Args:
+    enabled: 共有パスワード保護を有効にするかを表す真偽値。
+    password_hash: scrypt形式の保存済みパスワードhash。認証設定の比較・検証に使う。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
         self._lock = RLock()
         self._enabled = enabled
         self._password_hash = password_hash
@@ -25,12 +32,26 @@ class SharedPasswordAuth:
 
     @property
     def enabled(self) -> bool:
-        """現在の認証有効状態をthread-safeに返す。"""
+        """現在の認証有効状態をthread-safeに返す。
+
+Args:
+    なし。
+
+Returns:
+    判定結果。条件を満たす場合はTrueを返し、
+        満たさない場合はFalse（または注釈に示すNone）を返す。"""
         with self._lock:
             return self._enabled
 
     def verify(self, password: str) -> bool:
-        """入力パスワードを保存済みhashと比較する。"""
+        """入力パスワードを保存済みhashと比較する。
+
+Args:
+    password: 照合または保存対象の共有パスワード。平文をログや応答へ含めない。
+
+Returns:
+    判定結果。条件を満たす場合はTrueを返し、
+        満たさない場合はFalse（または注釈に示すNone）を返す。"""
         with self._lock:
             enabled = self._enabled
             password_hash = self._password_hash
@@ -39,7 +60,15 @@ class SharedPasswordAuth:
         return verify_password(password, password_hash)
 
     def authenticate(self, password: str) -> str | None:
-        """照合した認証設定に対応するCookie用世代を返す。"""
+        """照合した認証設定に対応するCookie用世代を返す。
+
+            Args:
+                password: 照合または保存対象の共有パスワード。
+                    平文をログや応答へ含めない。
+
+            Returns:
+                現在設定のgeneration文字列。password不一致または認証無効ならNone。
+        """
         # 照合後に別threadでpasswordが変わっても、新しい世代を旧passwordへ
         # 発行しないよう、照合と世代取得を同じlock内で完結させる。
         with self._lock:
@@ -52,7 +81,15 @@ class SharedPasswordAuth:
             return self._session_generation
 
     def accepts_session(self, generation: object) -> bool:
-        """現在の共有認証に対応するログインだけを受け付ける。"""
+        """現在の共有認証に対応するログインだけを受け付ける。
+
+Args:
+    generation: sessionから読んだauth generation。
+        現在有効なgeneration文字列との一致を確認する。
+
+Returns:
+    判定結果。条件を満たす場合はTrueを返し、
+        満たさない場合はFalse（または注釈に示すNone）を返す。"""
         with self._lock:
             return not self._enabled or (
                 isinstance(generation, str)
@@ -61,7 +98,14 @@ class SharedPasswordAuth:
             )
 
     def configure(self, *, enabled: bool, password_hash: str | None) -> None:
-        """設定画面から共有認証の有効状態を更新する。"""
+        """設定画面から共有認証の有効状態を更新する。
+
+Args:
+    enabled: 共有パスワード保護を有効にするかを表す真偽値。
+    password_hash: scrypt形式の保存済みパスワードhash。認証設定の比較・検証に使う。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
         if enabled and not password_hash:
             raise ValueError("password_hash is required when auth is enabled")
         with self._lock:
@@ -73,7 +117,15 @@ class SharedPasswordAuth:
 
 
 def hash_password(password: str) -> str:
-    """scryptで共有パスワードをhash化し、設定保存用文字列を返す。"""
+    """scryptで共有パスワードをhash化し、設定保存用文字列を返す。
+
+        Args:
+            password: 照合または保存対象の共有パスワード。平文をログや応答へ含めない。
+
+        Returns:
+            scrypt形式の保存用文字列。random salt、固定cost parameters、
+                Base64化したsalt/digestを含む。
+    """
     if not password:
         raise ValueError("password must not be empty")
     salt = secrets.token_bytes(16)
@@ -91,7 +143,15 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, encoded: str) -> bool:
-    """scrypt形式を検証し、不正形式はFalseとして扱う。"""
+    """scrypt形式を検証し、不正形式はFalseとして扱う。
+
+Args:
+    password: 照合または保存対象の共有パスワード。平文をログや応答へ含めない。
+    encoded: 保存形式のscrypt password hash文字列。
+
+Returns:
+    判定結果。条件を満たす場合はTrueを返し、
+        満たさない場合はFalse（または注釈に示すNone）を返す。"""
     try:
         algorithm, n_text, r_text, p_text, salt_text, digest_text = encoded.split("$")
         if algorithm != "scrypt":

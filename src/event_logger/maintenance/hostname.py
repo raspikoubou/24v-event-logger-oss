@@ -17,7 +17,18 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def apply_hostname(database_path: str | Path) -> bool:
-    """DBのhostname設定をhostnamectlへ渡し、変更したか返す。"""
+    """DBのhostname設定をhostnamectlへ渡し、変更したか返す。
+
+    Args:
+        database_path: SQLite databaseのfilesystem path。
+
+    Returns:
+        OS hostnameを変更した場合True。保存値が現在値と同じならFalse。
+
+    Raises:
+        ValueError: 引数の形式・範囲が仕様外、または現在
+            の状態では要求を適用できない場合。
+    """
     connection = connect_database(database_path)
     try:
         initialize_connection(connection)
@@ -47,7 +58,14 @@ def apply_hostname(database_path: str | Path) -> bool:
 
 
 def main() -> None:
-    """指定DBのhostnameをOSへ反映する。"""
+    """指定DBのhostnameをOSへ反映する。
+
+    Args:
+        なし。
+
+    Returns:
+        None。
+    """
     parser = argparse.ArgumentParser(description="apply event logger hostname")
     parser.add_argument(
         "--database",

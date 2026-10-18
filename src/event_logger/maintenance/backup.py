@@ -11,7 +11,19 @@ from event_logger.database.backup import backup_database, integrity_check
 
 
 def main() -> None:
-    """DBをbackupし、作成先のintegrityを確認する。"""
+    """DBをbackupし、作成先のintegrityを確認する。
+
+    Args:
+        なし。
+
+    Returns:
+        None。
+
+    Raises:
+        RuntimeError: 必要なservice、owner
+            、writerなどの状態が成立していない場合、または
+            副作用処理に失敗した場合。
+    """
     parser = argparse.ArgumentParser(description="event logger database backup")
     parser.add_argument(
         "--database",

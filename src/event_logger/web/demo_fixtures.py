@@ -22,7 +22,14 @@ if TYPE_CHECKING:
 
 
 def _seed_demo_data(context: WebContext) -> None:
-    """固定fixtureを一度だけ投入する。"""
+    """固定fixtureを一度だけ投入する。
+
+Args:
+    context: 現在のWebContext。関数が使うRepository、Clock、
+        設定値や制御clientを所有する。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     if context.events.count_all() == 0:
         base_ms = context.clock.now_utc_ms() - 8 * 60 * 60 * 1000
         session = context.sessions.create(

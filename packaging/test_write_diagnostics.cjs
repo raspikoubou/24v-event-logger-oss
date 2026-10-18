@@ -15,17 +15,27 @@ for (const id of ['unsynchronized-warning', 'write-latency-warning', 'configurat
 for (const id of ['storage-warning-banner', 'diagnostic-warning-count']) assert.ok(!template.includes(`id="${id}"`));
 assert.ok(!template.includes('class="banner banner--warning"'));
 const nodes = new Map();
+/**
+ * 指定keyのDOM mockを遅延生成し、warning描画結果をテストから読み取れるようにする。
+ * @param {string} key selectorまたはselector由来のnode key。
+ * @returns {Object} hidden/textContent/classList/querySelectorを持つmock node。
+ */
 function node(key) {
-  if (!nodes.has(key)) nodes.set(key, {hidden: false, textContent: '', classList: {toggle() {}}, querySelector(s) {return node(key + s);}});
+  if (!nodes.has(key)) nodes.set(key, {hidden: false, textContent: '', classList: {/** @param {string} _name class名。 @param {boolean} _enabled 切替状態。 @returns {void} class変更を省略するDOM mock。 */ toggle() {}}, /** @param {string} s 子要素selector。 @returns {Object} keyを連結した子mock node。 */ querySelector(s) {return node(key + s);}});
   return nodes.get(key);
 }
 const fixtures = {unsynchronizedCount: 0, writeLatency: {severity: 'normal', warning: false, delayed_count_5m: 7, max_delay_ms_5m: 2702, oldest_pending_ms: 0}};
 let storage = {visible: false, title: '', severity: 'normal'};
 const context = {document: {querySelector: node}, fixtures, liveMode: true, activeView: 'diagnostics',
-  storageWarningFor: () => storage, storageWarningMessage: () => '容量を確認してください',
-  formatMilliseconds: v => Number(v).toFixed(1)};
+  /** @returns {Object} 個別テストで差し替えるstorage warning fixture。 */ storageWarningFor: () => storage, /** @returns {string} 表示用の固定容量注意文。 */ storageWarningMessage: () => '容量を確認してください',
+  /** @param {number} v 時間値（ミリ秒）。 @returns {string} 小数1桁の表示値。 */ formatMilliseconds: v => Number(v).toFixed(1)};
 vm.createContext(context);
 vm.runInContext(source.slice(start, end), context);
+/**
+ * 指定画面をactive viewにしてwarning描画関数を実行する。
+ * @param {string} view 表示中として扱う画面名。
+ * @returns {void} mock nodeのhidden/textContentを更新する。
+ */
 function render(view) {
   context.activeView = view;
   vm.runInContext('renderUnsynchronizedWarnings();', context);

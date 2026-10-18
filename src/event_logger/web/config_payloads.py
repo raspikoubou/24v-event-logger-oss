@@ -21,7 +21,16 @@ if TYPE_CHECKING:
 
 
 def _json_int(value: object, field_name: str) -> int:
-    """JSON payloadの整数を検証する。boolを整数として受理しない。"""
+    """JSON payloadの整数を検証する。boolを整数として受理しない。
+
+        Args:
+            value: JSON objectの指定fieldから読み取った未変換値。
+                boolをintegerに混同せず型検証する。
+            field_name: 検証エラーに示すJSON field名。
+
+        Returns:
+            boolを除くJSON integer。欠落、別型、SQLite signed 64-bit範囲外はValueError。
+    """
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{field_name} must be an integer")
     if not -(2**63) <= value < 2**63:
@@ -30,14 +39,32 @@ def _json_int(value: object, field_name: str) -> int:
 
 
 def _json_bool(value: object, field_name: str) -> bool:
-    """JSON booleanを検証する。0/1や文字列を暗黙変換しない。"""
+    """JSON booleanを検証する。0/1や文字列を暗黙変換しない。
+
+Args:
+    value: JSON objectの指定fieldから読み取った未変換値。
+        boolをintegerに混同せず型検証する。
+    field_name: 検証エラーに示すJSON field名。
+
+Returns:
+    判定結果。条件を満たす場合はTrueを返し、
+        満たさない場合はFalse（または注釈に示すNone）を返す。"""
     if not isinstance(value, bool):
         raise ValueError(f"{field_name} must be a boolean")
     return value
 
 
 def _json_text(value: object, field_name: str) -> str:
-    """JSON文字列を設定Repositoryへ渡す。"""
+    """JSON文字列を設定Repositoryへ渡す。
+
+        Args:
+            value: JSON objectの指定fieldから読み取った未変換値。
+                boolをintegerに混同せず型検証する。
+            field_name: 検証エラーに示すJSON field名。
+
+        Returns:
+            fieldの文字数・型制限を満たすstr。入力がstr以外または制限外ならValueError。
+    """
     if not isinstance(value, str):
         raise ValueError(f"{field_name} must be a string")
     return value
@@ -50,7 +77,20 @@ def _build_output_rule(
     *,
     exclude_rule_id: int | None = None,
 ) -> OutputRule:
-    """HTTP payloadを固定ルールDomainへ変換する。"""
+    """HTTP payloadを固定ルールDomainへ変換する。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            payload: HTTP JSON bodyまたは保存対象の設定値。
+                呼出元で形式を検証している場合はその検証済み値。
+            rule_id: 対象条件出力ルールの永続ID。
+            exclude_rule_id: 重複検査時に自分自身として除外するrule ID。
+
+        Returns:
+            検証済みのOutputRule Domain object。
+                種別固有条件やOUT owner競合はValueError。
+    """
     name = _json_text(payload.get("name"), "name")
     input_channel = _json_int(payload.get("input_channel"), "input_channel")
     output_channel = _json_int(payload.get("output_channel"), "output_channel")
@@ -119,7 +159,20 @@ def _build_widget(
     widget_id: str | None,
     base: Widget | None = None,
 ) -> Widget:
-    """HTTP payloadを固定widget Domainへ変換する。"""
+    """HTTP payloadを固定widget Domainへ変換する。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            payload: HTTP JSON bodyまたは保存対象の設定値。
+                呼出元で形式を検証している場合はその検証済み値。
+            widget_id: 対象Dashboard widgetの永続ID。
+            base: 更新時に既存値として継承するwidget設定。
+
+        Returns:
+            検証済みのWidget Domain object。widget typeごとの必須config、表示順、
+                期間境界を反映する。
+    """
     raw_type = payload.get("type", base.widget_type.value if base else None)
     widget_type_text = _json_text(raw_type, "type")
     try:
@@ -185,7 +238,15 @@ def _build_widget(
 
 
 def _counter_definition_changed(before: Widget, after: Widget) -> bool:
-    """reset counterの対象条件が変わったか返す。"""
+    """reset counterの対象条件が変わったか返す。
+
+Args:
+    before: 変更前の値。
+    after: 変更後の値。
+
+Returns:
+    判定結果。条件を満たす場合はTrueを返し、
+        満たさない場合はFalse（または注釈に示すNone）を返す。"""
     if before.widget_type is not WidgetType.EVENT_COUNT:
         return after.widget_type is WidgetType.EVENT_COUNT
     before_mode = before.config.get("count_mode", "period")
@@ -200,7 +261,15 @@ def _counter_definition_changed(before: Widget, after: Widget) -> bool:
 
 
 def _output_rule_payload(rule: OutputRule) -> dict[str, Any]:
-    """OutputRuleを内部Web responseへ変換する。"""
+    """OutputRuleを内部Web responseへ変換する。
+
+        Args:
+            rule: 保存または応答へ変換する条件出力ルール。
+
+        Returns:
+            rule ID/nameと固定condition fieldを含むJSON対応dict。
+                DB internal objectは漏らさない。
+    """
     return {
         "id": rule.id,
         "name": rule.name,
@@ -215,7 +284,14 @@ def _output_rule_payload(rule: OutputRule) -> dict[str, Any]:
 
 
 def _widget_payload(widget: Widget) -> dict[str, Any]:
-    """WidgetをJSON responseへ変換する。"""
+    """WidgetをJSON responseへ変換する。
+
+        Args:
+            widget: 対象のDashboard widget設定。
+
+        Returns:
+            widget ID/title/type/config/size/sort_order/enabledを含むAPI response dict。
+    """
     return {
         "id": widget.id,
         "type": widget.widget_type.value,

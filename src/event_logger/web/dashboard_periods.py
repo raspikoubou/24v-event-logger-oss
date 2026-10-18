@@ -19,7 +19,18 @@ def _dashboard_range_ms(
     timezone_name: str,
     period: str,
 ) -> tuple[int, int]:
-    """Dashboardの固定・暦期間をUTC millisecond境界へ変換する。"""
+    """Dashboardの固定・暦期間をUTC millisecond境界へ変換する。
+
+        Args:
+            clock: 期間境界とする現在時刻を得るClock。
+            timezone_name: ローカル日時解釈・表示に使うIANA timezone名。
+            period: 1h/8h/24h/7d/30dまたはtoday/yesterday/this_weekのperiod key。
+
+        Returns:
+            期間の半開境界(start_ms, end_ms)。固定期間は現在時刻基準、
+                暦期間はtimezoneの現地日付境界からUTC millisecondへ変換する。
+                    不明period/timezoneはValueError。
+    """
     now_ms = clock.now_utc_ms()
     if period in WIDGET_PERIOD_DURATIONS_MS:
         return now_ms - WIDGET_PERIOD_DURATIONS_MS[period], now_ms
@@ -51,8 +62,17 @@ def _fixed_widget_calendar_ranges(
 ) -> dict[str, tuple[int, int]]:
     """固定期間widgetの暦境界をtimezoneを持つWeb層で解決する。
 
-    DomainはFlaskやtimezone設定を参照しないため、暦期間だけはWeb adapterで
-    UTC境界へ変換してから評価関数へ渡す。
+        DomainはFlaskやtimezone設定を参照しないため、暦期間だけはWeb adapterで
+            UTC境界へ変換してから評価関数へ渡す。
+
+        Args:
+            widgets: Dashboard計算対象となるwidget設定の順序付き集合。
+            clock: 現在時刻と単調時刻を供給するClock。期間境界の基準に使う。
+            timezone_name: 日時表示・暦境界計算に使うIANA timezone名。
+
+        Returns:
+            暦期間widget IDからUTC半開範囲(start_ms, end_ms)へのmapping。
+                固定暦期間以外は含めない。
     """
     calendar_periods = {"today", "yesterday", "this_week"}
     ranges: dict[str, tuple[int, int]] = {}

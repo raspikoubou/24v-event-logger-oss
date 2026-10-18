@@ -43,6 +43,16 @@ class UpdateAgent:
         `repository`はroot service側の環境設定からだけ受け取り、Web userが
         socket依頼で変更できない。root agent自身がGitHubのchecksumを再取得し、
         service userが置いたchecksumファイルを信頼しない境界を作る。
+
+        Args:
+            socket_path: 接続先またはlistenするUnix socket path。
+            helper_path: 起動を許可する固定updater helper path。
+            work_dir: assetを配置してよい作業directory。
+            repository: この処理が利用する保存・照会Repository。
+            verified_dir: root所有でservice userが書換できないstaging directory。
+
+        Returns:
+            None。
         """
         self._socket_path = Path(socket_path)
         self._helper_path = Path(helper_path)
@@ -63,7 +73,17 @@ class UpdateAgent:
         self._process: subprocess.Popen[bytes] | None = None
 
     def serve_forever(self) -> None:
-        """Unix socketをroot serviceとして待ち受ける。"""
+        """Unix socketをroot serviceとして待ち受ける。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
+
+        Raises:
+            FileExistsError: 同じpathに許可されない既存file/socketがある場合。
+        """
         self._work_dir.mkdir(mode=0o750, parents=True, exist_ok=True)
         self._prepare_verified_dir()
         if self._socket_path.exists():
@@ -93,7 +113,18 @@ class UpdateAgent:
                         continue
 
     def _handle_connection(self, connection: socket.socket) -> dict[str, object]:
-        """1接続のJSON依頼を検証してupdaterを起動する。"""
+        """1接続のJSON依頼を検証してupdaterを起動する。
+
+        Args:
+            connection: この関数が使うSQLite connection。
+
+        Returns:
+            クライアントへ返すagent応答mapping。更新要求の受理状態または拒否理由を含む。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         staging: Path | None = None
         try:
             request = _read_request(connection)
@@ -148,7 +179,18 @@ class UpdateAgent:
             return {"ok": False, "message": str(error)}
 
     def _schedule_reboot(self) -> dict[str, object]:
-        """更新と排他し、応答を返した後にsystemdへ通常の本体再起動を依頼する。"""
+        """更新と排他し、応答を返した後にsystemdへ通常の本体再起動を依頼する。
+
+        Args:
+            なし。
+
+        Returns:
+            クライアントへ返すagent応答mapping。更新要求の受理状態または拒否理由を含む。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         if self._process is not None and self._process.poll() is None:
             raise ValueError("更新中は再起動できません。完了までお待ちください。")
         try:
@@ -180,7 +222,18 @@ class UpdateAgent:
         return {"ok": True, "started": True}
 
     def _validate_request(self, request: object) -> tuple[Path, Path, str]:
-        """asset path、checksum path、versionの固定境界を検証する。"""
+        """asset path、checksum path、versionの固定境界を検証する。
+
+        Args:
+            request: 検証済みのloggerd制御要求。
+
+        Returns:
+            検証済みarchive、checksumのPathとversion文字列のtuple。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         if not isinstance(request, dict):
             raise ValueError("update request must be an object")
         if set(request) != {"archive", "checksum", "version"}:
@@ -209,7 +262,18 @@ class UpdateAgent:
         return archive, checksum, version
 
     def _validate_helper(self) -> None:
-        """root helperが差し替え可能な権限でないことを検証する。"""
+        """root helperが差し替え可能な権限でないことを検証する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         if not self._helper_path.is_file() or not os.access(self._helper_path, os.X_OK):
             raise ValueError("configured update helper is not executable")
         helper_stat = self._helper_path.stat()
@@ -221,7 +285,18 @@ class UpdateAgent:
             raise ValueError("configured update helper is not root-owned")
 
     def _prepare_verified_dir(self) -> None:
-        """service userから差し替えできないroot専用stagingを作る。"""
+        """service userから差し替えできないroot専用stagingを作る。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         for ancestor in (self._verified_dir, *self._verified_dir.parents):
             if ancestor.is_symlink():
                 raise ValueError("verified update directory must not contain symlinks")
@@ -246,7 +321,19 @@ class UpdateAgent:
         archive: Path,
         version: str,
     ) -> tuple[Path, Path, Path]:
-        """archiveをroot-ownedへコピーしてからtrusted checksumを照合する。"""
+        """archiveをroot-ownedへコピーしてからtrusted checksumを照合する。
+
+        Args:
+            archive: trusted checksumと照合するrelease archive file。
+            version: update対象releaseのversion文字列。
+
+        Returns:
+            root専用領域へstagingしたarchive、checksum、pathのtuple。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         self._prepare_verified_dir()
         staging = Path(
             tempfile.mkdtemp(prefix=f"event-logger-{version}-", dir=self._verified_dir)
@@ -270,14 +357,38 @@ class UpdateAgent:
             raise
 
     def _verify_trusted_archive(self, archive: Path, version: str) -> None:
-        """GitHubの固定repository checksumとarchive本体をroot側で照合する。"""
+        """GitHubの固定repository checksumとarchive本体をroot側で照合する。
+
+        Args:
+            archive: trusted checksumと照合するrelease archive file。
+            version: update対象releaseのversion文字列。
+
+        Returns:
+            None。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         expected = self._trusted_checksum(version, archive.name)
         actual = _sha256_file(archive)
         if actual.lower() != expected.lower():
             raise ValueError("archive does not match trusted GitHub checksum")
 
     def _trusted_checksum(self, version: str, archive_name: str) -> str:
-        """GitHub Releaseから対象archiveのchecksumを取得する。"""
+        """GitHub Releaseから対象archiveのchecksumを取得する。
+
+        Args:
+            version: update対象releaseのversion文字列。
+            archive_name: Release内で一意にchecksumを探すarchive filename。
+
+        Returns:
+            検証済みまたは生成済みの文字列を返す。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", self._repository):
             raise ValueError("trusted update repository is not configured")
         api_url = f"https://api.github.com/repos/{self._repository}/releases/latest"
@@ -335,7 +446,19 @@ class UpdateAgent:
 
 
 def _safe_asset_path(raw_path: str, work_dir: Path) -> Path:
-    """work directory配下の実在pathへ解決する。"""
+    """work directory配下の実在pathへ解決する。
+
+    Args:
+        raw_path: 要求から受け取った未検証staging path。
+        work_dir: assetを配置してよい作業directory。
+
+    Returns:
+        指定work_dir内の通常fileとして確認された絶対Path。
+
+    Raises:
+        ValueError: 引数の形式・範囲が仕様外、または現在
+            の状態では要求を適用できない場合。
+    """
     path = Path(raw_path)
     if not path.is_absolute():
         raise ValueError("update asset path must be absolute")
@@ -351,7 +474,18 @@ def _safe_asset_path(raw_path: str, work_dir: Path) -> Path:
 
 
 def _read_request(connection: socket.socket) -> object:
-    """agent requestをnewline JSONとして読む。"""
+    """agent requestをnewline JSONとして読む。
+
+    Args:
+        connection: この関数が使うSQLite connection。
+
+    Returns:
+        newline JSONをdecodeしたrequest object。
+
+    Raises:
+        ValueError: 引数の形式・範囲が仕様外、または現在
+            の状態では要求を適用できない場合。
+    """
     buffer = bytearray()
     while len(buffer) <= MAX_MESSAGE_BYTES:
         chunk = connection.recv(4096)
@@ -369,12 +503,26 @@ def _read_request(connection: socket.socket) -> object:
 
 
 def _encode_response(response: dict[str, object]) -> bytes:
-    """agent responseをnewline JSONへ変換する。"""
+    """agent responseをnewline JSONへ変換する。
+
+    Args:
+        response: newline JSONで返す応答mapping。
+
+    Returns:
+        newline終端を含むUTF-8 JSON bytes。
+    """
     return json.dumps(response, separators=(",", ":")).encode("utf-8") + b"\n"
 
 
 def _set_socket_group(path: Path) -> None:
-    """service user groupへsocketを共有する（存在しない環境ではrootのまま）。"""
+    """service user groupへsocketを共有する（存在しない環境ではrootのまま）。
+
+    Args:
+        path: 対象fileまたはUnix socketのfilesystem path。
+
+    Returns:
+        None。
+    """
     try:
         group_id = grp.getgrnam("event-logger").gr_gid
     except KeyError:
@@ -383,7 +531,19 @@ def _set_socket_group(path: Path) -> None:
 
 
 def _checksum_for_bytes(raw: bytes, target_name: str) -> str:
-    """SHA256SUMS本文から対象名の一意なdigestを取得する。"""
+    """SHA256SUMS本文から対象名の一意なdigestを取得する。
+
+    Args:
+        raw: 検証前のchecksumまたはIPC bytes。
+        target_name: checksum一覧で検索するasset filename。
+
+    Returns:
+        対象archive名に対応するtrusted SHA-256 digest。
+
+    Raises:
+        ValueError: 引数の形式・範囲が仕様外、または現在
+            の状態では要求を適用できない場合。
+    """
     matches: list[str] = []
     for line in raw.decode("ascii").splitlines():
         fields = line.split()
@@ -395,7 +555,14 @@ def _checksum_for_bytes(raw: bytes, target_name: str) -> str:
 
 
 def _sha256_file(path: Path) -> str:
-    """ファイルをstreamでSHA-256計算する。"""
+    """ファイルをstreamでSHA-256計算する。
+
+    Args:
+        path: 対象fileまたはUnix socketのfilesystem path。
+
+    Returns:
+        対象file全体のSHA-256 hex digest。
+    """
     digest = hashlib.sha256()
     with path.open("rb") as file:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
@@ -404,7 +571,19 @@ def _sha256_file(path: Path) -> str:
 
 
 def _copy_update_archive(source: Path, destination: Path) -> None:
-    """検証後の差替えを想定し、開いた通常fileだけを上限付きでコピーする。"""
+    """検証後の差替えを想定し、開いた通常fileだけを上限付きでコピーする。
+
+    Args:
+        source: 読み込み元fileまたは記録上の出力source。
+        destination: 生成またはcopyする出力file path。
+
+    Returns:
+        None。
+
+    Raises:
+        ValueError: 引数の形式・範囲が仕様外、または現在
+            の状態では要求を適用できない場合。
+    """
     # Web userのstagingはpath検証後も書換え可能。最終pathのsymlinkを辿らず、
     # FIFOへ差し替わってもopenで停止しない。判定対象は同じfdの実体とする。
     descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -429,7 +608,15 @@ def _copy_update_archive(source: Path, destination: Path) -> None:
 
 
 def _remove_staging_after(process: subprocess.Popen[bytes], staging: Path) -> None:
-    """root helper終了後にverified archiveを削除する。"""
+    """root helper終了後にverified archiveを削除する。
+
+    Args:
+        process: staging削除前に終了を待つupdater process。
+        staging: helper終了後に削除する一時directory。
+
+    Returns:
+        None。
+    """
     try:
         process.wait()
     finally:
@@ -437,7 +624,14 @@ def _remove_staging_after(process: subprocess.Popen[bytes], staging: Path) -> No
 
 
 def main() -> None:
-    """環境変数・引数からroot update-agentを起動する。"""
+    """環境変数・引数からroot update-agentを起動する。
+
+    Args:
+        なし。
+
+    Returns:
+        None。
+    """
     parser = argparse.ArgumentParser(description="event-logger root update agent")
     parser.add_argument("--socket", default="/run/event-logger-update/update.sock")
     parser.add_argument(

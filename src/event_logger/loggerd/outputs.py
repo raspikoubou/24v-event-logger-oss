@@ -27,7 +27,14 @@ class OutputEventSink(Protocol):
     """OUT履歴を制御loop外のsingle DB writerへ渡す境界。"""
 
     def enqueue_output(self, event: PendingOutputEvent) -> None:
-        """OUT履歴eventをcommit Queueへ入れる。"""
+        """OUT履歴eventをcommit Queueへ入れる。
+
+        Args:
+            event: FIFOへ追加、保存、または型変換する確定event。
+
+        Returns:
+            None。
+        """
 
 
 class OutputManager:
@@ -44,7 +51,20 @@ class OutputManager:
         maintenance_mode_provider: Callable[[], bool],
         event_sink: OutputEventSink | None = None,
     ) -> None:
-        """出力port、履歴Repository、現在session providerを注入する。"""
+        """出力port、履歴Repository、現在session providerを注入する。
+
+        Args:
+            clock: UTC/monotonic時刻と同期状態を提供するClock。
+            outputs: OUT channel IDからGPIO output portへのmapping。
+            repository: この処理が利用する保存・照会Repository。
+            owner_registry: 各OUTの単一所有者を検査・更新するregistry。
+            session_id_provider: 現在session IDを返す関数。session外ではNoneを返す。
+            maintenance_mode_provider: maintenance mode中かを返す関数。
+            event_sink: 履歴eventを非同期DB writerへenqueueする任意sink。
+
+        Returns:
+            None。
+        """
         self._clock = clock
         self._outputs = dict(outputs)
         self._repository = repository
@@ -70,12 +90,27 @@ class OutputManager:
         ] = []
 
     def has_active_output(self) -> bool:
-        """物理OUTのいずれかがONか、watchdog用に取得する。"""
+        """物理OUTのいずれかがONか、watchdog用に取得する。
+
+        Args:
+            なし。
+
+        Returns:
+            物理ON状態のOUTが1つ以上あればTrue。
+        """
         with self._physical_lock:
             return any(output.is_active for output in self._outputs.values())
 
     def emergency_off(self) -> bool:
-        """制御loopが停止した場合、DBを待たずに全OUTをOFFへ戻す。"""
+        """制御loopが停止した場合、DBを待たずに全OUTをOFFへ戻す。
+
+        Args:
+            なし。
+
+        Returns:
+            初回に全OUTのOFF処理を試みて完了するとTrue。停止済
+            みならFalse。物理OFF失敗は例外。
+        """
         session_id = self._session_id_provider()
         synced = self._clock.is_synchronized()
         # 診断テストも同じ順序（test→physical）でlockを取得する。
@@ -117,7 +152,14 @@ class OutputManager:
             return True
 
     def flush_emergency_off_events(self) -> None:
-        """watchdogが物理OFFを済ませた時刻を、loop復帰後に履歴化する。"""
+        """watchdogが物理OFFを済ませた時刻を、loop復帰後に履歴化する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
+        """
         while self._emergency_off_events:
             channel_id, source, utc_ms, mono_ns, synced, session_id = (
                 self._emergency_off_events[0]
@@ -137,31 +179,66 @@ class OutputManager:
 
     @property
     def heartbeat_channel(self) -> int | None:
-        """Heartbeat割当OUTを返す。"""
+        """Heartbeat割当OUTを返す。
+
+        Args:
+            なし。
+
+        Returns:
+            Heartbeatが割り当てられていれば論理OUT channel ID、未割当ならNone。
+        """
         return self._heartbeat_channel
 
     @property
     def heartbeat_interval_ms(self) -> int | None:
-        """Heartbeat周期を返す。"""
+        """Heartbeat周期を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            Heartbeatが割り当てられていれば論理OUT channel ID、未割当ならNone。
+        """
         return (
             self._heartbeat_interval_ms if self._heartbeat_channel is not None else None
         )
 
     @property
     def output_test_channel(self) -> int | None:
-        """進行中の出力テストOUTを返す。"""
+        """進行中の出力テストOUTを返す。
+
+        Args:
+            なし。
+
+        Returns:
+            Heartbeatが割り当てられていれば論理OUT channel ID、未割当ならNone。
+        """
         with self._output_test_lock:
             return (
                 self._output_test.channel_id if self._output_test is not None else None
             )
 
     def startup_off(self) -> None:
-        """daemon起動時に全OUTをOFFへ戻し、実状態を履歴へ記録する。"""
+        """daemon起動時に全OUTをOFFへ戻し、実状態を履歴へ記録する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。全OUTをOFFへ指示し、起動時状態を履歴へ記録する。
+        """
         for channel_id in sorted(self._outputs):
             self._set_state(channel_id, False, OutputSource.STARTUP, force_record=True)
 
     def shutdown_off(self) -> None:
-        """正常終了時に全OUTをOFFへ戻す。"""
+        """正常終了時に全OUTをOFFへ戻す。
+
+        Args:
+            なし。
+
+        Returns:
+            None。test timerを破棄して全OUTのOFFを試みる。
+        """
         first_error: Exception | None = None
         try:
             try:
@@ -191,7 +268,19 @@ class OutputManager:
             raise first_error
 
     def configure_heartbeat(self, channel_id: int, interval_ms: int = 5_000) -> None:
-        """Heartbeat ownerと反転周期を設定する。"""
+        """Heartbeat ownerと反転周期を設定する。
+
+        Args:
+            channel_id: 論理IN/OUT番号（1〜6）。GPIO pin番号ではない。
+            interval_ms: Heartbeat反転周期（ms）。
+
+        Returns:
+            None。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         if not 1_000 <= interval_ms <= 60_000:
             raise ValueError("heartbeat interval must be between 1000 and 60000ms")
         self._owners.assign_heartbeat(channel_id)
@@ -208,7 +297,20 @@ class OutputManager:
         channel_id: int | None = None,
         interval_ms: int = 5_000,
     ) -> None:
-        """保存済みHeartbeat設定をownerと周期へ反映する。"""
+        """保存済みHeartbeat設定をownerと周期へ反映する。
+
+        Args:
+            enabled: 設定された機能を有効にするか。
+            channel_id: 論理IN/OUT番号（1〜6）。GPIO pin番号ではない。
+            interval_ms: Heartbeat反転周期（ms）。
+
+        Returns:
+            None。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         if (
             enabled
             and self._heartbeat_channel == channel_id
@@ -227,14 +329,28 @@ class OutputManager:
             self.configure_heartbeat(channel_id, interval_ms)
 
     def resume_heartbeat(self) -> None:
-        """新session開始後にHeartbeat反転の起点を作り直す。"""
+        """新session開始後にHeartbeat反転の起点を作り直す。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
+        """
         if self._heartbeat_channel is not None:
             self._heartbeat_next_ns = (
                 self._clock.now_monotonic_ns() + self._heartbeat_interval_ms * 1_000_000
             )
 
     def disable_heartbeat(self) -> None:
-        """Heartbeatを停止し、割当を解放する。"""
+        """Heartbeatを停止し、割当を解放する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。Heartbeat出力をOFFにしてOUT ownerを解放する。
+        """
         if self._heartbeat_channel is not None:
             self._set_state(
                 self._heartbeat_channel,
@@ -250,6 +366,12 @@ class OutputManager:
         """Heartbeatを必要な時だけ反転する。
 
         DB書込みやQueue処理が正常でない場合は反転を停止し、可能ならOFFにする。
+
+        Args:
+            healthy: Heartbeatを続けてよいDB/Queue状態か。
+
+        Returns:
+            Heartbeatを反転した場合True。未到達または健全性不良で停止した場合False。
         """
         if not healthy or self._heartbeat_channel is None:
             if self._heartbeat_channel is not None:
@@ -275,7 +397,20 @@ class OutputManager:
         return True
 
     def begin_output_test(self, channel_id: int, duration_ms: int = 5_000) -> None:
-        """メンテナンス中だけ指定OUTの一時テストを開始する。"""
+        """メンテナンス中だけ指定OUTの一時テストを開始する。
+
+        Args:
+            channel_id: 論理IN/OUT番号（1〜6）。GPIO pin番号ではない。
+            duration_ms: 動作継続時間（ms）。
+
+        Returns:
+            None。maintenance中に期限watchdogを設定して指定OUTを一時ONにする。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         if not self._maintenance_mode_provider():
             raise RuntimeError("output test is available only in maintenance mode")
         if self._heartbeat_channel is not None:
@@ -352,7 +487,14 @@ class OutputManager:
         # GPIO/履歴の更新が成功した後は、daemon loopが期限処理を引き継ぐ。
 
     def output_test_tick(self) -> bool:
-        """期限切れの出力テストをOFFにする。"""
+        """期限切れの出力テストをOFFにする。
+
+        Args:
+            なし。
+
+        Returns:
+            期限切れtestをOFF処理した場合True。対象testがなければFalse。
+        """
         with self._output_test_lock:
             output_test = self._output_test
             watchdog_expired = self._output_test_watchdog_expired
@@ -378,7 +520,14 @@ class OutputManager:
         return True
 
     def end_output_test(self) -> None:
-        """ユーザー操作で出力テストを早期終了する。"""
+        """ユーザー操作で出力テストを早期終了する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。テストOUTをOFFにして、物理OFF時刻の履歴を保存する。
+        """
         with self._output_test_lock:
             output_test = self._output_test
             watchdog_expired = self._output_test_watchdog_expired
@@ -400,7 +549,15 @@ class OutputManager:
                 )
 
     def _output_test_watchdog(self, channel_id: int, output_test: OutputTest) -> None:
-        """DBへ触れず、期限到達時の物理OFFだけを実行する。"""
+        """DBへ触れず、期限到達時の物理OFFだけを実行する。
+
+        Args:
+            channel_id: 論理IN/OUT番号（1〜6）。GPIO pin番号ではない。
+            output_test: 開始時刻・OUT番号・上限時間を持つテストtoken。
+
+        Returns:
+            None。期限到達時にDBを待たず物理OFFし、OFF時刻を一時保存する。
+        """
         with self._output_test_lock:
             # cancelは実行開始済みcallbackを止めない。同じOUTの次テストへ
             # 古い期限が作用しないよう、channelではなくテスト自体を照合する。
@@ -423,7 +580,14 @@ class OutputManager:
             self._output_test_watchdog_expired = True
 
     def _clear_output_test(self) -> None:
-        """出力テスト状態とwatchdog timerを破棄する。"""
+        """出力テスト状態とwatchdog timerを破棄する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
+        """
         with self._output_test_lock:
             timer = self._output_test_timer
             self._output_test_timer = None
@@ -434,18 +598,47 @@ class OutputManager:
                 timer.cancel()
 
     def set_rule_state(self, channel_id: int, value: bool) -> None:
-        """条件ルール所有OUTをON/OFFする。"""
+        """条件ルール所有OUTをON/OFFする。
+
+        Args:
+            channel_id: 論理IN/OUT番号（1〜6）。GPIO pin番号ではない。
+            value: 論理状態。ONはTrue/1、OFFはFalse/0。
+
+        Returns:
+            None。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         owner = self._owners.owner(channel_id)
         if owner.kind is not OutputOwnerKind.RULE:
             raise RuntimeError("output is not owned by a condition rule")
         self._set_state(channel_id, value, OutputSource.RULE, force_record=False)
 
     def configure_rule(self, rule_id: int, channel_id: int) -> None:
-        """条件ルール用OUT ownerを割り当てる。"""
+        """条件ルール用OUT ownerを割り当てる。
+
+        Args:
+            rule_id: OUTを所有する条件ruleの識別子。
+            channel_id: 論理IN/OUT番号（1〜6）。GPIO pin番号ではない。
+
+        Returns:
+            None。
+        """
         self._owners.assign_rule(channel_id, rule_id)
 
     def release_rule(self, channel_id: int, rule_id: int) -> None:
-        """一致する条件ルールownerをOFFにして解放する。"""
+        """一致する条件ルールownerをOFFにして解放する。
+
+        Args:
+            channel_id: 論理IN/OUT番号（1〜6）。GPIO pin番号ではない。
+            rule_id: OUTを所有する条件ruleの識別子。
+
+        Returns:
+            None。
+        """
         owner = self._owners.owner(channel_id)
         if owner.kind is not OutputOwnerKind.RULE or owner.rule_id != rule_id:
             return
@@ -460,7 +653,22 @@ class OutputManager:
         *,
         force_record: bool,
     ) -> None:
-        """物理出力とoutput_eventsを同じ論理値で更新する。"""
+        """物理出力とoutput_eventsを同じ論理値で更新する。
+
+        Args:
+            channel_id: 論理IN/OUT番号（1〜6）。GPIO pin番号ではない。
+            value: 論理状態。ONはTrue/1、OFFはFalse/0。
+            source: 読み込み元fileまたは記録上の出力source。
+            force_record: 状態が変化しなくてもoutput eventを記録するか。
+
+        Returns:
+            None。物理出力を更新し、必要な場合だけ同じ論理値の履歴を記録する。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         output = self._outputs[channel_id]
         physical_lock_started_ns = self._clock.now_monotonic_ns()
         with self._physical_lock:
@@ -529,7 +737,18 @@ class OutputManager:
         source: OutputSource,
         elapsed_ns: int,
     ) -> None:
-        """watchdog予算の半分を使った物理/DB段階を記録する。"""
+        """watchdog予算の半分を使った物理/DB段階を記録する。
+
+        Args:
+            stage: 遅延した物理lock/GPIO/event保存段階を識別する名前。
+            channel_id: 論理IN/OUT番号（1〜6）。GPIO pin番号ではない。
+            value: 論理状態。ONはTrue/1、OFFはFalse/0。
+            source: 読み込み元fileまたは記録上の出力source。
+            elapsed_ns: commitに要したmonotonic経過時間（ns）。
+
+        Returns:
+            None。
+        """
         if elapsed_ns < _SLOW_OUTPUT_OPERATION_NS:
             return
         _LOGGER.warning(
@@ -548,7 +767,16 @@ class OutputManager:
         value: bool,
         source: OutputSource,
     ) -> None:
-        """物理操作時刻を含むoutput_eventsをcommit Queueへ渡す。"""
+        """物理操作時刻を含むoutput_eventsをcommit Queueへ渡す。
+
+        Args:
+            channel_id: 論理IN/OUT番号（1〜6）。GPIO pin番号ではない。
+            value: 論理状態。ONはTrue/1、OFFはFalse/0。
+            source: 読み込み元fileまたは記録上の出力source。
+
+        Returns:
+            None。
+        """
         self._persist_output_event(
             PendingOutputEvent(
                 session_id=self._session_id_provider(),
@@ -562,7 +790,14 @@ class OutputManager:
         )
 
     def _persist_output_event(self, event: PendingOutputEvent) -> None:
-        """履歴eventを専用writerへ渡すか、単体テスト用Repositoryへ保存する。"""
+        """履歴eventを専用writerへ渡すか、単体テスト用Repositoryへ保存する。
+
+        Args:
+            event: FIFOへ追加、保存、または型変換する確定event。
+
+        Returns:
+            None。
+        """
         if self._event_sink is not None:
             self._event_sink.enqueue_output(event)
             return

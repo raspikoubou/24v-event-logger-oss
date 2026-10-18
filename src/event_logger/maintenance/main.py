@@ -45,6 +45,21 @@ def run_once(
 
     通常のtimerはDBに保存した保存期間を使い、明示CLIの`--no-retention`だけが
     `use_stored_retention=False`を指定してretentionを無効化する。
+
+    Args:
+        database_path: SQLite databaseのfilesystem path。
+        retention_days: 保存期間（日）。Noneなら通常retentionを行わない。
+        clock: UTC/monotonic時刻と同期状態を提供するClock。
+        disk_path: 容量を測るfilesystem上のpath。
+        use_stored_retention: DB保存期間設定を採用するか。明示CLI指定ではFalseを許す。
+
+    Returns:
+        1回分のretention、容量保護、DB integrity結果。
+
+    Raises:
+        DatabaseIntegrityError: database schema/integrity検査が失敗した場合。
+        ValueError: 引数の形式・範囲が仕様外、または現在
+            の状態では要求を適用できない場合。
     """
     _validate_retention_days(retention_days)
     current_clock = clock or SystemClock()
@@ -111,7 +126,14 @@ def run_once(
 
 
 def main() -> None:
-    """環境変数・CLIから定期保守を実行する。"""
+    """環境変数・CLIから定期保守を実行する。
+
+    Args:
+        なし。
+
+    Returns:
+        None。
+    """
     parser = argparse.ArgumentParser(description="event logger maintenance")
     parser.add_argument(
         "--retention-days",
@@ -147,13 +169,32 @@ def main() -> None:
 
 
 def _validate_retention_days(retention_days: int | None) -> None:
-    """仕様で定義した保存期間だけを受け付ける。"""
+    """仕様で定義した保存期間だけを受け付ける。
+
+    Args:
+        retention_days: 保存期間（日）。Noneなら通常retentionを行わない。
+
+    Returns:
+        None。
+
+    Raises:
+        ValueError: 引数の形式・範囲が仕様外、または現在
+            の状態では要求を適用できない場合。
+    """
     if retention_days is not None and retention_days not in RETENTION_CHOICES:
         raise ValueError(f"retention_days must be one of {RETENTION_CHOICES}")
 
 
 def _merge_results(first: RetentionResult, second: RetentionResult) -> RetentionResult:
-    """通常retentionと容量保護の結果を合算する。"""
+    """通常retentionと容量保護の結果を合算する。
+
+    Args:
+        first: 先行するretention処理結果。
+        second: 後続する容量保護処理結果。
+
+    Returns:
+        2つのretention結果の削除数とvacuum所要時間を合算した値。
+    """
     return RetentionResult(
         deleted_input_events=(first.deleted_input_events + second.deleted_input_events),
         deleted_output_events=(

@@ -1,3 +1,9 @@
+  /**
+   * widget追加・編集dialogを初期化して開く。
+   * @param {boolean} isEditing - 編集modeか。
+   * @param {string} widgetGroup - widget group。
+   * @returns {void} 選択mode/groupに合わせてfieldを初期化し、modalを開く。
+   */
   function openWidgetDialog(isEditing, widgetGroup = "realtime") {
     const typeSelect = document.querySelector("#new-widget-type");
     typeSelect.disabled = isEditing;
@@ -48,6 +54,10 @@
     document.querySelector("#widget-dialog").showModal();
   }
 
+  /**
+   * widget typeに応じて編集fieldの表示を切り替える。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function updateWidgetTypeFields() {
     const type = document.querySelector("#new-widget-type").value;
     const isCurrentState = type === "現在状態";
@@ -71,6 +81,10 @@
     document.querySelector("#widget-list-fields").hidden = type !== "イベント一覧";
   }
 
+  /**
+   * widget順序に応じて上下移動buttonの状態を更新する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function updateMoveButtons() {
     document.querySelectorAll("#widget-settings-list .widget-group-list").forEach((group) => {
       const rows = [...group.querySelectorAll(".widget-setting-row")];
@@ -83,6 +97,11 @@
     });
   }
 
+  /**
+   * 設定rowからwidget typeを読む。
+   * @param {HTMLElement} row - widget row element。
+   * @returns {string} widget setting rowが表すAPI/UI type。
+   */
   function widgetTypeForRow(row) {
     const types = {
       "current-state": "現在状態",
@@ -95,6 +114,11 @@
     return row.dataset.widgetType || types[row.dataset.widgetRow] || "現在状態";
   }
 
+  /**
+   * 設定rowから対象channelを読む。
+   * @param {HTMLElement} row - widget row element。
+   * @returns {string} widget setting rowから得たchannel選択値。
+   */
   function widgetChannelForRow(row) {
     const channels = {
       "current-state": "IN1",
@@ -107,6 +131,11 @@
     return row.dataset.widgetChannel || channels[row.dataset.widgetRow] || "IN1";
   }
 
+  /**
+   * 画面row値をAPI設定形式へまとめる。
+   * @param {HTMLElement} row - widget row element。
+   * @returns {Object} 保存APIへ渡すwidget種別別config object。
+   */
   function widgetApiConfigForRow(row) {
     try {
       const config = JSON.parse(row.dataset.apiConfig || "{}");
@@ -116,6 +145,14 @@
     }
   }
 
+  /**
+   * widget設定を一覧表示用の短い説明にする。
+   * @param {string} type - widget type key。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {string} period - 期間選択値。
+   * @param {Object} config - widget config。
+   * @returns {string} type・channel・period・configから作る設定一覧向け説明。
+   */
   function widgetSettingSummary(type, channelId, period, config = {}) {
     const periodText = period === "follow" ? "ダッシュボード期間に追従" : fixtures.dashboardPeriods[period].label;
     if (type === "現在状態") return `現在状態・${channelId}${config.showElapsed ? "・継続時間を表示" : ""}`;
@@ -131,6 +168,10 @@
     return `${type}・${channelId.replaceAll(",", "・")}・${periodText}`;
   }
 
+  /**
+   * widget設定順・groupに合わせてDashboard layoutを同期する。
+   * @returns {void} widget rowのgroup順に従ってDashboard cardをDOM上で並べ直す。
+   */
   function syncDashboardLayout() {
     const dashboardTargets = {
       realtime: document.querySelector("#dashboard-realtime-grid"),
@@ -148,11 +189,22 @@
     updateMoveButtons();
   }
 
+  /**
+   * IDに一致するDashboard widgetを検索する。
+   * @param {string} widgetId - widget ID。
+   * @returns {Object|null} ID一致widget。見つからない場合はnull。
+   */
   function dashboardWidgetById(widgetId) {
     return [...document.querySelectorAll("#dashboard-realtime-grid [data-widget], #dashboard-history-grid [data-widget]")]
       .find((widget) => widget.dataset.widget === widgetId) || null;
   }
 
+  /**
+   * widget rowを同じgroup内で指定方向へ移動する。
+   * @param {HTMLElement} row - widget row element。
+   * @param {number} direction - 移動方向。
+   * @returns {void} rowを同group内で上下へ移し、設定dirty stateを更新する。
+   */
   function moveWidgetRow(row, direction) {
     const sibling = direction === "up" ? row.previousElementSibling : row.nextElementSibling;
     if (!sibling) return;
@@ -167,12 +219,23 @@
     showToast("表示順を変更しました");
   }
 
+  /**
+   * 既存IDと衝突しないwidget IDを生成する。
+   * @param {string} prefix - ID prefix。
+   * @returns {string} 指定prefixから生成した新しいwidget ID。
+   */
   function uniqueWidgetId(prefix = "widget") {
     let number = 1;
     while (document.querySelector(`[data-widget="${prefix}-${number}"], [data-widget-row="${prefix}-${number}"]`)) number += 1;
     return `${prefix}-${number}`;
   }
 
+  /**
+   * rowからwidget設定を読み、overrideを適用する。
+   * @param {HTMLElement} row - widget row element。
+   * @param {string} overrides - 設定override値。
+   * @returns {Object} row fieldとoverrideから作るwidget編集config。channelId、type、periodなど保存値を含む。
+   */
   function widgetConfigFromRow(row, overrides = {}) {
     return {
       id: row.dataset.widgetRow,
@@ -201,6 +264,11 @@
     };
   }
 
+  /**
+   * widget設定を複製し、新しいIDと表示位置を割り当てる。
+   * @param {HTMLElement} row - widget row element。
+   * @returns {void} 現在rowの設定を複製し、新IDで保存する。
+   */
   function duplicateWidget(row) {
     const group = row.closest(".widget-group-list").dataset.widgetGroup;
     const config = widgetConfigFromRow(row, {
@@ -222,6 +290,11 @@
     showToast("表示項目を複製しました");
   }
 
+  /**
+   * widget設定の削除確認を行い、確定後に削除する。
+   * @param {HTMLElement} row - widget row element。
+   * @returns {void} 確認dialog後に削除APIを呼び、widget一覧を更新する。
+   */
   function deleteWidget(row) {
     const title = row.querySelector("strong").textContent;
     openConfirmation(
@@ -241,6 +314,11 @@
 
 
 
+  /**
+   * 選択widgetのsignalと期間をログ検索へ引き継ぐ。
+   * @param {Object} widget - widget設定。
+   * @returns {void} widgetのsignalとperiod条件をログviewへ設定して表示を切り替える。
+   */
   function openLogsForWidget(widget) {
     const period = periodKeyForWidget(widget.dataset.widgetPeriod || "follow");
     const periodSelect = document.querySelector("#log-period");

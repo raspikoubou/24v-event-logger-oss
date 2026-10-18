@@ -61,7 +61,18 @@ class EventQueue:
     """GPIO callback・出力loopとSQLite writerの間の有界Queue。"""
 
     def __init__(self, maxsize: int = 10_000) -> None:
-        """指定容量のQueueを作成する。"""
+        """指定容量のQueueを作成する。
+
+        Args:
+            maxsize: Queueが保持できる未commit eventの最大数。
+
+        Returns:
+            None。Queueとin-flight時刻を初期化する。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         if maxsize < 1:
             raise ValueError("maxsize must be positive")
         self._maxsize = maxsize
@@ -73,7 +84,14 @@ class EventQueue:
 
     @property
     def capacity(self) -> int:
-        """commit中を含む未保存eventの保持上限を返す。"""
+        """commit中を含む未保存eventの保持上限を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            commit中を含む未保存eventの上限件数。
+        """
         return self._maxsize
 
     def put(self, event: PendingDatabaseEvent) -> None:
@@ -81,6 +99,15 @@ class EventQueue:
 
         SQLiteの同期書込みが遅くてもGPIO callbackとHeartbeat loopを止めない。
         未commit eventを有界に保ち、満杯時は明示的にCriticalへ遷移させる。
+
+        Args:
+            event: FIFOへ追加、保存、または型変換する確定event。
+
+        Returns:
+            None。eventとenqueue時刻をFIFOへ追加し、waiterを起こす。
+
+        Raises:
+            EventQueueFull: 未commit eventが有界Queueの容量を使い切った場合。
         """
         with self._condition:
             if len(self._queue) + self._in_flight >= self._maxsize:
@@ -90,14 +117,31 @@ class EventQueue:
             self._condition.notify_all()
 
     def get(self) -> PendingDatabaseEvent:
-        """先頭eventを待たずに取り出し、未commit数へ含める。"""
+        """先頭eventを待たずに取り出し、未commit数へ含める。
+
+        Args:
+            なし。
+
+        Returns:
+            FIFOの先頭から移した未commit event。Queueが空ならIndexErrorを送出する。
+
+        Raises:
+            IndexError: 空のQueueから即時取得しようとした場合。
+        """
         with self._condition:
             if not self._queue:
                 raise IndexError("event queue is empty")
             return self._take_locked()
 
     def wait_get(self, timeout_s: float) -> PendingDatabaseEvent | None:
-        """eventを待って取り出す。timeout経過時はNoneを返す。"""
+        """eventを待って取り出す。timeout経過時はNoneを返す。
+
+        Args:
+            timeout_s: 最大待機時間（秒）。Noneは時間制限なし。
+
+        Returns:
+            FIFO先頭event。指定秒数内に届かなければNone。
+        """
         with self._condition:
             if not self._queue:
                 self._condition.wait(timeout_s)
@@ -115,6 +159,17 @@ class EventQueue:
 
         新しいeventを待つ追加delayは設けない。SD同期が遅れてQueueに溜まった
         eventだけを一 transactionへまとめ、通常時の保存待ちを増やさない。
+
+        Args:
+            max_count: 一回に取り出すevent数の上限。
+            timeout_s: 最大待機時間（秒）。Noneは時間制限なし。
+
+        Returns:
+            FIFO順に取り出した最大max_count件のevent列。timeout時は空列の場合がある。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
         """
         if max_count < 1:
             raise ValueError("max_count must be positive")
@@ -129,7 +184,21 @@ class EventQueue:
             return batch
 
     def task_done(self, count: int = 1) -> None:
-        """正常commitしたeventを未commit数から除く。"""
+        """正常commitしたeventを未commit数から除く。
+
+        Args:
+            count: 処理済みとして通知するevent数。1以上を指定する。
+
+        Returns:
+            None。指定数のin-flight eventを完了扱いにしてidle waiterを起こす。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         with self._condition:
             if count < 1:
                 raise ValueError("count must be positive")
@@ -141,11 +210,32 @@ class EventQueue:
             self._condition.notify_all()
 
     def requeue_front(self, event: PendingDatabaseEvent) -> None:
-        """保存失敗したin-flight eventを先頭へ戻す。"""
+        """保存失敗したin-flight eventを先頭へ戻す。
+
+        Args:
+            event: FIFOへ追加、保存、または型変換する確定event。
+
+        Returns:
+            None。失敗eventをFIFOの先頭へ戻す。
+        """
         self.requeue_front_many((event,))
 
     def requeue_front_many(self, events: Sequence[PendingDatabaseEvent]) -> None:
-        """失敗したbatch全体を元のFIFO順でQueue先頭へ戻す。"""
+        """失敗したbatch全体を元のFIFO順でQueue先頭へ戻す。
+
+        Args:
+            events: FIFO順で保存または差し戻す未commit event列。
+
+        Returns:
+            None。失敗batchとenqueue時刻を元の順序でFIFO先頭へ戻す。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         with self._condition:
             count = len(events)
             if count < 1:
@@ -161,7 +251,14 @@ class EventQueue:
             self._condition.notify_all()
 
     def wait_until_idle(self, timeout_s: float | None = None) -> bool:
-        """Queueとwriter処理中eventがなくなるまで待つ。"""
+        """Queueとwriter処理中eventがなくなるまで待つ。
+
+        Args:
+            timeout_s: 最大待機時間（秒）。Noneは時間制限なし。
+
+        Returns:
+            Queueとin-flight eventが空ならTrue、期限までに空にならなければFalse。
+        """
         deadline = None if timeout_s is None else monotonic() + timeout_s
         with self._condition:
             while self._queue or self._in_flight:
@@ -172,17 +269,38 @@ class EventQueue:
             return True
 
     def wake_waiters(self) -> None:
-        """writer終了要求を反映するため、待機threadを起こす。"""
+        """writer終了要求を反映するため、待機threadを起こす。
+
+        Args:
+            なし。
+
+        Returns:
+            None。Conditionで待機しているwriter threadを起こす。
+        """
         with self._condition:
             self._condition.notify_all()
 
     def __len__(self) -> int:
-        """Queue内とcommit中を合わせた未commit event数を返す。"""
+        """Queue内とcommit中を合わせた未commit event数を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            Queue待機中とcommit中を合算した未commit event件数。
+        """
         with self._condition:
             return len(self._queue) + self._in_flight
 
     def oldest_pending_ms(self) -> int:
-        """commit中を含め、最古の未保存eventの待ち時間を返す。"""
+        """commit中を含め、最古の未保存eventの待ち時間を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            最古の未commit eventの待ち時間（ms）。eventなしなら0。
+        """
         with self._condition:
             oldest = (
                 self._in_flight_at_ns[0]
@@ -196,7 +314,14 @@ class EventQueue:
             return max(0, (monotonic_ns() - oldest) // 1_000_000)
 
     def _take_locked(self) -> PendingDatabaseEvent:
-        """Condition lock保持中に先頭eventを未commit処理へ移す。"""
+        """Condition lock保持中に先頭eventを未commit処理へ移す。
+
+        Args:
+            なし。
+
+        Returns:
+            FIFOの先頭から移した未commit event。Queueが空ならIndexErrorを送出する。
+        """
         event = self._queue.popleft()
         self._in_flight_at_ns.append(self._queued_at_ns.popleft())
         self._in_flight += 1

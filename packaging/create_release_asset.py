@@ -67,7 +67,15 @@ VERSION_PATTERN = re.compile(r"^[0-9][A-Za-z0-9.+_-]*$")
 
 
 def _read_source_date_epoch() -> int:
-    """SOURCE_DATE_EPOCHを検証して返す。"""
+    """SOURCE_DATE_EPOCHを検証して返す。
+
+        Args:
+            なし。
+
+        Returns:
+            SOURCE_DATE_EPOCHのUnix epoch秒整数。未設定時は既定値、
+                負値・不正値はValueError。
+    """
     raw_value = os.environ.get(SOURCE_DATE_EPOCH_NAME)
     if raw_value is None:
         raise ValueError(f"{SOURCE_DATE_EPOCH_NAME} must be set explicitly")
@@ -81,7 +89,14 @@ def _read_source_date_epoch() -> int:
 
 
 def _read_version() -> str:
-    """pyproject.tomlの製品Versionを読み込む。"""
+    """pyproject.tomlの製品Versionを読み込む。
+
+        Args:
+            なし。
+
+        Returns:
+            pyproject.tomlから読み取ったdistribution version文字列。
+    """
     project_config = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
     version = project_config["project"]["version"]
     if not isinstance(version, str) or VERSION_PATTERN.fullmatch(version) is None:
@@ -90,7 +105,16 @@ def _read_version() -> str:
 
 
 def _archive_entries() -> list[tuple[PurePosixPath, Path, bool]]:
-    """release allow-listから安全なarchive entryを作る。"""
+    """release allow-listから安全なarchive entryを作る。
+
+        Args:
+            なし。
+
+        Returns:
+            allowlistに合致した(relative archive path, source path, is_directory)
+                tuple列。
+                symlink・想定外pathは含めない。
+    """
     entries: list[tuple[PurePosixPath, Path, bool]] = []
     for name in ROOT_FILES:
         path = PROJECT_ROOT / name
@@ -154,7 +178,17 @@ def _add_entry(
     is_directory: bool,
     source_date_epoch: int,
 ) -> None:
-    """正規化したowner、mode、時刻で1 entryをtarへ追加する。"""
+    """正規化したowner、mode、時刻で1 entryをtarへ追加する。
+
+Args:
+    archive: entryを追加する開いたtar archive writer。
+    relative_path: archive root基準のentry path。
+    source_path: entryの内容を読むworkspace上のsource path。
+    is_directory: entryがdirectoryかを表す真偽値。
+    source_date_epoch: 配布archiveのmtimeに使う検証済みUnix epoch秒。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     info = tarfile.TarInfo(relative_path.as_posix())
     info.uid = 0
     info.gid = 0
@@ -179,7 +213,15 @@ def _add_entry(
 def _write_archive(
     path: Path, entries: list[tuple[PurePosixPath, Path, bool]], epoch: int
 ) -> None:
-    """正規化したsource allow-listをzstd tarへ書く。"""
+    """正規化したsource allow-listをzstd tarへ書く。
+
+Args:
+    path: 読み書きするfileのpath。呼出元で認可・配置を限定した値。
+    entries: archiveへ格納する許可済みentry列。
+    epoch: archive entryに設定する正規化済みUnix epoch秒。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     # mypy typeshedの一部にはPython 3.14のw:zst overloadがまだ含まれない。
     with tarfile.open(  # type: ignore[call-overload]
         path, mode="w:zst", format=tarfile.PAX_FORMAT, level=19
@@ -189,7 +231,14 @@ def _write_archive(
 
 
 def _sha256(path: Path) -> str:
-    """fileのSHA-256を返す。"""
+    """fileのSHA-256を返す。
+
+        Args:
+            path: 読み書きするfileのpath。呼出元で認可・配置を限定した値。
+
+        Returns:
+            file bytesから計算したlowercase SHA-256 hex digest。
+    """
     digest = hashlib.sha256()
     with path.open("rb") as source_file:
         for block in iter(lambda: source_file.read(1024 * 1024), b""):
@@ -202,17 +251,13 @@ def create_release_asset(
 ) -> tuple[Path, Path]:
     """release tar.zstと対応するSHA256SUMSを生成する。
 
-    Args:
-        output_directory: 生成物の保存先。
-        source_date_epoch: 全archive entryへ設定する固定時刻。
+        Args:
+            output_directory: 生成物の保存先。
+            source_date_epoch: 全archive entryへ設定する固定時刻。
 
-    Returns:
-        生成したarchive pathとchecksum path。
-
-    Raises:
-        FileExistsError: 同名の生成物が既にある場合。
-        OSError: directoryや生成物を書き込めない場合。
-        ValueError: source treeやVersion、epochが不正な場合。
+        Returns:
+            作成したtar.zst pathとSHA256SUMS pathの組。
+                allowlist検証やfile IO失敗は例外。
     """
     if sys.version_info < (3, 14):
         raise RuntimeError("release assetの生成にはPython 3.14以降が必要です")
@@ -262,7 +307,14 @@ def create_release_asset(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """CLI entry point."""
+    """CLI entry point.
+
+        Args:
+            argv: CLIへ渡されたargument列。Noneならprocess既定のargvを使う。
+
+        Returns:
+            CLI終了code。作成成功は0、生成失敗は非0。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output-dir", type=Path, default=PROJECT_ROOT / "dist", help="生成物の保存先"

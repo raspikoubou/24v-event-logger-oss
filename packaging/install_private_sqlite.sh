@@ -10,6 +10,9 @@ SOURCE_LIBRARY="$SQLITE_BUNDLE_ROOT/libsqlite3.so.$VERSION"
 VERSION_ROOT="$RUNTIME_ROOT/$VERSION"
 CURRENT_LINK="$RUNTIME_ROOT/current"
 
+# 引数: 1個以上の診断文。標準エラーへprefix付きで出力する。
+# 戻り値: 戻らない。status 1でinstallerを終了する。
+# 副作用: 標準エラー出力とprocess終了。
 die() {
   printf 'private SQLite install: %s\n' "$*" >&2
   exit 1
@@ -43,6 +46,9 @@ if [[ -e "$VERSION_ROOT" ]]; then
     die "既存runtimeのsource archiveがbundleと一致しません"
 else
   STAGING_ROOT="$(mktemp -d "$RUNTIME_ROOT/.stage-$VERSION.XXXXXX")"
+  # 引数: なし。STAGING_ROOTが示す作成途中のversion directoryを使う。
+  # 戻り値: rm成功なら0。失敗時はtrap実行時の終了statusへ影響する。
+  # 副作用: 不完全なstaging directoryを再帰削除する。
   cleanup() {
     rm -rf -- "${STAGING_ROOT:-}"
   }

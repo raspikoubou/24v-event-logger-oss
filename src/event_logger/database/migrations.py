@@ -28,8 +28,15 @@ class MigrationResult:
 def migrate_database(database_path: str | Path) -> MigrationResult:
     """DBを明示的に最新schemaへ更新する。
 
-    通常のloggerd/Web起動からは呼び出さず、更新処理や保守CLIの明示操作から
-    呼び出す。未知のテーブルや将来versionを破壊的に解釈しない。
+    通常のloggerd/Web起動からは呼び出さず、 更新処理や保守CLIの明示操作から
+    呼び出す。 未知のテーブルや将来versionを破壊的に解釈しない。
+
+    Args:
+        database_path: 読み書きまたは検査対象のSQLite database file path。
+
+    Returns:
+        MigrationResult型の結果。 戻り値の型に応じ、
+            該当なしはNoneまたは空collectionとなる。
     """
     with closing(connect_database(database_path)) as connection:
         with connection:
@@ -37,7 +44,19 @@ def migrate_database(database_path: str | Path) -> MigrationResult:
 
 
 def migrate_connection(connection: sqlite3.Connection) -> MigrationResult:
-    """開いた接続を最新schemaへ更新する。"""
+    """開いた接続を最新schemaへ更新する。
+
+    Args:
+        connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+    Returns:
+        MigrationResult型の結果。 戻り値の型に応じ、
+            該当なしはNoneまたは空collectionとなる。
+
+    Raises:
+        SchemaVersionError: 「existing tables have no schema version; refusing implicit
+            conversion」に該当すると判定した場合。
+    """
     old_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
     if old_version > LATEST_SCHEMA_VERSION:
         raise SchemaVersionError(
@@ -68,7 +87,14 @@ def migrate_connection(connection: sqlite3.Connection) -> MigrationResult:
 
 
 def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
-    """event IDの再利用を防ぐevents tableへ再構築する。"""
+    """event IDの再利用を防ぐevents tableへ再構築する。
+
+    Args:
+        connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+    Returns:
+        None。 渡されたSQLite接続へ変更を適用し、 接続のcloseは呼出元に残す。
+    """
     foreign_keys = int(connection.execute("PRAGMA foreign_keys").fetchone()[0])
     connection.execute("PRAGMA foreign_keys = OFF")
     try:
@@ -118,7 +144,18 @@ def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
 
 
 def _ensure_events_autoincrement(connection: sqlite3.Connection) -> bool:
-    """v2でも旧定義のevents tableならAUTOINCREMENTへ再構築する。"""
+    """v2でも旧定義のevents tableならAUTOINCREMENTへ再構築する。
+
+    Args:
+        connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+    Returns:
+        条件が成立している場合True、 未成立または未設定の場合False。
+
+    Raises:
+        SchemaVersionError: 「schema v2 is missing the events
+            table」に該当すると判定した場合。
+    """
     row = connection.execute(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'events'"
     ).fetchone()
@@ -131,7 +168,18 @@ def _ensure_events_autoincrement(connection: sqlite3.Connection) -> bool:
 
 
 def _ensure_incremental_vacuum(connection: sqlite3.Connection) -> bool:
-    """既存v2 DBのauto_vacuumを明示migrationで有効化する。"""
+    """既存v2 DBのauto_vacuumを明示migrationで有効化する。
+
+    Args:
+        connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+    Returns:
+        条件が成立している場合True、 未成立または未設定の場合False。
+
+    Raises:
+        SchemaVersionError: 「failed to enable incremental
+            auto_vacuum」に該当すると判定した場合。
+    """
     row = connection.execute("PRAGMA auto_vacuum").fetchone()
     current = int(row[0]) if row is not None else 0
     if current == 2:
@@ -155,7 +203,14 @@ def _ensure_incremental_vacuum(connection: sqlite3.Connection) -> bool:
 
 
 def _ensure_query_indexes(connection: sqlite3.Connection) -> bool:
-    """長期保存・Dashboard polling用の不足indexを既存DBへ追加する。"""
+    """長期保存・Dashboard polling用の不足indexを既存DBへ追加する。
+
+    Args:
+        connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+    Returns:
+        条件が成立している場合True、 未成立または未設定の場合False。
+    """
     indexes = (
         (
             "idx_events_counter",

@@ -32,7 +32,15 @@ from event_logger.domain.widgets import Widget, WidgetSize, WidgetType
 
 
 def _counter_reset_from_row(row: sqlite3.Row) -> CounterReset:
-    """SQLite rowをCounterResetへ変換する。"""
+    """SQLite rowをCounterResetへ変換する。
+
+    Args:
+        row: SQLite row mapping。 column値を検査してdomain valueへ移す。
+
+    Returns:
+        CounterReset型の結果。 戻り値の型に応じ、
+            該当なしはNoneまたは空collectionとなる。
+    """
     return CounterReset(
         id=int(row["id"]),
         widget_id=str(row["widget_id"]),
@@ -43,7 +51,17 @@ def _counter_reset_from_row(row: sqlite3.Row) -> CounterReset:
 
 
 def _widget_from_row(row: sqlite3.Row) -> Widget:
-    """SQLite rowを検証付きWidgetへ変換する。"""
+    """SQLite rowを検証付きWidgetへ変換する。
+
+    Args:
+        row: SQLite row mapping。 column値を検査してdomain valueへ移す。
+
+    Returns:
+        Widget型の結果。 戻り値の型に応じ、 該当なしはNoneまたは空collectionとなる。
+
+    Raises:
+        ValueError: 「widget config must be an object」に該当すると判定した場合。
+    """
     try:
         config = json.loads(str(row["config_json"]))
         if not isinstance(config, dict):
@@ -65,7 +83,14 @@ def _widget_from_row(row: sqlite3.Row) -> Widget:
 
 
 def _event_from_row(row: sqlite3.Row) -> InputEvent:
-    """SQLite rowをInputEventへ変換する。"""
+    """SQLite rowをInputEventへ変換する。
+
+    Args:
+        row: SQLite row mapping。 column値を検査してdomain valueへ移す。
+
+    Returns:
+        InputEvent型の結果。 戻り値の型に応じ、 該当なしはNoneまたは空collectionとなる。
+    """
     return InputEvent(
         id=int(row["id"]),
         session_id=int(row["session_id"]),
@@ -79,7 +104,15 @@ def _event_from_row(row: sqlite3.Row) -> InputEvent:
 
 
 def _output_event_from_row(row: sqlite3.Row) -> OutputEvent:
-    """SQLite rowをOutputEventへ変換する。"""
+    """SQLite rowをOutputEventへ変換する。
+
+    Args:
+        row: SQLite row mapping。 column値を検査してdomain valueへ移す。
+
+    Returns:
+        OutputEvent型の結果。 戻り値の型に応じ、
+            該当なしはNoneまたは空collectionとなる。
+    """
     return OutputEvent(
         id=int(row["id"]),
         session_id=(int(row["session_id"]) if row["session_id"] is not None else None),
@@ -93,7 +126,15 @@ def _output_event_from_row(row: sqlite3.Row) -> OutputEvent:
 
 
 def _channel_from_row(row: sqlite3.Row) -> ChannelConfig:
-    """SQLite rowをChannelConfigへ変換する。"""
+    """SQLite rowをChannelConfigへ変換する。
+
+    Args:
+        row: SQLite row mapping。 column値を検査してdomain valueへ移す。
+
+    Returns:
+        ChannelConfig型の結果。 戻り値の型に応じ、
+            該当なしはNoneまたは空collectionとなる。
+    """
     return ChannelConfig(
         id=int(row["id"]),
         enabled=bool(row["enabled"]),
@@ -106,7 +147,18 @@ def _channel_from_row(row: sqlite3.Row) -> ChannelConfig:
 
 
 def _log_record_from_row(row: sqlite3.Row) -> LogRecord:
-    """UNION queryのSQLite rowを統合ログモデルへ変換する。"""
+    """UNION queryのSQLite rowを統合ログモデルへ変換する。
+
+    Args:
+        row: SQLite row mapping。 column値を検査してdomain valueへ移す。
+
+    Returns:
+        LogRecord型の結果。 戻り値の型に応じ、 該当なしはNoneまたは空collectionとなる。
+
+    Raises:
+        ValueError: 「stored log record type is invalid」に該当すると判定した場合。
+            「stored log kind is invalid」に該当すると判定した場合。
+    """
     raw_record_type = row["record_type"]
     raw_kind = row["kind"]
     raw_source = row["source"]
@@ -129,13 +181,34 @@ def _log_record_from_row(row: sqlite3.Row) -> LogRecord:
 
 
 def _validate_channel_ids(channel_ids: Sequence[int]) -> None:
-    """チャンネルID列を検証する。"""
+    """チャンネルID列を検証する。
+
+    Args:
+        channel_ids: 対象IN番号の列。 各番号を1〜6に制限し、 query filterへ渡す。
+
+    Returns:
+        None。 制約を検証するだけで、 永続状態や入力値は変更しない。
+
+    Raises:
+        ValueError: channel_idが1〜6の範囲外の場合。
+    """
     if any(not 1 <= channel_id <= 6 for channel_id in channel_ids):
         raise ValueError("channel_id must be between 1 and 6")
 
 
 def _validate_channel_text(value: str, field_name: str) -> None:
-    """設定画面から保存する名称を検証する。"""
+    """設定画面から保存する名称を検証する。
+
+    Args:
+        value: 論理入力/出力値。 ONはTrueまたは1、 OFFはFalseまたは0。
+        field_name: validation errorに示すfield名。
+
+    Returns:
+        None。 制約を検証するだけで、 永続状態や入力値は変更しない。
+
+    Raises:
+        ValueError: deviceまたはSQLite操作で失敗が返された場合。
+    """
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} must not be empty")
     if len(value) > 100:
@@ -143,7 +216,18 @@ def _validate_channel_text(value: str, field_name: str) -> None:
 
 
 def _mapping_int(values: Mapping[str, object], key: str) -> int:
-    """設定mappingからboolを除外した整数を取得する。"""
+    """設定mappingからboolを除外した整数を取得する。
+
+    Args:
+        values: 複数設定のkey/value群。 一括更新時に一つのtransactionへまとめる。
+        key: 設定項目名。 保存値の取得または更新対象を特定する。
+
+    Returns:
+        条件に従って算出した整数値。
+
+    Raises:
+        ValueError: deviceまたはSQLite操作で失敗が返された場合。
+    """
     value = values.get(key)
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{key} must be an integer")
@@ -151,7 +235,18 @@ def _mapping_int(values: Mapping[str, object], key: str) -> int:
 
 
 def _mapping_text(values: Mapping[str, object], key: str) -> str:
-    """設定mappingから文字列を取得する。"""
+    """設定mappingから文字列を取得する。
+
+    Args:
+        values: 複数設定のkey/value群。 一括更新時に一つのtransactionへまとめる。
+        key: 設定項目名。 保存値の取得または更新対象を特定する。
+
+    Returns:
+        検査または正規化を通過した文字列値。
+
+    Raises:
+        ValueError: deviceまたはSQLite操作で失敗が返された場合。
+    """
     value = values.get(key)
     if not isinstance(value, str):
         raise ValueError(f"{key} must be a string")
@@ -159,14 +254,35 @@ def _mapping_text(values: Mapping[str, object], key: str) -> str:
 
 
 def _lastrowid(cursor: sqlite3.Cursor) -> int:
-    """INSERT直後のrowidを必ず整数として取得する。"""
+    """INSERT直後のrowidを必ず整数として取得する。
+
+    Args:
+        cursor: SQL statementを実行したSQLite cursor。 lastrowid取得に使う。
+
+    Returns:
+        保存先で次に使う、 または直近に割り当てられた整数ID。
+
+    Raises:
+        RuntimeError: 「SQLite did not return a row id」に該当すると判定した場合。
+    """
     if cursor.lastrowid is None:
         raise RuntimeError("SQLite did not return a row id")
     return int(cursor.lastrowid)
 
 
 def _input_state(raw_value: object) -> InputState:
-    """SQLite値を論理入力値へ検証付き変換する。"""
+    """SQLite値を論理入力値へ検証付き変換する。
+
+    Args:
+        raw_value: SQLiteまたはJSON境界から復元した未検証値。
+
+    Returns:
+        InputState型の結果。 戻り値の型に応じ、 該当なしはNoneまたは空collectionとなる。
+
+    Raises:
+        ValueError: 「stored event value must be an integer」に該当すると判定した場合。
+            論理値が0または1以外の場合。
+    """
     if not isinstance(raw_value, int):
         raise ValueError("stored event value must be an integer")
     value = raw_value
@@ -180,7 +296,19 @@ def _delete_ids(
     table_name: str,
     rows: Sequence[sqlite3.Row],
 ) -> None:
-    """許可済み一次event tableのIDだけをparameter bindingで削除する。"""
+    """許可済み一次event tableのIDだけをparameter bindingで削除する。
+
+    Args:
+        connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+        table_name: retention対象とする内部固定table名。 外部SQLとして扱わない。
+        rows: 処理対象のSQLite row列。
+
+    Returns:
+        None。 渡されたSQLite接続へ変更を適用し、 接続のcloseは呼出元に残す。
+
+    Raises:
+        ValueError: 「unsupported retention table」に該当すると判定した場合。
+    """
     if not rows:
         return
     if table_name not in {"events", "output_events"}:
@@ -193,7 +321,14 @@ def _delete_ids(
 
 
 def _counter_config(raw_config: object) -> dict[str, object] | None:
-    """widget config JSONからcounter条件を安全に取り出す。"""
+    """widget config JSONからcounter条件を安全に取り出す。
+
+    Args:
+        raw_config: DBに保存された未検証JSON config。
+
+    Returns:
+        widget APIへ返す表示field/value mapping。
+    """
     if not isinstance(raw_config, str):
         return None
     try:
@@ -207,7 +342,15 @@ def _counter_event_matches(
     event_row: sqlite3.Row,
     config: Mapping[str, object],
 ) -> bool:
-    """初期版counterのchannel/edge条件へ1eventを照合する。"""
+    """初期版counterのchannel/edge条件へ1eventを照合する。
+
+    Args:
+        event_row: DB queryが返した単一event row。 格納値を検査してdomain値へ変換する。
+        config: widgetまたはruleのJSON相当設定mapping。 式やSQLとして実行しない。
+
+    Returns:
+        判定対象が条件を満たす場合True、 その他はFalse。
+    """
     channel_id = config.get("channel_id")
     if isinstance(channel_id, bool) or not isinstance(channel_id, int):
         return False

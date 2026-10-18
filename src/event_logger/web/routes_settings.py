@@ -14,7 +14,15 @@ if TYPE_CHECKING:
 
 
 def _register_channel_routes(app: Flask, context: WebContext) -> None:
-    """入力チャンネル設定のHTTP routeをappへ登録する。"""
+    """入力チャンネル設定のHTTP routeをappへ登録する。
+
+        Args:
+            app: Flask application。
+            context: requestごとのRepository、Clock、設定値を保持するWebContext。
+
+        Returns:
+            None。関数の概要に記したroute登録・状態更新を行う。
+    """
 
     from event_logger.web.app import (
         IpcProtocolError,
@@ -36,7 +44,16 @@ def _register_channel_routes(app: Flask, context: WebContext) -> None:
 
     @app.post("/api/channels/<int:channel_id>")
     def update_channel(channel_id: int) -> Response:
-        """入力設定を保存し、loggerd reload失敗時は旧値へ戻す。"""
+        """入力設定を保存し、loggerd reload失敗時は旧値へ戻す。
+
+            Args:
+                channel_id: 対象チャンネルの製品上の番号。
+
+            Returns:
+                保存後のchannel設定payloadをJSON 200で返す。channel不存在は404、
+                    body/field不正は400、
+                    loggerd拒否は409、IPC利用不可は503。reload失敗時は変更前設定へ戻す。
+        """
         before = context.channels.get(channel_id)
         if before is None:
             return _error("NOT_FOUND", "channel was not found", 404)
@@ -83,7 +100,16 @@ def _register_channel_routes(app: Flask, context: WebContext) -> None:
 
 
 def _register_basic_settings_routes(app: Flask, context: WebContext) -> None:
-    """Heartbeat・保存期間・Dashboard期間のrouteをappへ登録する。"""
+    """Heartbeat・保存期間・Dashboard期間のrouteをappへ登録する。
+
+        Args:
+            app: 対象のFlask application。設定値、extension、route登録先として使う。
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+
+        Returns:
+            None。関数の概要に記したroute登録・状態更新を行う。
+    """
 
     from event_logger.web.app import (
         WIDGET_PERIOD_DURATIONS_MS,
@@ -105,7 +131,16 @@ def _register_basic_settings_routes(app: Flask, context: WebContext) -> None:
 
     @app.post("/api/settings/heartbeat")
     def update_heartbeat() -> Response:
-        """Heartbeat設定を保存し、loggerd reload ACKを確認する。"""
+        """Heartbeat設定を保存し、loggerd reload ACKを確認する。
+
+            Args:
+                なし。
+
+            Returns:
+                保存したHeartbeat設定をJSON 200で返す。JSONや設定値不正は400、
+                    保存済み値破損は500、loggerd拒否は409、
+                    IPC利用不可は503。reload失敗時は旧設定へ戻す。
+        """
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return _error("INVALID_REQUEST", "JSON object is required", 400)
@@ -172,7 +207,15 @@ def _register_basic_settings_routes(app: Flask, context: WebContext) -> None:
 
     @app.post("/api/settings/retention")
     def update_retention() -> Response:
-        """保存期間を仕様で定義した選択肢へ限定して保存する。"""
+        """保存期間を仕様で定義した選択肢へ限定して保存する。
+
+            Args:
+                なし。
+
+            Returns:
+                保存日数を {retention_days: number} としてJSON 200で返す。
+                    JSON不正または許可された保持日数以外はINVALID_REQUEST/400。
+        """
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return _error("INVALID_REQUEST", "JSON object is required", 400)
@@ -196,7 +239,15 @@ def _register_basic_settings_routes(app: Flask, context: WebContext) -> None:
 
     @app.post("/api/settings/dashboard")
     def update_dashboard_settings() -> Response:
-        """Dashboard共通期間を保存する。"""
+        """Dashboard共通期間を保存する。
+
+            Args:
+                なし。
+
+            Returns:
+                保存した共通periodとcustom_rangeを含むJSON 200を返す。
+                    JSONやperiod/range不正はINVALID_REQUEST/400。
+        """
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return _error("INVALID_REQUEST", "JSON object is required", 400)
@@ -244,7 +295,17 @@ def _register_system_settings_routes(
     context: WebContext,
     auth: SharedPasswordAuth,
 ) -> None:
-    """設備名・hostname・timezone・共有認証のrouteをappへ登録する。"""
+    """設備名・hostname・timezone・共有認証のrouteをappへ登録する。
+
+        Args:
+            app: 対象のFlask application。設定値、extension、route登録先として使う。
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            auth: 共有パスワード認証の状態を管理するオブジェクト。
+
+        Returns:
+            None。関数の概要に記したroute登録・状態更新を行う。
+    """
 
     from event_logger.web.app import (
         Response,
@@ -263,12 +324,27 @@ def _register_system_settings_routes(
 
     @app.get("/api/settings/system")
     def system_settings() -> Response:
-        """本体・データ設定を返す（パスワードhashは返さない）。"""
+        """本体・データ設定を返す（パスワードhashは返さない）。
+
+            Args:
+                なし。
+
+            Returns:
+                パスワードhashを除いた本体・データ設定payloadをJSON 200で返す。
+        """
         return _ok(_system_settings_payload(context, app, auth))
 
     @app.post("/api/settings/system")
     def update_system_settings() -> Response:
-        """設備名・hostname・timezone・共有認証を保存する。"""
+        """設備名・hostname・timezone・共有認証を保存する。
+
+            Args:
+                なし。
+
+            Returns:
+                保存後のhashなし設定payloadをJSON 200で返す。JSON、hostname、timezone、
+                    認証fieldが不正ならINVALID_REQUEST/400。
+        """
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return _error("INVALID_REQUEST", "JSON object is required", 400)
@@ -333,7 +409,17 @@ def _register_setup_routes(
     context: WebContext,
     auth: SharedPasswordAuth,
 ) -> None:
-    """初回設定の状態取得・一括反映routeをappへ登録する。"""
+    """初回設定の状態取得・一括反映routeをappへ登録する。
+
+        Args:
+            app: 対象のFlask application。設定値、extension、route登録先として使う。
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            auth: 共有パスワード認証の状態を管理するオブジェクト。
+
+        Returns:
+            None。関数の概要に記したroute登録・状態更新を行う。
+    """
 
     from event_logger.web.app import (
         ControlCommand,
@@ -361,7 +447,14 @@ def _register_setup_routes(
 
     @app.get("/api/setup")
     def setup_status() -> Response:
-        """初回設定の完了状態と入力設定を返す。"""
+        """初回設定の完了状態と入力設定を返す。
+
+            Args:
+                なし。
+
+            Returns:
+                初回設定の完了状態、channel設定、Heartbeat等を含むJSON 200を返す。
+        """
         channels = context.channels.list_all()
         completed = context.settings.get_json("setup_completed", False)
         return _ok(
@@ -375,7 +468,16 @@ def _register_setup_routes(
 
     @app.post("/api/setup")
     def complete_setup() -> Response:
-        """初回設定を一括保存し、監視再開時のsnapshotを作成する。"""
+        """初回設定を一括保存し、監視再開時のsnapshotを作成する。
+
+            Args:
+                なし。
+
+            Returns:
+                初回設定を保存した結果と監視再開用snapshot情報をJSON 200で返す。
+                    未完了の必須入力や値の形式不正は400、
+                    loggerdへ反映できない場合はその制御errorを返す。
+        """
         if context.settings.get_json("setup_completed", False):
             return _error("SETUP_COMPLETED", "initial setup is already completed", 409)
         payload = request.get_json(silent=True)

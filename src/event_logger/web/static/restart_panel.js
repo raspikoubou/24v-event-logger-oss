@@ -1,6 +1,10 @@
 "use strict";
 
 // 本体再起動は更新設定の有無に依存させず、常設の確認ダイアログを通す。
+/**
+ * 再起動buttonと確認dialogを結び、確定後に本体再起動APIを呼び出す。
+ * @returns {void} DOM event handlerを登録する。必須DOMがなければ何も登録せず終了する。
+ */
 (function mountRestartPanel() {
   const button = document.getElementById("restart-system");
   const dialog = document.getElementById("restart-dialog");

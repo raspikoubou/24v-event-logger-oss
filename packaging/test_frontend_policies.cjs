@@ -6,7 +6,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const web = path.join(__dirname, "../src/event_logger/web");
 let time = 0;
-const context = { window: {}, performance: { now: () => time }, liveMode: true, logging: true,
+const context = { window: {}, performance: { /** @returns {number} 制御可能な単調時刻（ミリ秒）。 */ now: () => time }, liveMode: true, logging: true,
   fixtures: { channels: [{ id: 1, enabled: true, value: "ON" }], events: [],
     dashboardValues: [{ widget_id: "run", state: "ON", elapsed_ms: 1_200_000 }],
     dashboardReceivedAtMs: 0 } };
@@ -44,6 +44,10 @@ context.fixtures.dashboardValues = [{ widget_id: "run", state: "UNKNOWN" }];
 assert.equal(context.currentStateValues("IN1", "運転", "停止", "run").value, "UNKNOWN");
 assert.equal(context.currentStateValues("IN1", "運転", "停止", "run").elapsed, "継続時間は計測していません");
 
+/**
+ * refresh policyの抑制条件と進行中refreshへの追従実行を検証する。
+ * @returns {Promise<void>} 非同期assertion完了後に解決する。
+ */
 async function main() {
   const policy = context.window.EventLoggerRefreshPolicy;
   assert.equal(policy.shouldRefreshDashboard({ currentPeriod: "custom",

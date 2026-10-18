@@ -52,8 +52,20 @@ class LoggerService:
         """loggerd依存を注入して作成する。
 
         Args:
+            clock: UTC/monotonic時刻と同期状態を提供するClock。
+            session_repository: 監視sessionの作成と終了を担当するRepository。
+            event_repository: 入力eventの保存先Repository。
+            event_queue: producerとwriterで共有する有界FIFO Queue。
+            event_writer: Queue eventを保存するwriter。未指定なら同期writerを構成する。
+            app_version: 稼働中ソフトウェアのversion文字列。
+            boot_id: OS起動単位の識別値。
             enabled_channels: 有効入力のchannel_idとdebounce_msの対応。
                 GPIO番号はこの層へ渡さず、hardware adapter側で解決する。
+            output_manager: OUT ownerと物理出力状態を管理する任意の依存。
+            confirmed_input_callback: debounce確定値と確定時刻を受け取る任意callback。
+
+        Returns:
+            None。
         """
         self._clock = clock
         self._session_repository = session_repository
@@ -80,45 +92,106 @@ class LoggerService:
 
     @property
     def session_id(self) -> int | None:
-        """現在の監視session IDを返す。"""
+        """現在の監視session IDを返す。
+
+        Args:
+            なし。
+
+        Returns:
+            Heartbeatが割り当てられていれば論理OUT channel ID、未割当ならNone。
+        """
         return self._session_id
 
     @property
     def pending_event_count(self) -> int:
-        """DB writer待ちの確定event数を返す。"""
+        """DB writer待ちの確定event数を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            writerが保持する未commit eventの件数。Queue待機中とcommit中を含む。
+        """
         return len(self._event_queue)
 
     @property
     def enabled_channel_ids(self) -> tuple[int, ...]:
-        """現在の監視対象入力IDを返す。"""
+        """現在の監視対象入力IDを返す。
+
+        Args:
+            なし。
+
+        Returns:
+            監視対象の論理入力IDを設定順に並べたtuple。
+        """
         with self._lock:
             return tuple(self._enabled_channels)
 
     @property
     def enabled_channels(self) -> dict[int, int]:
-        """現在の監視対象入力とdebounce設定のコピーを返す。"""
+        """現在の監視対象入力とdebounce設定のコピーを返す。
+
+        Args:
+            なし。
+
+        Returns:
+            現在のchannel IDとdebounce ms設定のコピー。
+        """
         with self._lock:
             return dict(self._enabled_channels)
 
     @property
     def confirmed_inputs(self) -> dict[int, bool]:
-        """現在sessionで最後に確定した論理入力値を返す。"""
+        """現在sessionで最後に確定した論理入力値を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            各入力の最後の確定論理値を持つコピー。
+        """
         with self._lock:
             return dict(self._confirmed_values)
 
     @property
     def confirmed_input_since_ns(self) -> dict[int, int]:
-        """各入力値が確定したmonotonic時刻を返す。"""
+        """各入力値が確定したmonotonic時刻を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            各入力の確定monotonic時刻（ns）のコピー。
+        """
         with self._lock:
             return dict(self._confirmed_since_ns)
 
     def mark_critical(self) -> None:
-        """外部callbackから記録不能状態へ安全に遷移させる。"""
+        """外部callbackから記録不能状態へ安全に遷移させる。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
+        """
         with self._lock:
             self.status = LoggerStatus.CRITICAL
 
     def start(self, input_values: Mapping[int, bool]) -> None:
-        """新しいsessionを作成し、有効入力のsnapshotを保存する。"""
+        """新しいsessionを作成し、有効入力のsnapshotを保存する。
+
+        Args:
+            input_values: channel IDを論理状態へ対応づけた入力snapshot。
+
+        Returns:
+            None。sessionを作り、全有効入力のsnapshotを保存してLOGGINGへ移る。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         with self._lock:
             if self.status is not LoggerStatus.STOPPED:
                 raise RuntimeError(f"cannot start from status {self.status}")
@@ -167,6 +240,13 @@ class LoggerService:
         """GPIO callbackから論理入力変化を受け取る。
 
         callback内ではSQLiteへ直接書き込まず、debounce確定eventをQueueへ積む。
+
+        Args:
+            channel_id: 論理IN/OUT番号（1〜6）。GPIO pin番号ではない。
+            value: 論理状態。ONはTrue/1、OFFはFalse/0。
+
+        Returns:
+            None。入力候補をdebounceへ渡し、安定確定時だけQueueへ積む。
         """
         with self._lock:
             if self.status is not LoggerStatus.LOGGING:
@@ -191,6 +271,12 @@ class LoggerService:
 
         GPIO Zeroは安定中に追加callbackを発生させないため、daemon loopから
         候補をpollしないと、変化がそのまま保持された入力のeventが欠落する。
+
+        Args:
+            なし。
+
+        Returns:
+            今回確定してQueueへ追加した入力event数。
         """
         with self._lock:
             if self.status is not LoggerStatus.LOGGING:
@@ -212,7 +298,19 @@ class LoggerService:
             return confirmed_count
 
     def enqueue_counter_reset(self, pending: PendingCounterReset) -> None:
-        """確定入力と同じ排他境界でresetをFIFOへ投入する。"""
+        """確定入力と同じ排他境界でresetをFIFOへ投入する。
+
+        Args:
+            pending: Queue上の位置に保存する未commit event。
+
+        Returns:
+            None。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         with self._lock:
             if self.status is LoggerStatus.CRITICAL:
                 raise RuntimeError("counter reset is unavailable in critical state")
@@ -228,7 +326,23 @@ class LoggerService:
         now_monotonic_ns: int,
         notify_rules: bool = True,
     ) -> None:
-        """確定済みedgeをQueueへ積み、出力ルールへ通知する。"""
+        """確定済みedgeをQueueへ積み、出力ルールへ通知する。
+
+        Args:
+            channel_id: 論理IN/OUT番号（1〜6）。GPIO pin番号ではない。
+            confirmed: debounceを通過した論理入力状態。
+            now_utc_ms: 現在のUTC Unix epoch時刻（ms）。
+            now_monotonic_ns: 現在のmonotonic時計値（ns）。
+            notify_rules: 確定edgeを条件rule evaluatorへ通知するか。
+
+        Returns:
+            None。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         if self._session_id is None:
             raise RuntimeError("logging status has no active session")
         pending = PendingInputEvent(
@@ -259,7 +373,14 @@ class LoggerService:
                 raise
 
     def drain_events(self) -> int:
-        """DB writerを進め、保存件数を返す。"""
+        """DB writerを進め、保存件数を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            writerが保持する未commit eventの件数。Queue待機中とcommit中を含む。
+        """
         with self._lock:
             if self.status is LoggerStatus.CRITICAL:
                 return 0
@@ -273,7 +394,14 @@ class LoggerService:
             raise
 
     def stop(self, *, on_quiesced: Callable[[], None] | None = None) -> None:
-        """Queueを保存し、正常終了できたsessionへ終了時刻を記録する。"""
+        """Queueを保存し、正常終了できたsessionへ終了時刻を記録する。
+
+        Args:
+            on_quiesced: 受付停止後、Queue drain前に呼ぶ任意callback。
+
+        Returns:
+            None。新規eventを止め、Queue drain後に正常sessionを終了する。
+        """
         with self._lock:
             if self.status is LoggerStatus.STOPPED:
                 return
@@ -336,7 +464,14 @@ class LoggerService:
             self.status = LoggerStatus.STOPPED
 
     def _try_shutdown_outputs(self) -> None:
-        """Critical時にも可能な範囲でOUTをOFFへ戻す。"""
+        """Critical時にも可能な範囲でOUTをOFFへ戻す。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
+        """
         if self._output_manager is None:
             return
         try:
@@ -350,7 +485,19 @@ class LoggerService:
     def enter_maintenance(
         self, *, on_quiesced: Callable[[], None] | None = None
     ) -> None:
-        """監視を停止し、Web出力テスト可能な状態へ移行する。"""
+        """監視を停止し、Web出力テスト可能な状態へ移行する。
+
+        Args:
+            on_quiesced: 受付停止後、Queue drain前に呼ぶ任意callback。
+
+        Returns:
+            None。監視とrule ownerを停止してmaintenance状態へ移る。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         with self._lock:
             if self.status is not LoggerStatus.LOGGING:
                 raise RuntimeError(
@@ -361,7 +508,19 @@ class LoggerService:
             self.status = LoggerStatus.MAINTENANCE
 
     def enter_initial_maintenance(self) -> None:
-        """初回設定前にsessionを作らず、設定完了待ちへ移行する。"""
+        """初回設定前にsessionを作らず、設定完了待ちへ移行する。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         with self._lock:
             if self.status is not LoggerStatus.STOPPED:
                 raise RuntimeError(
@@ -373,7 +532,19 @@ class LoggerService:
             self.status = LoggerStatus.MAINTENANCE
 
     def leave_maintenance(self) -> None:
-        """再開前の入力値を受け取る呼び出しへ状態を戻す。"""
+        """再開前の入力値を受け取る呼び出しへ状態を戻す。
+
+        Args:
+            なし。
+
+        Returns:
+            None。次のstartで入力snapshotを受けられる状態へ戻す。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         with self._lock:
             if self.status is not LoggerStatus.MAINTENANCE:
                 raise RuntimeError(f"not in maintenance: {self.status}")
@@ -384,6 +555,12 @@ class LoggerService:
 
         session終了時刻を付けると、snapshot後に監視できなかった区間まで
         正常終了したように見えるため、異常sessionは未終了のまま残す。
+
+        Args:
+            なし。
+
+        Returns:
+            None。
         """
         with self._lock:
             if self.status not in {LoggerStatus.LOGGING, LoggerStatus.CRITICAL}:
@@ -405,7 +582,19 @@ class LoggerService:
             self.status = LoggerStatus.MAINTENANCE
 
     def reload_channels(self, enabled_channels: Mapping[int, int]) -> None:
-        """停止中の次回sessionへ入力設定を反映する。"""
+        """停止中の次回sessionへ入力設定を反映する。
+
+        Args:
+            enabled_channels: 有効channel IDをdebounce時間（ms）へ対応づける設定。
+
+        Returns:
+            None。
+
+        Raises:
+            RuntimeError: 必要なservice、owner
+                、writerなどの状態が成立していない場合、または
+                副作用処理に失敗した場合。
+        """
         with self._lock:
             if self.status is LoggerStatus.LOGGING:
                 raise RuntimeError("channel reload requires logging to be stopped")
@@ -413,7 +602,18 @@ class LoggerService:
             self._enabled_channels = dict(enabled_channels)
 
     def _validate_input_values(self, input_values: Mapping[int, bool]) -> None:
-        """有効入力の初期値がすべて揃っていることを検証する。"""
+        """有効入力の初期値がすべて揃っていることを検証する。
+
+        Args:
+            input_values: channel IDを論理状態へ対応づけた入力snapshot。
+
+        Returns:
+            None。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         self._validate_enabled_channels(self._enabled_channels)
         missing = set(self._enabled_channels) - set(input_values)
         if missing:
@@ -421,7 +621,18 @@ class LoggerService:
 
     @staticmethod
     def _validate_enabled_channels(enabled_channels: Mapping[int, int]) -> None:
-        """enabled channel設定の範囲を検証する。"""
+        """enabled channel設定の範囲を検証する。
+
+        Args:
+            enabled_channels: 有効channel IDをdebounce時間（ms）へ対応づける設定。
+
+        Returns:
+            None。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         for channel_id, debounce_ms in enabled_channels.items():
             if not 1 <= channel_id <= 6:
                 raise ValueError("enabled channel id must be between 1 and 6")

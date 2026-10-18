@@ -7,7 +7,15 @@ from zoneinfo import ZoneInfo
 
 
 def format_timestamp(timestamp_ms: int, timezone_name: str) -> str:
-    """Unix epochミリ秒を設定timezoneのISO風文字列へ変換する。"""
+    """Unix epochミリ秒を設定timezoneのISO風文字列へ変換する。
+
+    Args:
+        timestamp_ms: UTC Unix epochからのtimestamp（ms）。 timezone変換前の値。
+        timezone_name: 時刻表示へ適用するIANA timezone名。
+
+    Returns:
+        指定timezoneのoffset付き表示文字列。
+    """
     timezone = ZoneInfo(timezone_name)
     timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC).astimezone(timezone)
     offset = timestamp.utcoffset()

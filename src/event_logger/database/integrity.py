@@ -39,20 +39,41 @@ class DatabaseIntegrityError(RuntimeError):
     """安全にretentionを続行できないDB不整合。"""
 
     def __init__(self, report: IntegrityReport) -> None:
-        """検査結果を保持して例外を作る。"""
+        """検査結果を保持して例外を作る。
+
+        Args:
+            report: SQLite integrity検査結果を持つIntegrityReport。
+
+        Returns:
+            None。 依存値を保持して利用可能なinstanceを初期化する。
+        """
         self.report = report
         super().__init__(format_integrity_error(report))
 
 
 def check_database(database_path: str | Path) -> IntegrityReport:
-    """SQLite fileを開いて整合性を検査する。"""
+    """SQLite fileを開いて整合性を検査する。
+
+    Args:
+        database_path: 読み書きまたは検査対象のSQLite database file path。
+
+    Returns:
+        check_database/check_connectionが集めたintegrity結果値。
+    """
     with closing(connect_database(database_path)) as connection:
         with connection:
             return check_connection(connection)
 
 
 def check_connection(connection: sqlite3.Connection) -> IntegrityReport:
-    """開いたSQLite接続のschema・integrity・foreign keyを検査する。"""
+    """開いたSQLite接続のschema・integrity・foreign keyを検査する。
+
+    Args:
+        connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+    Returns:
+        check_database/check_connectionが集めたintegrity結果値。
+    """
     schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
     integrity_messages = tuple(
         str(row[0])
@@ -94,7 +115,14 @@ def check_connection(connection: sqlite3.Connection) -> IntegrityReport:
 
 
 def format_integrity_error(report: IntegrityReport) -> str:
-    """IntegrityReportをログ向けの短い文字列へ変換する。"""
+    """IntegrityReportをログ向けの短い文字列へ変換する。
+
+    Args:
+        report: SQLite integrity検査結果を持つIntegrityReport。
+
+    Returns:
+        指定timezoneのoffset付き表示文字列。
+    """
     details = [*report.integrity_messages, *report.foreign_key_violations]
     if report.missing_tables:
         details.append(f"missing tables: {', '.join(report.missing_tables)}")

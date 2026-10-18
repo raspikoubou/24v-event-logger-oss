@@ -22,7 +22,16 @@ from event_logger.maintenance.update import (
 
 
 def _release_token(release: ReleaseInfo) -> str:
-    """確認時の版とasset情報を、適用時の再取得結果へ対応付ける。"""
+    """確認時の版とasset情報を、適用時の再取得結果へ対応付ける。
+
+        Args:
+            release: 確認済みのReleaseInfo。
+
+        Returns:
+            SHA-256 hex token。Release tag/versionとarchive/checksum assetのname、URL、
+                size、
+                API URLをJSON化してhashする。
+    """
     identity = [
         release.tag,
         release.version,
@@ -39,7 +48,15 @@ def _release_token(release: ReleaseInfo) -> str:
 
 
 def _register_update_routes(app: Flask, demo: bool) -> None:
-    """GitHub Release確認・更新依頼のrouteをappへ登録する。"""
+    """GitHub Release確認・更新依頼のrouteをappへ登録する。
+
+        Args:
+            app: 対象のFlask application。設定値、extension、route登録先として使う。
+            demo: GPIO等を使わない固定fixture modeかを表す真偽値。
+
+        Returns:
+            None。関数の概要に記したroute登録・状態更新を行う。
+    """
 
     from event_logger.web.app import (
         Response,
@@ -50,7 +67,16 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
 
     @app.post("/api/system/reboot")
     def reboot_system() -> Response:
-        """確認後の本体再起動を、root権限のないWebから管理agentへ依頼する。"""
+        """確認後の本体再起動を、root権限のないWebから管理agentへ依頼する。
+
+            Args:
+                なし。
+
+            Returns:
+                bodyが空ならdemo時は{started:false,demo:true}を200で返し、実機では
+                agent受付後に{started:true,demo:false}を202で返す。任意bodyは400、
+                agent不通は503。
+        """
         # 固定操作に任意引数を付けられると誤解させない。CSRF・共有passwordは
         # 他の変更endpointと同じbefore_request境界で検証済み。
         if request.get_data():
@@ -67,7 +93,15 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
 
     @app.get("/api/update/status")
     def update_status() -> Response:
-        """ローカルの更新結果だけを返す。定期確認ではGitHubへ通信しない。"""
+        """ローカルの更新結果だけを返す。定期確認ではGitHubへ通信しない。
+
+            Args:
+                なし。
+
+            Returns:
+                current_versionとlocal statusを含むJSON 200を返し、
+                    Cache-Controlをno-storeにする。
+        """
         response = _ok(
             {
                 "current_version": str(app.config["APP_VERSION"]),
@@ -79,7 +113,17 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
 
     @app.get("/api/update")
     def update_info() -> Response:
-        """GitHub Releasesの安定版情報を確認する。"""
+        """GitHub Releasesの安定版情報を確認する。
+
+            Args:
+                なし。
+
+            Returns:
+                未構成またはdemo時はconfigured:falseのJSON 200を返す。
+                    Release確認成功時は版、更新可否、notes、
+                    確認token、local statusを返し、
+                        外部確認失敗はUPDATE_CHECK_FAILED/502。
+        """
         current = str(app.config["APP_VERSION"])
         repository = str(app.config.get("UPDATE_REPOSITORY", ""))
         if demo or not repository:
@@ -111,7 +155,16 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
 
     @app.post("/api/update")
     def apply_update() -> Response:
-        """ユーザー操作で検証済みReleaseを固定updaterへ渡す。"""
+        """ユーザー操作で検証済みReleaseを固定updaterへ渡す。
+
+            Args:
+                なし。
+
+            Returns:
+                updater起動を受理した結果をJSON 202で返す。未構成は503、
+                    確認情報不足・対象変更は409、
+                    downloadや検証失敗は該当UPDATE errorで返し、部分downloadを削除する。
+        """
         repository = str(app.config.get("UPDATE_REPOSITORY", ""))
         if demo or not repository:
             return _error(

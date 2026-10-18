@@ -2,6 +2,9 @@
 
 # lgpioのwheelが対象Python/ARM64向けに提供されない場合でも、
 # install/updateのvenv構築を同じOS前提で再現できるようにする。
+# 引数: なし。wheelhouse指定ならAPTを使わず、その場で終了する。
+# 戻り値: 必要packageがある/導入できた場合0、APT不在またはinstall失敗なら非zero。
+# 副作用: wheelhouse未指定で不足時はapt-get update/installを実行する。
 ensure_python_build_dependencies() {
   # wheelhouseを指定した導入では、依存wheelが揃っていればコンパイル不要である。
   # オフライン復旧時にAPT更新を要求して導入不能にしない。

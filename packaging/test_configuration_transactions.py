@@ -17,7 +17,14 @@ from event_logger.web.control_service import _configuration_fingerprint
 def test_failed_reload_does_not_undo_another_successful_save(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """反映確認中の保存と後続の無効化を競合させ、無効化の成功を守る。"""
+    """反映確認中の保存と後続の無効化を競合させ、無効化の成功を守る。
+
+    Args:
+        tmp_path: pytestが用意するテスト専用一時directory。
+        monkeypatch: pytestが提供する一時的な属性・環境差し替えfixture。
+
+    Returns:
+        なし。呼出元は副作用の完了をもって処理結果を扱う。"""
     reloading, release_first, second_entered = Event(), Event(), Event()
 
     class Control:
@@ -26,6 +33,15 @@ def test_failed_reload_does_not_undo_another_successful_save(
         failed = False
 
         def request(self, request: ControlRequest) -> dict[str, object]:
+            """requestの役割を説明する。
+
+                Args:
+                    request: WSGI/HTTP request、または制御clientへ送る要求。
+
+                Returns:
+                    制御commandに応じたACK mapping。最初のreload ACKは遅延・失敗し、
+                        他のrequestは設定fingerprintを返す。
+            """
             if (
                 request.command is ControlCommand.RELOAD_CONFIG
                 and current_thread().name == "first-save"
@@ -65,6 +81,16 @@ def test_failed_reload_does_not_undo_another_successful_save(
     serialized = app.wsgi_app
 
     def observed(environ: dict[str, Any], start: Any) -> Any:
+        """observedの役割を説明する。
+
+            Args:
+                environ: WSGIが渡すrequest環境mapping。本文streamやtransportを含む。
+                start: WSGI start_response callback。元applicationへ応答metadataを渡す。
+
+            Returns:
+                元WSGI appのresponse iterable。
+                    second-save開始を同期eventへ記録してから処理を委譲する。
+        """
         if current_thread().name == "second-save":
             second_entered.set()
         return serialized(environ, start)
@@ -73,6 +99,15 @@ def test_failed_reload_does_not_undo_another_successful_save(
     results: dict[str, int] = {}
 
     def save(name: str, payload: dict[str, object]) -> None:
+        """saveの役割を説明する。
+
+    Args:
+        name: 項目名、選択肢名、または表示用の文字列。
+        payload: HTTP JSON bodyまたは保存対象の設定値。
+            呼出元で形式を検証している場合はその検証済み値。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
         with app.test_client() as client:
             results[name] = client.post("/api/channels/1", json=payload).status_code
 
@@ -107,7 +142,14 @@ def test_failed_reload_does_not_undo_another_successful_save(
 def test_password_save_and_authentication_switch_are_serialized(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """DB保存後に認証切替を止めても、別要求は旧Cookieで保存できない。"""
+    """DB保存後に認証切替を止めても、別要求は旧Cookieで保存できない。
+
+    Args:
+        tmp_path: pytestが用意するテスト専用一時directory。
+        monkeypatch: pytestが提供する一時的な属性・環境差し替えfixture。
+
+    Returns:
+        なし。呼出元は副作用の完了をもって処理結果を扱う。"""
     initial = hash_password("original-password")
     app = create_app(
         {
@@ -129,6 +171,14 @@ def test_password_save_and_authentication_switch_are_serialized(
     configure = auth.configure
 
     def delayed_configure(*, enabled: bool, password_hash: str | None) -> None:
+        """delayed_configureの役割を説明する。
+
+    Args:
+        enabled: 共有パスワード保護を有効にするかを表す真偽値。
+        password_hash: scrypt形式の保存済みパスワードhash。認証設定の比較・検証に使う。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
         if password_hash and verify_password("first-password", password_hash):
             committed.set()
             assert finish_first.wait(5)
@@ -146,6 +196,16 @@ def test_password_save_and_authentication_switch_are_serialized(
     serialized = app.wsgi_app
 
     def observed(environ: dict[str, Any], start: Any) -> Any:
+        """observedの役割を説明する。
+
+            Args:
+                environ: WSGIが渡すrequest環境mapping。本文streamやtransportを含む。
+                start: WSGI start_response callback。元applicationへ応答metadataを渡す。
+
+            Returns:
+                元WSGI appのresponse iterable。
+                    second-save開始を同期eventへ記録してから処理を委譲する。
+        """
         if current_thread().name == "second-password":
             second_entered.set()
         return serialized(environ, start)
@@ -154,6 +214,14 @@ def test_password_save_and_authentication_switch_are_serialized(
     results: dict[int, int] = {}
 
     def save(index: int, password: str) -> None:
+        """saveの役割を説明する。
+
+    Args:
+        index: 対象項目の位置。
+        password: 照合または保存対象の共有パスワード。平文をログや応答へ含めない。
+
+    Returns:
+        なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
         results[index] = (
             clients[index]
             .post(

@@ -28,7 +28,14 @@ class StorageSnapshot:
 
     @property
     def free_ratio(self) -> float:
-        """空き容量の割合を0〜1で返す。"""
+        """空き容量の割合を0〜1で返す。
+
+        Args:
+            なし。
+
+        Returns:
+            filesystem総容量に対する空き容量比（0〜1）。総容量0なら0.0。
+        """
         if self.total_bytes <= 0:
             return 0.0
         return self.free_bytes / self.total_bytes
@@ -47,7 +54,15 @@ class StorageMonitor:
         *,
         disk_path: str | Path | None = None,
     ) -> StorageSnapshot:
-        """DB配置先のfilesystemとDBファイルサイズを読む。"""
+        """DB配置先のfilesystemとDBファイルサイズを読む。
+
+        Args:
+            db_path: 対象SQLite databaseのpath。
+            disk_path: 容量を測るfilesystem上のpath。
+
+        Returns:
+            filesystem、SQLite関連fileサイズ、容量状態のStorageSnapshot。
+        """
         database_path = Path(db_path)
         if str(db_path) == ":memory:" and disk_path is None:
             usage_path = Path.cwd()
@@ -71,7 +86,14 @@ class StorageMonitor:
         )
 
     def needs_capacity_protection(self, snapshot: StorageSnapshot) -> bool:
-        """仕様のDB比率または空き容量閾値に達したか返す。"""
+        """仕様のDB比率または空き容量閾値に達したか返す。
+
+        Args:
+            snapshot: filesystemとDB容量の測定値を持つStorageSnapshot。
+
+        Returns:
+            容量危険状態またはDB比率上限到達時にTrue。
+        """
         database_ratio = (
             snapshot.db_bytes / snapshot.total_bytes if snapshot.total_bytes else 1.0
         )
@@ -81,7 +103,14 @@ class StorageMonitor:
 
 
 def _database_bytes(database_path: Path) -> int:
-    """WAL/SHMを含むSQLite関連ファイルの容量を合算する。"""
+    """WAL/SHMを含むSQLite関連ファイルの容量を合算する。
+
+    Args:
+        database_path: SQLite databaseのfilesystem path。
+
+    Returns:
+        DB本体、WAL、SHM fileの合計サイズ（byte）。
+    """
     total = 0
     for path in (
         database_path,

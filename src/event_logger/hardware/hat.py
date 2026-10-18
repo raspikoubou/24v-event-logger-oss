@@ -41,7 +41,19 @@ OUTPUT_ACTIVE_HIGH: Final[bool] = True
 
 
 def validate_definition() -> None:
-    """固定定義のチャンネル数と重複を検証する。"""
+    """固定定義のチャンネル数と重複を検証する。
+
+    Args:
+        なし。
+
+    Returns:
+        None。 制約を検証するだけで、 永続状態や入力値は変更しない。
+
+    Raises:
+        ValueError: 「HAT definition must contain channels 1 through
+            6」に該当すると判定した場合。 「HAT input and output GPIO pins must be
+            unique」に該当すると判定した場合。
+    """
     expected_channels = set(range(1, 7))
     if set(INPUT_PINS) != expected_channels or set(OUTPUT_PINS) != expected_channels:
         raise ValueError("HAT definition must contain channels 1 through 6")

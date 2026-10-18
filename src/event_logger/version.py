@@ -10,7 +10,14 @@ _FALLBACK_VERSION = "1.0.1"
 
 
 def get_version() -> str:
-    """インストール済みevent-loggerのversionを返す。"""
+    """インストール済みevent-loggerのversionを返す。
+
+        Args:
+            なし。
+
+        Returns:
+            インストールmetadataまたはpackage defaultから得たversion文字列。
+    """
     try:
         return distribution_version("event-logger")
     except PackageNotFoundError:

@@ -53,7 +53,14 @@ class EventBatchRepository:
     """入力・出力eventを同一のSQLite transactionで保存する。"""
 
     def __init__(self, connection: sqlite3.Connection) -> None:
-        """transaction対象の接続を受け取る。接続のclose責務は呼び出し側にある。"""
+        """transaction対象の接続を受け取る。接続のclose責務は呼び出し側にある。
+
+        Args:
+            connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+        Returns:
+            None。 依存値を保持して利用可能なinstanceを初期化する。
+        """
         self._connection = connection
 
     def append_many(self, events: Sequence[EventWrite]) -> None:
@@ -61,6 +68,10 @@ class EventBatchRepository:
 
         Args:
             events: FIFO順に並べた入力・出力event。
+
+        Returns:
+            None。 空列は何もせず終了する。 非空列はFIFO順で一transactionに保存する。
+                全件成功時にcommitし、 失敗時はrollbackする。 connectionはcloseしない。
 
         Raises:
             ValueError: channelまたはlogical valueが範囲外の場合。
@@ -89,7 +100,18 @@ def _insert_input_event(
     connection: sqlite3.Connection,
     event: InputEventWrite,
 ) -> None:
-    """入力eventをtransaction内へ追加する。"""
+    """入力eventをtransaction内へ追加する。
+
+    Args:
+        connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+        event: これから保存するInputEventWrite値。 DB rowや復元済みInputEventではない。
+
+    Returns:
+        None。 渡されたSQLite接続へ変更を適用し、 接続のcloseは呼出元に残す。
+
+    Raises:
+        ValueError: 論理値が0または1以外の場合。 channel_idが1〜6の範囲外の場合。
+    """
     if event.value not in (0, 1):
         raise ValueError("value must be 0 or 1")
     if not 1 <= event.channel_id <= 6:
@@ -116,7 +138,18 @@ def _insert_output_event(
     connection: sqlite3.Connection,
     event: OutputEventWrite,
 ) -> None:
-    """出力eventをtransaction内へ追加する。"""
+    """出力eventをtransaction内へ追加する。
+
+    Args:
+        connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+        event: 処理するevent値。 DB書込み関数では保存前のwrite modelを受け取る。
+
+    Returns:
+        None。 渡されたSQLite接続へ変更を適用し、 接続のcloseは呼出元に残す。
+
+    Raises:
+        ValueError: 論理値が0または1以外の場合。 output_channelが1〜6の範囲外の場合。
+    """
     if event.value not in (0, 1):
         raise ValueError("value must be 0 or 1")
     if not 1 <= event.output_channel <= 6:
@@ -144,7 +177,14 @@ class EventRepository:
     """入力の一次eventを保存・検索する。"""
 
     def __init__(self, connection: sqlite3.Connection) -> None:
-        """接続を受け取る。接続のclose責務は呼び出し側にある。"""
+        """接続を受け取る。接続のclose責務は呼び出し側にある。
+
+        Args:
+            connection: 呼出元管理のSQLite接続。 SQL実行後もcloseせず呼出元へ残す。
+
+        Returns:
+            None。 依存値を保持して利用可能なinstanceを初期化する。
+        """
         self._connection = connection
 
     def append(
@@ -158,7 +198,26 @@ class EventRepository:
         kind: EventKind,
         clock_synced: bool,
     ) -> InputEvent:
-        """入力eventを1件だけINSERT + COMMITする。"""
+        """入力eventを1件だけINSERT + COMMITする。
+
+        Args:
+            session_id: 対象sessionのDB ID。 session外eventが混ざらないようqueryで絞る。
+            ts_utc_ms: 保存時のUTC Unix epoch timestamp（ms）。
+                画面表示/検索の時間軸に使う。
+            mono_ns: event発生時のmonotonic timestamp（ns）。
+                session内経過時間の基準にする。
+            channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+            value: 論理入力/出力値。 ONはTrueまたは1、 OFFはFalseまたは0。
+            kind: event分類。 EDGEは変化、 SNAPSHOTはsession開始時の状態記録を示す。
+            clock_synced: event記録時のsystem clock同期状態。
+
+        Returns:
+            InputEvent型の結果。 戻り値の型に応じ、
+                該当なしはNoneまたは空collectionとなる。
+
+        Raises:
+            ValueError: 論理値が0または1以外の場合。 channel_idが1〜6の範囲外の場合。
+        """
         if value not in (0, 1):
             raise ValueError("value must be 0 or 1")
         if not 1 <= channel_id <= 6:
@@ -202,7 +261,25 @@ class EventRepository:
         offset: int = 0,
         descending: bool = False,
     ) -> list[InputEvent]:
-        """期間 `[start_ms, end_ms)` のeventを返す。既定は時刻・IDの昇順。"""
+        """期間 `[start_ms, end_ms)` のeventを返す。既定は時刻・IDの昇順。
+
+        Args:
+            start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+            end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+            channel_ids: 対象IN番号の列。 各番号を1〜6に制限し、 query filterへ渡す。
+            kinds: queryに含めるevent kindの集合。
+            limit: query結果の最大row数。
+            offset: query結果の先頭から除外するrow数。
+            descending: Trueなら新しい記録を先にする並び順指定。
+
+        Returns:
+            期間と任意filterに一致するInputEvent列。 query指定の時刻/ID順を保ち、
+                該当なしは空list。
+
+        Raises:
+            ValueError: 期間開始が終了未満でない場合。 limitが0以下の場合。
+                offsetが負の場合。
+        """
         if start_ms >= end_ms:
             raise ValueError("start_ms must be before end_ms")
         if limit is not None and limit < 1:
@@ -239,7 +316,19 @@ class EventRepository:
         end_ms: int,
         channel_id: int,
     ) -> int:
-        """指定入力の期間内event数を行データを展開せずに数える。"""
+        """指定入力の期間内event数を行データを展開せずに数える。
+
+        Args:
+            start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+            end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+            channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+
+        Returns:
+            条件に一致するevent/row件数。 該当がない場合は0。
+
+        Raises:
+            ValueError: 期間開始が終了未満でない場合。
+        """
         if start_ms >= end_ms:
             raise ValueError("start_ms must be before end_ms")
         _validate_channel_ids([channel_id])
@@ -260,7 +349,20 @@ class EventRepository:
         channel_id: int,
         limit: int,
     ) -> int:
-        """期間内eventを上限件数までだけ数える。"""
+        """期間内eventを上限件数までだけ数える。
+
+        Args:
+            start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+            end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+            channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+            limit: query結果の最大row数。
+
+        Returns:
+            条件に一致するevent/row件数。 該当がない場合は0。
+
+        Raises:
+            ValueError: 期間開始が終了未満でない場合。 limitが0以下の場合。
+        """
         if start_ms >= end_ms:
             raise ValueError("start_ms must be before end_ms")
         if limit < 1:
@@ -279,7 +381,15 @@ class EventRepository:
         return int(row[0]) if row is not None else 0
 
     def last_before(self, *, channel_id: int, before_ms: int) -> InputEvent | None:
-        """指定時刻より前の最後のeventを返す。"""
+        """指定時刻より前の最後のeventを返す。
+
+        Args:
+            channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+            before_ms: 指定時刻より前のeventを検索するUTC epoch ms境界。
+
+        Returns:
+            条件に一致する最新InputEvent。 該当eventがなければNone。
+        """
         _validate_channel_ids([channel_id])
         row = self._connection.execute(
             """
@@ -299,7 +409,19 @@ class EventRepository:
         value: int,
         before_ms: int,
     ) -> InputEvent | None:
-        """指定時刻以前で、event IDが最大のedgeを返す。"""
+        """指定時刻以前で、event IDが最大のedgeを返す。
+
+        Args:
+            channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+            value: 論理入力/出力値。 ONはTrueまたは1、 OFFはFalseまたは0。
+            before_ms: 指定時刻より前のeventを検索するUTC epoch ms境界。
+
+        Returns:
+            条件に一致する最新InputEvent。 該当eventがなければNone。
+
+        Raises:
+            ValueError: 論理値が0または1以外の場合。
+        """
         _validate_channel_ids([channel_id])
         if value not in (0, 1):
             raise ValueError("value must be 0 or 1")
@@ -360,7 +482,20 @@ class EventRepository:
     def last_edge_between(
         self, *, channel_id: int, value: int, start_ms: int, end_ms: int
     ) -> InputEvent | None:
-        """選択期間の最新edgeを、履歴を展開せずevent ID順で返す。"""
+        """選択期間の最新edgeを、履歴を展開せずevent ID順で返す。
+
+        Args:
+            channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+            value: 論理入力/出力値。 ONはTrueまたは1、 OFFはFalseまたは0。
+            start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+            end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+
+        Returns:
+            条件に一致する最新InputEvent。 該当eventがなければNone。
+
+        Raises:
+            ValueError: 「edge value or period is invalid」に該当すると判定した場合。
+        """
         _validate_channel_ids([channel_id])
         if value not in (0, 1) or start_ms >= end_ms:
             raise ValueError("edge value or period is invalid")
@@ -386,7 +521,18 @@ class EventRepository:
         after_event_id: int,
         channel_ids: Sequence[int] | None = None,
     ) -> list[InputEvent]:
-        """event ID基準でeventを古い順に返す。"""
+        """event ID基準でeventを古い順に返す。
+
+        Args:
+            after_event_id: このIDより大きいeventだけを数える排他的reset境界。
+            channel_ids: 対象IN番号の列。 各番号を1〜6に制限し、 query filterへ渡す。
+
+        Returns:
+            query条件に一致する入力event。 該当なしは空list。
+
+        Raises:
+            ValueError: after_event_idが負の場合。
+        """
         if after_event_id < 0:
             raise ValueError("after_event_id must not be negative")
         # reset後カウントの境界はevent IDが正本であり、wall clockの補正で
@@ -410,7 +556,18 @@ class EventRepository:
         session_id: int,
         channel_ids: Sequence[int] | None = None,
     ) -> list[InputEvent]:
-        """session境界を正として入力eventをevent ID順で返す。"""
+        """session境界を正として入力eventをevent ID順で返す。
+
+        Args:
+            session_id: 対象sessionのDB ID。 session外eventが混ざらないようqueryで絞る。
+            channel_ids: 対象IN番号の列。 各番号を1〜6に制限し、 query filterへ渡す。
+
+        Returns:
+            query条件に一致する入力event。 該当なしは空list。
+
+        Raises:
+            ValueError: session_idが0以下の場合。
+        """
         if session_id < 1:
             raise ValueError("session_id must be positive")
         clauses = ["session_id = ?"]
@@ -435,9 +592,20 @@ class EventRepository:
     ) -> InputEvent | None:
         """session内で時刻境界を満たす最後のeventをID順で返す。
 
-        NTP補正でwall clockが逆行しても発生順を保ちつつ、active session全件を
-        Web応答のために読み出さない。時刻境界は未来時刻のeventを現在状態へ
+        NTP補正でwall clockが逆行しても発生順を保ちつつ、 active session全件を
+        Web応答のために読み出さない。 時刻境界は未来時刻のeventを現在状態へ
         誤適用しないための限定条件である。
+
+        Args:
+            session_id: 対象sessionのDB ID。 session外eventが混ざらないようqueryで絞る。
+            channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+            before_ms: 指定時刻より前のeventを検索するUTC epoch ms境界。
+
+        Returns:
+            条件に一致する最新InputEvent。 該当eventがなければNone。
+
+        Raises:
+            ValueError: session_idが0以下の場合。
         """
         if session_id < 1:
             raise ValueError("session_id must be positive")
@@ -456,19 +624,40 @@ class EventRepository:
         return _event_from_row(row) if row is not None else None
 
     def max_id(self) -> int:
-        """現在保存されているeventの最大IDを返す。"""
+        """現在保存されているeventの最大IDを返す。
+
+        Args:
+            なし。
+
+        Returns:
+            保存先で次に使う、 または直近に割り当てられた整数ID。
+        """
         row = self._connection.execute(
             "SELECT COALESCE(MAX(id), 0) FROM events"
         ).fetchone()
         return int(row[0])
 
     def count_all(self) -> int:
-        """保存されている入力event件数を返す。"""
+        """保存されている入力event件数を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            条件に一致するevent/row件数。 該当がない場合は0。
+        """
         row = self._connection.execute("SELECT COUNT(*) FROM events").fetchone()
         return int(row[0])
 
     def count_unsynchronized(self) -> int:
-        """時計未同期時に保存された入力event件数を返す。"""
+        """時計未同期時に保存された入力event件数を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            条件に一致するevent/row件数。 該当がない場合は0。
+        """
         row = self._connection.execute(
             "SELECT COUNT(*) FROM events WHERE clock_synced = 0"
         ).fetchone()
@@ -483,7 +672,21 @@ class EventRepository:
         end_ms: int | None = None,
         after_event_id: int | None = None,
     ) -> int:
-        """指定条件のedge件数をSQL側で数える。"""
+        """指定条件のedge件数をSQL側で数える。
+
+        Args:
+            channel_id: 対象のIN/OUT番号。 製品固定の1〜6範囲で、 BCM pin番号ではない。
+            value: 論理入力/出力値。 ONはTrueまたは1、 OFFはFalseまたは0。
+            start_ms: 期間の開始時刻（UTC epoch ms、 包含境界）。
+            end_ms: 期間の終了時刻（UTC epoch ms、 排他的境界）。
+            after_event_id: このIDより大きいeventだけを数える排他的reset境界。
+
+        Returns:
+            条件に一致するevent/row件数。 該当がない場合は0。
+
+        Raises:
+            ValueError: 論理値が0または1以外の場合。 after_event_idが負の場合。
+        """
         _validate_channel_ids([channel_id])
         if value not in (0, 1):
             raise ValueError("value must be 0 or 1")

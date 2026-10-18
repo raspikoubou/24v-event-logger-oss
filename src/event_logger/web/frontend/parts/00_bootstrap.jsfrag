@@ -12,6 +12,12 @@
     shouldRefreshLogPage
   } = window.EventLoggerRefreshPolicy;
 
+  /**
+   * JSON APIを取得し、非成功応答を共通errorとして扱う。
+   * @param {string} path - API path。
+   * @param {Object} options - HTTP fetch options。method、bodyなどを含む。
+   * @returns {Promise<Object>} 成功時はpayload.data。401では/loginへ遷移し、非成功HTTPまたはok=falseではErrorをrejectする。
+   */
   async function liveJson(path, options = {}) {
     const requestOptions = { ...options, headers: { ...(options.headers || {}) } };
     if (requestOptions.body && !requestOptions.headers["Content-Type"]) {
@@ -42,6 +48,14 @@
   } = window.EventLoggerRetentionPolicy;
   const { serializeDemoCsv } = window.EventLoggerCsvFormat;
 
+  /**
+   * 画面初期化に必要な固定fixtureまたはlive API dataを読み込む。
+   * @param {string} period - 期間選択値。
+   * @param {boolean} includeDashboard - dashboard responseを含めるか。
+   * @param {Object|null} customRange - 任意期間の境界値。
+   * @param {boolean} includeEvents - event一覧を取得するか。
+   * @returns {Promise<Object>} Dashboard、channel、event等を含む初期fixture/API payload。
+   */
   async function loadLiveFixtures(
     period = null,
     includeDashboard = false,
@@ -107,6 +121,11 @@
       };
     }
     const knownLoggerState = ["logging", "maintenance", "critical"].includes(status.logger_status);
+    /**
+     * channelsの処理を行い、画面状態の該当部分を扱う。
+     * @param {Object} options - HTTP fetch options。method、bodyなどを含む。
+     * @returns {string} 入力を画面またはAPIで使う形式へ変換した文字列。
+     */
     const channels = (status.channels || []).map((channel) => ({
       id: channel.id,
       name: channel.name || `IN${channel.id}`,
@@ -118,6 +137,7 @@
       onLabel: channel.on_label || "ON",
       offLabel: channel.off_label || "OFF"
     }));
+    // fixtureのrule列を画面表示用に変換し、API保存形とは分けて保持する。
     const outputRules = (rules.items || []).map((rule) => ({
       id: rule.id,
       name: rule.name,
@@ -239,6 +259,10 @@
     storageWarningMessage
   } = window.EventLoggerStoragePolicy;
 
+  /**
+   * 初期データを読み、画面のevent handlerと初回描画を開始する。
+   * @returns {Promise<void>} 初期データ取得と初期描画が完了した時にresolveする。取得失敗はrejectする。
+   */
   async function start() {
     const fixtures = await loadLiveFixtures(null, liveMode);
     runApp(fixtures);

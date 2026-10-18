@@ -15,7 +15,14 @@ INTERNAL_PATTERNS = (
 
 
 def violations(body: str) -> list[int]:
-    """内部情報候補の行番号を返す。意味と事実は別途レビューする。"""
+    """内部情報候補の行番号を返す。意味と事実は別途レビューする。
+
+        Args:
+            body: 検査・送信するHTTPまたはRelease本文。
+
+        Returns:
+            公開本文内の内部情報候補を示す1-based行番号list。本文の意味確認は行わない。
+    """
     return [
         number
         for number, line in enumerate(body.splitlines(), 1)
@@ -24,7 +31,14 @@ def violations(body: str) -> list[int]:
 
 
 def main() -> int:
-    """指定本文を読み取り検査し、混入候補があれば失敗する。"""
+    """指定本文を読み取り検査し、混入候補があれば失敗する。
+
+        Args:
+            なし。
+
+        Returns:
+            CLI終了code。違反なしは0、候補検出または入力errorは非0。
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("body_file", type=Path)
     args = parser.parse_args()

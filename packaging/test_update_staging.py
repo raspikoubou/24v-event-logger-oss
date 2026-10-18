@@ -18,7 +18,15 @@ from event_logger.maintenance.update_agent import UpdateAgent
 def test_staging_revalidates_opened_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: str
 ) -> None:
-    """path検証後も、開いたfileの種類と実際のコピー量を検証する。"""
+    """path検証後も、開いたfileの種類と実際のコピー量を検証する。
+
+Args:
+    tmp_path: pytestが用意するテスト専用一時directory。
+    monkeypatch: pytestが提供する一時的な属性・環境差し替えfixture。
+    replacement: 検証後のarchive差し替え内容。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     work = tmp_path / "work"
     work.mkdir()
     verified = tmp_path / "verified"
@@ -43,7 +51,13 @@ def test_staging_revalidates_opened_archive(
     )
 
     def prepare() -> None:
-        """元path検証とrootコピーの間の差替えを再現する。"""
+        """元path検証とrootコピーの間の差替えを再現する。
+
+Args:
+    なし。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
         if replacement == "symlink":
             outside = tmp_path / "outside"
             outside.write_bytes(b"original")
@@ -71,7 +85,14 @@ def test_staging_revalidates_opened_archive(
 def test_archive_growth_after_fstat_is_bounded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """open後のサイズ確認を通っても、上限を越えた実データはコピーしない。"""
+    """open後のサイズ確認を通っても、上限を越えた実データはコピーしない。
+
+Args:
+    tmp_path: pytestが用意するテスト専用一時directory。
+    monkeypatch: pytestが提供する一時的な属性・環境差し替えfixture。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     archive = tmp_path / "archive"
     archive.write_bytes(b"123456789")
     monkeypatch.setattr(update_agent, "MAX_ARCHIVE_BYTES", 8)
@@ -85,7 +106,13 @@ def test_archive_growth_after_fstat_is_bounded(
 
 
 def test_fifo_archive_is_rejected_without_waiting(tmp_path: Path) -> None:
-    """FIFOを通常fileと誤認してroot agentの待受を止めない。"""
+    """FIFOを通常fileと誤認してroot agentの待受を止めない。
+
+Args:
+    tmp_path: pytestが用意するテスト専用一時directory。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     archive = tmp_path / "archive"
     os.mkfifo(archive)
     with pytest.raises(ValueError, match="regular file"):

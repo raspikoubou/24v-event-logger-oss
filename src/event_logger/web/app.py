@@ -174,8 +174,16 @@ _DASHBOARD_TIMELINE_MAX_JSON_BYTES = 2 * 1024 * 1024
 def create_app(config: Mapping[str, Any] | None = None) -> Flask:
     """Flask appを作成する。
 
-    `EVENT_LOGGER_DEMO=1` 相当の `DEMO=True` を渡すと、外部DBやGPIOなしで
-    固定fixtureを作成する。module import時にはDB・GPIO・threadを初期化しない。
+            `EVENT_LOGGER_DEMO=1` 相当の `DEMO=True` を渡すと、外部DBやGPIOなしで
+            固定fixtureを作成する。module import時にはDB・GPIO・threadを初期化しない。
+
+
+        Args:
+            config: Flask factoryへ渡す設定mapping。明示値が既定値を上書きする。
+
+        Returns:
+            登録済みroute、extension、WebContextを持つFlask app。
+                構築中失敗時はfactoryがbase SQLite connectionを閉じる。
     """
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config.from_mapping(
@@ -245,7 +253,22 @@ def _finish_app_creation(
     thread_safe_requests: bool,
     auth: SharedPasswordAuth,
 ) -> Flask:
-    """DB接続後のapp構築を完了する。失敗時の接続解放はfactoryが担う。"""
+    """DB接続後のapp構築を完了する。失敗時の接続解放はfactoryが担う。
+
+        Args:
+            app: 対象のFlask application。設定値、extension、route登録先として使う。
+            connection: この処理が利用するSQLite connection。
+                呼出元が所有する接続を前提とする。
+            database_path_text: SQLite接続へ渡す文字列化済みdatabase path。
+            clock: 現在時刻と単調時刻を供給するClock。期間境界の基準に使う。
+            demo: GPIO等を使わない固定fixture modeかを表す真偽値。
+            thread_safe_requests: requestごとにSQLite接続を分けるかを表す真偽値。
+            auth: 共有パスワード認証の状態を管理するオブジェクト。
+
+        Returns:
+            demo fixtureやrequest context middlewareを登録したFlask app。
+                受け取ったconnectionの寿命はWebContextが所有する。
+    """
     initialize_connection(connection)
     control_client = _control_client(app, demo)
     status_provider = _status_provider(app)
@@ -319,7 +342,15 @@ def _finish_app_creation(
 
 
 def create_production_app() -> Flask:
-    """Gunicorn用に環境変数から本番Web設定を読み込む。"""
+    """Gunicorn用に環境変数から本番Web設定を読み込む。
+
+        Args:
+            なし。
+
+        Returns:
+            本番environment設定、SQLite connection、
+                Unix loggerd control clientを持つFlask app。
+    """
     demo = os.environ.get("EVENT_LOGGER_DEMO") == "1"
     database_path = os.environ.get(
         "EVENT_LOGGER_DB",
@@ -365,7 +396,14 @@ def create_production_app() -> Flask:
 
 
 def _default_clock(demo: bool) -> Clock:
-    """demo fixtureと本番で異なるClockを選ぶ。"""
+    """demo fixtureと本番で異なるClockを選ぶ。
+
+        Args:
+            demo: GPIO等を使わない固定fixture modeかを表す真偽値。
+
+        Returns:
+            demoなら固定時刻fixture、本番ならsystem clockを実装するClock。
+    """
     if demo:
         return FakeClock(utc_ms=1_700_000_000_000, monotonic_ns=0, synchronized=True)
     return SystemClock()
@@ -375,7 +413,18 @@ def _control_endpoint(
     context: WebContext,
     control_request: ControlRequest,
 ) -> Response:
-    """制御要求をIPCへ渡し、UI向けの安全なHTTP envelopeへ変換する。"""
+    """制御要求をIPCへ渡し、UI向けの安全なHTTP envelopeへ変換する。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            control_request: loggerdへ送る固定スキーマの制御要求。
+
+        Returns:
+            成功時はcontrol response dataを含む200 envelope。
+                loggerd拒否はcommand error/409、
+                接続・protocol障害はLOGGERD_UNAVAILABLE/503。
+    """
     if context.control_client is None:
         return _error(
             "LOGGERD_UNAVAILABLE",
@@ -490,7 +539,15 @@ def _control_endpoint(
 
 
 def _ensure_csrf_token() -> str:
-    """sessionにCSRF tokenを一度だけ発行する。"""
+    """sessionにCSRF tokenを一度だけ発行する。
+
+        Args:
+            なし。
+
+        Returns:
+            sessionに保存済み、または新規生成したURL-safe CSRF token。
+                session lifetime中は同じ値を返す。
+    """
     token = session.get("csrf_token")
     if not isinstance(token, str) or not token:
         token = secrets.token_urlsafe(32)
@@ -499,7 +556,15 @@ def _ensure_csrf_token() -> str:
 
 
 def _status_provider(app: Flask) -> Callable[[], str]:
-    """loggerd状態providerを設定値から構築する。"""
+    """loggerd状態providerを設定値から構築する。
+
+        Args:
+            app: 対象のFlask application。設定値、extension、route登録先として使う。
+
+        Returns:
+            LOGGER_STATUS_PROVIDER、control client、
+                または固定設定からlogger status文字列を返すcallable。
+    """
     configured = app.config.get("LOGGER_STATUS_PROVIDER")
     if callable(configured):
         return lambda: str(configured())
@@ -507,7 +572,15 @@ def _status_provider(app: Flask) -> Callable[[], str]:
 
 
 def _stored_dashboard_period(context: WebContext) -> str:
-    """保存済みDashboard共通期間を検証して返す。"""
+    """保存済みDashboard共通期間を検証して返す。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+
+        Returns:
+            許可されたDashboard period key。保存値欠落・不正なら既定の8h。
+    """
     value = context.settings.get_json("dashboard_time_range", "8h")
     supported_periods = {
         *WIDGET_PERIOD_DURATIONS_MS,
@@ -524,7 +597,15 @@ def _stored_dashboard_period(context: WebContext) -> str:
 def _stored_dashboard_custom_range(
     context: WebContext,
 ) -> dict[str, int] | None:
-    """保存済みの任意期間を検証して返す。"""
+    """保存済みの任意期間を検証して返す。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+
+        Returns:
+            検証済みfrom_ms/to_msを持つdict。保存範囲が欠落・不正ならNone。
+    """
     value = context.settings.get_json("dashboard_custom_range")
     if not isinstance(value, Mapping):
         return None
@@ -543,7 +624,15 @@ def _stored_dashboard_custom_range(
 
 
 def _channel_payload(channel: ChannelConfig) -> dict[str, Any]:
-    """ChannelConfigをJSON payloadへ変換する。"""
+    """ChannelConfigをJSON payloadへ変換する。
+
+        Args:
+            channel: 対象入力チャンネルの設定または記録に対応するchannel。
+
+        Returns:
+            id/enabled/name/debounce_msを含むchannel JSON dict。
+                GPIO番号や電気極性は含めない。
+    """
     return {
         "id": channel.id,
         "enabled": channel.enabled,
@@ -560,7 +649,18 @@ def _log_payload(
     rule_names: Mapping[int, str],
     timezone_name: str,
 ) -> dict[str, Any]:
-    """統合ログレコードをUI用payloadへ変換する。"""
+    """統合ログレコードをUI用payloadへ変換する。
+
+        Args:
+            event: 対象のログ記録。channel、値、時刻、種類を含む。
+            channel_map: チャンネル番号から設定への対応表。ログの表示名解決に使う。
+            rule_names: ルールIDから画面表示名への対応表。
+            timezone_name: 日時表示・暦境界計算に使うIANA timezone名。
+
+        Returns:
+            日時、signal、name、logical value、kind/sourceを含むログJSON dict。
+                時刻は指定timezoneで表示する。
+    """
     if event.record_type == "input":
         signal = f"IN{event.channel_id}"
         name = channel_map[event.channel_id].name
@@ -581,7 +681,16 @@ def _log_payload(
 
 
 def _read_update_status(path_value: object) -> dict[str, object] | None:
-    """root updaterが出力した状態を表示用に読み取る。"""
+    """root updaterが出力した状態を表示用に読み取る。
+
+        Args:
+            path_value: 状態fileまたは設定fileのpath文字列。
+                存在しない場合の扱いは呼出元の契約に従う。
+
+        Returns:
+            許可されたfieldだけを持つlocal updater status dict。
+                file不在・破損・型不正ならNone。
+    """
     if not isinstance(path_value, str) or not path_value:
         return None
     try:
@@ -599,19 +708,42 @@ def _read_update_status(path_value: object) -> dict[str, object] | None:
 
 
 def _ok(data: Mapping[str, Any]) -> Response:
-    """成功レスポンスを統一形式で返す。"""
+    """成功レスポンスを統一形式で返す。
+
+        Args:
+            data: 成功envelopeのdata fieldへそのまま格納するpayload mapping。
+
+        Returns:
+            HTTP 200 Response。bodyは {ok: true, data: data} envelope。
+    """
     return jsonify({"ok": True, "data": data})
 
 
 def _error(code: str, message: str, status_code: int) -> Response:
-    """内部exceptionを漏らさずエラーレスポンスを返す。"""
+    """内部exceptionを漏らさずエラーレスポンスを返す。
+
+        Args:
+            code: HTTPまたは内部エラーを識別する固定code。
+            message: 利用者へ返す安全な説明文。内部例外の詳細を含めない。
+            status_code: HTTP responseへ設定する数値status code。
+
+        Returns:
+            指定status codeのHTTP Response。
+                bodyは安全なcode/messageを持つ {ok: false, error: ...} envelope。
+    """
     response = jsonify({"ok": False, "error": {"code": code, "message": message}})
     response.status_code = status_code
     return response
 
 
 def main() -> None:
-    """開発・demo確認用にlocalhostだけでFlask appを起動する。"""
+    """開発・demo確認用にlocalhostだけでFlask appを起動する。
+
+Args:
+    なし。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     app = create_production_app()
     app.run(
         host=os.environ.get("EVENT_LOGGER_WEB_HOST", "127.0.0.1"),

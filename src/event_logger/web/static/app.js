@@ -12,6 +12,12 @@
     shouldRefreshLogPage
   } = window.EventLoggerRefreshPolicy;
 
+  /**
+   * JSON APIを取得し、非成功応答を共通errorとして扱う。
+   * @param {string} path - API path。
+   * @param {Object} options - HTTP fetch options。method、bodyなどを含む。
+   * @returns {Promise<Object>} 成功時はpayload.data。401では/loginへ遷移し、非成功HTTPまたはok=falseではErrorをrejectする。
+   */
   async function liveJson(path, options = {}) {
     const requestOptions = { ...options, headers: { ...(options.headers || {}) } };
     if (requestOptions.body && !requestOptions.headers["Content-Type"]) {
@@ -42,6 +48,14 @@
   } = window.EventLoggerRetentionPolicy;
   const { serializeDemoCsv } = window.EventLoggerCsvFormat;
 
+  /**
+   * 画面初期化に必要な固定fixtureまたはlive API dataを読み込む。
+   * @param {string} period - 期間選択値。
+   * @param {boolean} includeDashboard - dashboard responseを含めるか。
+   * @param {Object|null} customRange - 任意期間の境界値。
+   * @param {boolean} includeEvents - event一覧を取得するか。
+   * @returns {Promise<Object>} Dashboard、channel、event等を含む初期fixture/API payload。
+   */
   async function loadLiveFixtures(
     period = null,
     includeDashboard = false,
@@ -107,6 +121,11 @@
       };
     }
     const knownLoggerState = ["logging", "maintenance", "critical"].includes(status.logger_status);
+    /**
+     * channelsの処理を行い、画面状態の該当部分を扱う。
+     * @param {Object} options - HTTP fetch options。method、bodyなどを含む。
+     * @returns {string} 入力を画面またはAPIで使う形式へ変換した文字列。
+     */
     const channels = (status.channels || []).map((channel) => ({
       id: channel.id,
       name: channel.name || `IN${channel.id}`,
@@ -118,6 +137,7 @@
       onLabel: channel.on_label || "ON",
       offLabel: channel.off_label || "OFF"
     }));
+    // fixtureのrule列を画面表示用に変換し、API保存形とは分けて保持する。
     const outputRules = (rules.items || []).map((rule) => ({
       id: rule.id,
       name: rule.name,
@@ -239,11 +259,20 @@
     storageWarningMessage
   } = window.EventLoggerStoragePolicy;
 
+  /**
+   * 初期データを読み、画面のevent handlerと初回描画を開始する。
+   * @returns {Promise<void>} 初期データ取得と初期描画が完了した時にresolveする。取得失敗はrejectする。
+   */
   async function start() {
     const fixtures = await loadLiveFixtures(null, liveMode);
     runApp(fixtures);
   }
 
+  /**
+   * fixtureを共有状態へ設定し、各画面の初期化と描画を行う。
+   * @param {Object} fixtures - 固定fixtureまたは現在の画面状態。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function runApp(fixtures) {
   let currentPeriod = fixtures.settings.dashboardPeriod || "8h";
   let dashboardCustomRangeDraft = null;
@@ -293,12 +322,21 @@
     "イベント一覧": "ダッシュボード内に簡易ログを表示します。"
   };
 
+  /**
+   * demo画面の時刻軸に使う固定基準時刻を返す。
+   * @returns {number} demo fixtureの固定時刻をUTC Unix epoch millisecondで返す。
+   */
   function demoNowMs() {
     return demoClockBaseMs + performance.now() - demoClockStartedAtMs;
   }
 
   const refreshLiveState = createRefreshCoordinator(refreshLiveStateOnce);
 
+  /**
+   * 一回分のlive状態を取得し、表示と次回更新時刻を更新する。
+   * @param {boolean} forceDashboard - dashboard更新を強制するか。
+   * @returns {Promise<void>} live statusと必要なDashboard dataをDOMへ反映後resolveする。通信失敗時はErrorをrejectする。
+   */
   async function refreshLiveStateOnce(forceDashboard = false) {
     const nowMs = Date.now();
     const customRangeForRefresh = (
@@ -399,6 +437,10 @@
     refreshCurrentStateCards();
   }
 
+  /**
+   * 現在のserver stateを操作buttonやstatus表示へ同期する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function syncLiveControls() {
     const critical = fixtures.loggerStatus === "critical";
     const configurationBlocked = Boolean(fixtures.configurationSync?.outOfSync);
@@ -440,6 +482,10 @@
     banner.hidden = logging && loggerStateKnown;
   }
 
+  /**
+   * 設定同期や保存状態の警告を表示する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderUnsynchronizedWarnings() {
     const count = fixtures.unsynchronizedCount;
     const latencyWarning = Boolean(fixtures.writeLatency?.warning);
@@ -486,6 +532,10 @@
     }
   }
 
+  /**
+   * 現在設定中のtimezoneを返す。
+   * @returns {string} 本体設定に保存された有効timezone名。未設定時は既定timezone。
+   */
   function selectedTimeZone() {
     return fixtures.settings.timezone || "Asia/Tokyo";
   }
@@ -502,6 +552,11 @@
     event.id ||= fixtures.events.length - index;
   });
 
+  /**
+   * 信号IDに対応する設定名を返す。
+   * @param {string} signalId - 信号ID。
+   * @returns {string} IN/OUT signal IDに対応する設定名。未登録時はsignal IDそのもの。
+   */
   function signalDisplayName(signalId) {
     const match = /^(IN|OUT)(\d+)$/.exec(signalId);
     if (!match) return signalId;
@@ -512,19 +567,39 @@
 
   const { signalIds, channelLabel, escapeHtml } = window.EventLoggerViewFormat;
 
+  /**
+   * switch elementの論理ON/OFF状態を読む。
+   * @param {HTMLElement} button - 対象button element。
+   * @returns {boolean} buttonのaria-checkedがtrueならtrue。
+   */
   function switchIsOn(button) {
     return button.classList.contains("is-on");
   }
 
+  /**
+   * switchのaria状態と表示を指定状態へ更新する。
+   * @param {HTMLElement} button - 対象button element。
+   * @param {boolean} enabled - widgetを有効にするか。
+   * @returns {boolean} buttonがON classを持ち、論理ONならtrue。
+   */
   function setSwitchState(button, enabled) {
     button.classList.toggle("is-on", enabled);
     button.setAttribute("aria-checked", String(enabled));
   }
 
+  /**
+   * boolean設定用controlの現在値を読む。
+   * @param {HTMLElement} button - 対象button element。
+   * @returns {boolean} checkbox/switch controlの論理boolean値。
+   */
   function boolControlValue(button) {
     return switchIsOn(button);
   }
 
+  /**
+   * widget編集switchの状態ラベルを初期化する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function initializeWidgetSwitchLabels() {
     document.querySelectorAll("#widget-settings-list .switch").forEach((button) => {
       button.dataset.onLabel ||= "表示中";
@@ -532,6 +607,11 @@
     });
   }
 
+  /**
+   * 短い利用者向け通知を表示し、時間後に閉じる。
+   * @param {string} message - 利用者向け説明。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function showToast(message) {
     const toast = document.querySelector("#toast");
     toast.textContent = message;
@@ -540,6 +620,11 @@
     toastTimer = window.setTimeout(() => toast.classList.remove("is-visible"), 2400);
   }
 
+  /**
+   * 指定viewを表示し、view依存データを更新する。
+   * @param {string} viewName - 切替先の画面名。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function switchView(viewName) {
     activeView = viewName;
     renderUnsynchronizedWarnings();
@@ -556,6 +641,10 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  /**
+   * 選択timezoneに合わせて画面時計を描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderClock() {
     const nowMs = demoNowMs();
     const demoNow = new Date(nowMs);
@@ -575,6 +664,10 @@
     renderLastEventCard();
   }
 
+  /**
+   * 直近eventをDashboard領域へ描画する。
+   * @returns {void} 直近eventの一覧DOMを置換する。
+   */
   function renderRecentEvents() {
     const card = document.querySelector('[data-widget="recent-events"]');
     const list = document.querySelector("#recent-events");
@@ -600,20 +693,39 @@
     `).join("") || '<p class="custom-widget-empty">対象期間の記録はありません。</p>';
   }
 
+  /**
+   * 現在のtimeline表示期間の開始・終了を返す。
+   * @returns {Object} startMs/endMsを持つ現在選択期間の半開範囲（millisecond）。
+   */
   function timelinePeriodBounds() {
     const card = document.querySelector('[data-widget="timeline"]');
     return periodBounds(periodKeyForWidget(card.dataset.widgetPeriod || "follow"));
   }
 
+  /**
+   * timeline軸用の日時labelへ変換する。
+   * @param {number} timestampMs - UTC Unix epoch millisecond。
+   * @returns {string} 入力を画面またはAPIで使う形式へ変換した文字列。
+   */
   function formatTimelineTime(timestampMs) {
     return formatLocalDateTime(timestampMs, true);
   }
 
   // 表示だけを丸め、記録時刻や集計値の精度は変更しない。
+  /**
+   * millisecond値を表示用文字列へ変換する。
+   * @param {string} value - 変換対象の値。
+   * @returns {string} 入力を画面またはAPIで使う形式へ変換した文字列。
+   */
   function formatMilliseconds(value) {
     return Number(value).toFixed(1);
   }
 
+  /**
+   * 経過時間を読みやすい表示へ変換する。
+   * @param {number} durationMs - 期間長（millisecond）。
+   * @returns {string} 経過millisecondを人向け時間表示へ整形した文字列。
+   */
   function formatDuration(durationMs) {
     if (durationMs < 1000) return `${formatMilliseconds(durationMs)}ミリ秒`;
     const totalSeconds = Math.round(durationMs / 1000);
@@ -625,6 +737,12 @@
     return `${seconds}秒`;
   }
 
+  /**
+   * 経過時間を指定単位の文字列へ変換する。
+   * @param {number} durationMs - 期間長（millisecond）。
+   * @param {string} unit - 期間表示に使う単位。
+   * @returns {string} 経過millisecondを指定unitで丸めた数値付き文字列。
+   */
   function formatDurationForUnit(durationMs, unit = "human") {
     if (unit === "minutes") return `${Math.round(durationMs / 60000)}分`;
     if (unit === "hours_decimal") return `${(durationMs / 3600000).toFixed(2)}時間`;
@@ -638,6 +756,14 @@
     return formatDuration(durationMs);
   }
 
+  /**
+   * 現在状態cardに表示する論理状態と文言を決める。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {boolean} onLabel - 論理ONに対応する表示文言。
+   * @param {string} offLabel - 論理OFFに対応する表示文言。
+   * @param {string} widgetId - widget ID。
+   * @returns {Object} state、label、elapsed value、UNKNOWN表示をまとめた現在状態model。
+   */
   function currentStateValues(channelId, onLabel, offLabel, widgetId) {
     const channel = fixtures.channels.find((item) => `IN${item.id}` === channelId);
     if (liveMode) {
@@ -667,6 +793,12 @@
     };
   }
 
+  /**
+   * 現在状態cardの値と表示を更新する。
+   * @param {HTMLElement} card - 対象card element。
+   * @param {Object} config - widget config。
+   * @returns {void} cardのstate、ON/OFF表示、elapsed表示を更新する。
+   */
   function updateCurrentStateCard(card, config) {
     const values = currentStateValues(config.channelId, config.onLabel, config.offLabel, config.id);
     card.dataset.widgetType = "現在状態";
@@ -684,6 +816,11 @@
     card.querySelector("small").textContent = config.channelId;
   }
 
+  /**
+   * 現在状態widgetのHTMLを組み立てる。
+   * @param {Object} config - widget config。
+   * @returns {string} 表示labelと現在値を含むcurrent-state card HTML。
+   */
   function currentStateCardHtml(config) {
     const values = currentStateValues(config.channelId, config.onLabel, config.offLabel, config.id);
     const hiddenClass = config.enabled === false ? " is-hidden-widget" : "";
@@ -697,6 +834,11 @@
     `;
   }
 
+  /**
+   * 現在状態widgetの設定rowを組み立てる。
+   * @param {Object} config - widget config。
+   * @returns {string} 設定一覧へ追加するcurrent-state row HTML。
+   */
   function currentStateSettingRowHtml(config) {
     const enabled = config.enabled !== false;
     return `
@@ -711,6 +853,11 @@
     `;
   }
 
+  /**
+   * widget sizeの選択optionを組み立てる。
+   * @param {string} selectedSize - 選択済みサイズ。
+   * @returns {string} サイズ選択option一覧のHTML。
+   */
   function sizeOptionsHtml(selectedSize) {
     const labels = { small: "小", medium: "中", large: "大" };
     return Object.entries(labels).map(([value, label]) => (
@@ -718,6 +865,10 @@
     )).join("");
   }
 
+  /**
+   * 現在状態widget cardを最新fixture値で更新する。
+   * @returns {void} DOM上の有効なcurrent-state cardを順に更新する。
+   */
   function refreshCurrentStateCards() {
     document.querySelectorAll("#dashboard-realtime-grid [data-widget-type='現在状態']").forEach((card) => {
       updateCurrentStateCard(card, {
@@ -731,10 +882,21 @@
     });
   }
 
+  /**
+   * widget期間設定を計算用period keyへ変換する。
+   * @param {string} periodSetting - 保存期間設定。
+   * @returns {string} widget設定をfollow/customまたは許可済み固定period keyへ正規化した値。
+   */
   function periodKeyForWidget(periodSetting) {
     return periodSetting === "follow" ? currentPeriod : periodSetting;
   }
 
+  /**
+   * period keyから表示対象時間境界を計算する。
+   * @param {string} periodKey - 期間key。
+   * @param {number} durationOverrideMs - 期間上書きmillisecond。
+   * @returns {Object} startMs/endMsを持つ半開期間範囲。
+   */
   function periodBounds(periodKey, durationOverrideMs = 0) {
     const period = fixtures.dashboardPeriods[periodKey];
     const endMs = period.endAt ? Date.parse(period.endAt) : demoNowMs();
@@ -745,10 +907,21 @@
     return { startMs, endMs };
   }
 
+  /**
+   * event timestampをUnix epoch millisecondへ変換する。
+   * @param {Object} event - fixture event。
+   * @returns {number} event時刻のUTC Unix epoch millisecond。
+   */
   function eventTimeMs(event) {
     return event.timestamp ? Date.parse(event.timestamp) : Date.parse(`2026-09-12T${event.time}+09:00`);
   }
 
+  /**
+   * 日時inputの値を検証し、カスタム期間を適用する。
+   * @param {string} fromInput - 開始日時input。
+   * @param {string} toInput - 終了日時input。
+   * @returns {boolean} from/toを検証して期間適用できた時true。不正な入力ではfalse。
+   */
   function applyCustomPeriod(fromInput, toInput) {
     const startMs = parseLocalDateTime(fromInput.value);
     const endMs = parseLocalDateTime(toInput.value);
@@ -761,6 +934,12 @@
     return true;
   }
 
+  /**
+   * 信号と期間に一致するeventを抽出する。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {string} periodKey - 期間key。
+   * @returns {Array<Object>} 指定signalと半開期間に入るevent fixture列。
+   */
   function channelEventsInPeriod(channelId, periodKey) {
     const { startMs, endMs } = periodBounds(periodKey);
     return fixtures.events.filter((event) => {
@@ -769,12 +948,27 @@
     });
   }
 
+  /**
+   * 期間内で対象状態が継続した時間を合計する。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {string} periodKey - 期間key。
+   * @param {string} targetState - 対象論理状態。
+   * @param {number} durationOverrideMs - 期間上書きmillisecond。
+   * @returns {number} 対象論理状態が占める期間長（millisecond）。
+   */
   function stateDurationInPeriod(channelId, periodKey, targetState = "ON", durationOverrideMs = 0) {
     return timelineIntervals(channelId, periodKey, durationOverrideMs)
       .filter((interval) => interval.state === targetState)
       .reduce((total, interval) => total + interval.endMs - interval.startMs, 0);
   }
 
+  /**
+   * event列から状態・UNKNOWN区間を構成する。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {string} periodKey - 期間key。
+   * @param {number} durationOverrideMs - 期間上書きmillisecond。
+   * @returns {Array<Object>} 状態区間とUNKNOWN区間を時刻順に並べたtimeline配列。
+   */
   function timelineIntervals(channelId, periodKey, durationOverrideMs = 0) {
     const bounds = periodBounds(periodKey, durationOverrideMs);
     const observedEndMs = Math.max(bounds.startMs, Math.min(bounds.endMs, loggingStoppedAtMs || demoNowMs()));
@@ -821,6 +1015,13 @@
     return result;
   }
 
+  /**
+   * 状態と幅に対応するtimeline CSS classを返す。
+   * @param {string} classPrefix - CSS prefix。
+   * @param {boolean} unknown - 区間がUNKNOWNかを表す真偽値。
+   * @param {number} widthPercent - 全幅に対するpercentage。
+   * @returns {string} 状態・UNKNOWN・幅に対応するCSS class文字列。
+   */
   function timelineMarkClass(classPrefix, unknown, widthPercent) {
     // 長い期間では短い区間の幅が0px相当になり、hover/clickできなくなる。
     // 1%未満は時間幅を誇張せず、詳細を開ける固定マーカーで示す。
@@ -831,6 +1032,15 @@
     return `${classPrefix}-${isNarrow ? "marker" : "segment"}`;
   }
 
+  /**
+   * timeline intervalを表示するHTMLへ変換する。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {string} periodKey - 期間key。
+   * @param {string} classPrefix - CSS prefix。
+   * @param {number} durationOverrideMs - 期間上書きmillisecond。
+   * @param {string} domainIntervals - API計算済みintervals。
+   * @returns {string} 各timeline区間を示すHTML片。
+   */
   function timelineMarksHtml(
     channelId,
     periodKey,
@@ -863,6 +1073,14 @@
     }).join("");
   }
 
+  /**
+   * 小型timelineのHTMLを構成する。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {string} periodKey - 期間key。
+   * @param {number} durationOverrideMs - 期間上書きmillisecond。
+   * @param {Object|null} dashboardValue - APIが返したtimeline interval集計。nullならfixtureからintervalを作る。
+   * @returns {string} 小型timelineのlabelとintervalを含むHTML片。
+   */
   function miniTimelineHtml(channelId, periodKey, durationOverrideMs = 0, dashboardValue = null) {
     const domainIntervals = dashboardValue?.channels?.find((item) => item.signal === channelId)?.intervals;
     const marks = timelineMarksHtml(
@@ -875,6 +1093,11 @@
     return `<div class="custom-mini-timeline"><div class="custom-mini-track" data-mini-timeline-track>${marks}</div></div>`;
   }
 
+  /**
+   * 履歴widgetの種類に応じた本文HTMLを構成する。
+   * @param {Object} config - widget config。
+   * @returns {string} 履歴widget種別ごとの本文HTML。
+   */
   function historyWidgetBodyHtml(config) {
     if (liveMode && fixtures.dashboardWarning) {
       return `<p class="custom-widget-empty" role="status">${escapeHtml(fixtures.dashboardWarning.message)}</p>`;
@@ -987,6 +1210,11 @@
     return `<div class="event-list">${items || '<p class="custom-widget-empty">対象期間の記録はありません。</p>'}</div><small>${escapeHtml(config.channelId)}・${escapeHtml(periodLabel)}</small>`;
   }
 
+  /**
+   * 履歴widget cardの内容とevent handlerを描画する。
+   * @param {HTMLElement} card - 対象card element。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderHistoryWidgetCard(card) {
     if (card.dataset.widgetType === "タイムライン") {
       const focusedEvent = document.activeElement?.matches("[data-timeline-event]")
@@ -1035,6 +1263,11 @@
     bindTimelineEvents();
   }
 
+  /**
+   * 小型timelineの表示倍率を更新する。
+   * @param {HTMLElement} card - 対象card element。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function applyMiniTimelineZoom(card) {
     const label = card.querySelector("[data-mini-zoom-label]");
     if (!label) return;
@@ -1049,10 +1282,19 @@
     card.querySelector('[data-mini-zoom="in"]').disabled = index === timelineZoomLevels.length - 1;
   }
 
+  /**
+   * 保存済みの独自履歴widget群を描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderCustomHistoryWidgets() {
     document.querySelectorAll("[data-custom-history-widget]").forEach(renderHistoryWidgetCard);
   }
 
+  /**
+   * 履歴widget cardのHTMLを組み立てる。
+   * @param {Object} config - widget config。
+   * @returns {string} 履歴widget cardのHTML。
+   */
   function historyWidgetCardHtml(config) {
     const hiddenClass = config.enabled === false ? " is-hidden-widget" : "";
     const logLink = ["タイムライン", "イベント一覧"].includes(config.type)
@@ -1066,6 +1308,11 @@
     `;
   }
 
+  /**
+   * 履歴widget設定rowのHTMLを組み立てる。
+   * @param {Object} config - widget config。
+   * @returns {string} 履歴widget設定rowのHTML。
+   */
   function historyWidgetSettingRowHtml(config) {
     const summary = widgetSettingSummary(config.type, config.channelId, config.period, config);
     const enabled = config.enabled !== false;
@@ -1085,6 +1332,12 @@
   const { widgetConfigFromApi, widgetPayloadFromConfig } =
     window.EventLoggerWidgetConfig;
 
+  /**
+   * 編集rowの値をwidget保存API payloadへ変換する。
+   * @param {HTMLElement} row - widget row element。
+   * @param {number} sortOrder - 保存表示順。
+   * @returns {Object} widget保存API用payload。row値とsort orderを使う。
+   */
   function widgetApiPayloadFromRow(row, sortOrder) {
     // DOMの読取りはUI側、形式変換は専用モジュールに分離する。
     return widgetPayloadFromConfig(
@@ -1095,6 +1348,11 @@
     );
   }
 
+  /**
+   * 保存済みwidget設定を編集一覧へ反映する。
+   * @param {Array<Object>} items - APIまたはfixtureから受け取ったwidget列。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderPersistedWidgets(items) {
     const realtimeList = document.querySelector('[data-widget-group="realtime"]');
     const historyList = document.querySelector('[data-widget-group="history"]');
@@ -1119,10 +1377,18 @@
     renderCustomHistoryWidgets();
   }
 
+  /**
+   * widget設定に未保存変更がある状態を記録する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function markWidgetSettingsDirty() {
     if (liveMode) widgetSettingsDirty = true;
   }
 
+  /**
+   * 編集内容をwidget APIへ保存し、結果を画面へ反映する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   async function saveWidgetSettings() {
     if (!liveMode || !widgetSettingsDirty) return;
     // 途中の通信失敗で一部だけ保存された場合も、再試行時はDBの最新状態を
@@ -1156,6 +1422,12 @@
   }
 
   // rolling期間の境界は更新されるため、描画済み区間の詳細は絶対時刻を優先する。
+  /**
+   * timeline event群の時刻範囲を算出する。
+   * @param {DOMStringMap} dataset - DOM data属性。
+   * @param {string} periodBoundsValue - 期間境界値。
+   * @returns {Object|null} datasetから復元したevent期間のstart/end millisecond。必要な境界がなければnull。
+   */
   function timelineEventTimeBounds(dataset, periodBoundsValue) {
     const periodDurationMs = periodBoundsValue.endMs - periodBoundsValue.startMs;
     const storedStartMs = Number(dataset.startMs);
@@ -1171,6 +1443,11 @@
     return { eventStartMs, eventEndMs };
   }
 
+  /**
+   * buttonに対応するevent詳細を取得する。
+   * @param {HTMLElement} button - 対象button element。
+   * @returns {Object|null} button data attributeから組み立てたtimestamp、signal、value等の表示用details。
+   */
   function timelineEventDetails(button) {
     const periodBoundsValue = button.dataset.period
       ? periodBounds(button.dataset.period)
@@ -1190,6 +1467,11 @@
     };
   }
 
+  /**
+   * 詳細popupをviewport内で読みやすい位置へ配置する。
+   * @param {HTMLElement} button - 対象button element。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function positionTimelineDetail(button) {
     const detail = document.querySelector("#timeline-event-detail");
     const rect = button.getBoundingClientRect();
@@ -1202,6 +1484,12 @@
     detail.style.top = `${top}px`;
   }
 
+  /**
+   * timeline event詳細popupを表示し、必要なら固定する。
+   * @param {HTMLElement} button - 対象button element。
+   * @param {boolean} pin - 表示を固定するか。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function showTimelineDetail(button, pin = false) {
     const detail = document.querySelector("#timeline-event-detail");
     const timelineEvent = timelineEventDetails(button);
@@ -1228,6 +1516,11 @@
     positionTimelineDetail(button);
   }
 
+  /**
+   * timeline event詳細popupを条件に応じて閉じる。
+   * @param {boolean} force - 強制的に閉じるか。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function hideTimelineDetail(force = false) {
     if (pinnedTimelineEvent && !force) return;
     document.querySelector("#timeline-event-detail").hidden = true;
@@ -1241,6 +1534,10 @@
     }
   }
 
+  /**
+   * 未bindのtimeline eventへpointer、focus、click handlerを登録する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function bindTimelineEvents() {
     document.querySelectorAll("[data-timeline-event]:not([data-timeline-bound])").forEach((button) => {
       button.dataset.timelineBound = "true";
@@ -1267,6 +1564,10 @@
     });
   }
 
+  /**
+   * 選択信号・期間のtimeline軸と各rowを描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderTimeline() {
     const card = document.querySelector('[data-widget="timeline"]');
     const timeline = document.querySelector("#timeline");
@@ -1316,6 +1617,10 @@
     applyTimelineZoom();
   }
 
+  /**
+   * timeline拡大率に応じて表示範囲を更新する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function applyTimelineZoom() {
     const timeline = document.querySelector("#timeline");
     const zoomLabel = document.querySelector("#timeline-zoom-label");
@@ -1331,6 +1636,10 @@
     if (timelineZoomIndex === 0) timelineScroll.scrollLeft = 0;
   }
 
+  /**
+   * 選択期間に応じてdashboard集計widgetを再描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderDashboardPeriod() {
     const countCard = document.querySelector('[data-widget="cycle-count"]');
     if (countCard && document.querySelector("#cycle-count") && document.querySelector("#count-period-label")) {
@@ -1369,6 +1678,10 @@
     renderRecentEvents();
   }
 
+  /**
+   * ON時間集計cardを描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderOnTimeCard() {
     const timeCard = document.querySelector('[data-widget="on-time"]');
     if (timeCard && document.querySelector("#on-time-value") && document.querySelector("#on-time-period-label")) {
@@ -1381,6 +1694,10 @@
     renderLastEventCard();
   }
 
+  /**
+   * 最後の一致event cardを描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderLastEventCard() {
     const lastCard = document.querySelector('[data-widget="last-alarm"]');
     if (!lastCard || !document.querySelector("#last-alarm-value") || !document.querySelector("#last-alarm-period-label")) return;
@@ -1394,6 +1711,10 @@
     document.querySelector("#last-alarm-period-label").textContent = `${lastCard.dataset.widgetChannel}・${fixtures.dashboardPeriods[lastPeriodKey].label}`;
   }
 
+  /**
+   * 出力状態card一覧を描画する。
+   * @returns {void} output fixtureの状態・ownerを各output cardへ反映する。
+   */
   function renderDashboardOutputs() {
     const container = document.querySelector("#dashboard-outputs");
     if (!container) return;
@@ -1406,12 +1727,21 @@
     `).join("");
   }
 
+  /**
+   * event kindを画面用labelへ変換する。
+   * @param {Object} event - fixture event。
+   * @returns {string} event kindの画面表示label。
+   */
   function kindLabel(event) {
     if (event.kind === "output") return "出力の記録";
     if (event.kind === "snapshot") return "記録開始時の状態";
     return "入力の変化";
   }
 
+  /**
+   * 現在の検索条件に一致するeventを返す。
+   * @returns {Array<Object>} 現在のfilter条件に一致するevent fixture列。
+   */
   function filteredEvents() {
     const periodKey = document.querySelector("#log-period").value;
     const { startMs, endMs } = periodBounds(periodKey);
@@ -1433,6 +1763,10 @@
     ));
   }
 
+  /**
+   * ログ検索で選択可能な入力・出力signalを描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderLogSignalOptions() {
     const select = document.querySelector("#log-signal");
     const selected = select.value || "all";
@@ -1449,6 +1783,10 @@
     select.value = [...select.options].some((option) => option.value === selected) ? selected : "all";
   }
 
+  /**
+   * 現在の条件のログ一覧とpaging表示を描画する。
+   * @returns {void} 現在のquery結果、page操作、空結果案内をlogs viewへ描画する。
+   */
   function renderLogs() {
     const pageSize = Number(document.querySelector("#log-page-size").value);
     const events = liveMode ? logPageEvents : filteredEvents();
@@ -1490,6 +1828,11 @@
     }).join("");
   }
 
+  /**
+   * 画面の検索条件からAPI query parameterを組み立てる。
+   * @param {boolean} includePaging - paging queryを含めるか。
+   * @returns {string} 現在のfilter stateを使って組み立てたquery文字列。
+   */
   function logApiQuery(includePaging) {
     const periodKey = document.querySelector("#log-period").value;
     return buildLogApiQuery({
@@ -1507,6 +1850,10 @@
     });
   }
 
+  /**
+   * 現在の検索条件に合うlive log pageを取得する。
+   * @returns {Promise<void>} APIからpageを取得してlogs viewを更新後resolveする。transport/API失敗はrejectする。
+   */
   async function loadLiveLogPage() {
     const requestId = ++logRequestId;
     logPageLoading = true;
@@ -1546,6 +1893,10 @@
     }
   }
 
+  /**
+   * ログ条件を再読込し、最初のpageから表示を更新する。
+   * @returns {Promise<void>} page 1の検索を再実行し、結果をDOMへ描画後resolveする。
+   */
   function reloadLogQuery() {
     logPage = 1;
     // フィルター変更後は新たな時間範囲を検索する。ページ送りの間だけ範囲を固定する。
@@ -1561,6 +1912,10 @@
     }
   }
 
+  /**
+   * ログ・診断などのデータ画面を更新する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderDataViews() {
     renderLogSignalOptions();
     renderRecentEvents();
@@ -1570,6 +1925,10 @@
     renderCustomHistoryWidgets();
   }
 
+  /**
+   * 入力channel設定を画面へ描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderChannelSettings() {
     document.querySelector("#channel-settings").innerHTML = fixtures.channels.map((channel) => `
       <div class="channel-row${channel.enabled ? "" : " is-disabled"}" data-channel="${channel.id}">
@@ -1581,6 +1940,10 @@
     `).join("");
   }
 
+  /**
+   * 初回設定wizardを現在のsetup stateで描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderSetupWizard() {
     setSwitchState(document.querySelector("#setup-password-protection"), fixtures.settings.passwordProtection);
     document.querySelector("#setup-password-field").hidden = !fixtures.settings.passwordProtection;
@@ -1596,6 +1959,10 @@
     }
   }
 
+  /**
+   * 初回設定入力をまとめて保存する。
+   * @returns {Promise<void>} setup payloadを保存し、成功時は完了画面へ遷移する。API失敗はrejectする。
+   */
   async function completeSetup() {
     const deviceName = document.querySelector("#setup-device-name").value.trim();
     const passwordProtection = switchIsOn(document.querySelector("#setup-password-protection"));
@@ -1676,6 +2043,10 @@
     showToast("初回設定を完了し、記録を開始しました");
   }
 
+  /**
+   * 診断状態を画面へ描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderHealth() {
     const heartbeatHealth = fixtures.health.find((item) => item.label === "Heartbeat状態");
     const heartbeat = fixtures.settings.heartbeat;
@@ -1703,6 +2074,10 @@
     renderClock();
   }
 
+  /**
+   * OUT testの状態と操作を画面へ描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderOutputTests() {
     const critical = fixtures.loggerStatus === "critical";
     const configurationBlocked = Boolean(fixtures.configurationSync?.outOfSync);
@@ -1722,6 +2097,11 @@
     }).join("");
   }
 
+  /**
+   * 表示中のOUT testを終了状態にする。
+   * @param {boolean} showMessage - testを通常終了したsuccess通知を表示するか。
+   * @returns {Promise<void>} end-test要求後にtest state表示を更新する。API失敗時はtoast通知する。
+   */
   async function finishOutputTest(showMessage = true) {
     if (!activeOutputTest) return;
     if (liveMode) {
@@ -1747,6 +2127,11 @@
     if (showMessage) showToast(`OUT${outputId}をOFFに戻しました`);
   }
 
+  /**
+   * 選択OUTの許可された時間制限付きtestを要求する。
+   * @param {number} outputId - 出力番号。
+   * @returns {Promise<void>} 指定OUTのtest要求を送信し、ACKまたは失敗を画面へ反映する。
+   */
   async function startOutputTest(outputId) {
     if (liveMode) {
       try {
@@ -1771,6 +2156,10 @@
     renderHealth();
   }
 
+  /**
+   * 各OUTの唯一のowner設定を画面へ反映する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function updateOutputOwners() {
     fixtures.outputs.forEach((output) => {
       output.owner = "未使用";
@@ -1797,11 +2186,21 @@
     }
   }
 
+  /**
+   * ruleの時間条件を画面用文字列へ変換する。
+   * @param {string} rule - 条件出力rule設定。
+   * @returns {string} ruleの継続時間条件を表示するlabel。
+   */
   function durationLabel(rule) {
     const units = { seconds: "秒", minutes: "分", hours: "時間" };
     return `${rule.duration}${units[rule.durationUnit]}`;
   }
 
+  /**
+   * 条件出力ruleを人が読める説明にする。
+   * @param {string} rule - 条件出力rule設定。
+   * @returns {string} rule kindと条件値をまとめた説明文。
+   */
   function ruleDescription(rule) {
     const name = signalDisplayName(rule.channelId);
     const signalLabel = name === rule.channelId ? rule.channelId : `${rule.channelId} ${name}`;
@@ -1812,12 +2211,21 @@
     return `${signalLabel}が${rule.value}のまま${durationLabel(rule)}継続`;
   }
 
+  /**
+   * Heartbeat設定項目の有効状態と値を同期する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function syncHeartbeatFields() {
     const enabled = switchIsOn(document.querySelector("#heartbeat-enabled"));
     document.querySelector("#heartbeat-output").disabled = !enabled;
     document.querySelector("#heartbeat-interval").disabled = !enabled;
   }
 
+  /**
+   * OUTと条件ruleの設定を画面へ描画する。
+   * @param {boolean} preserveForm - 保存後も既存の編集form内容を保持するか。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderOutputSettings(preserveForm = false) {
     const heartbeat = fixtures.settings.heartbeat;
     if (!preserveForm) {
@@ -1852,6 +2260,11 @@
     }).join("") || '<p class="empty-rule-list">条件ルールはありません。</p>';
   }
 
+  /**
+   * ruleの有効状態を切り替えて保存する。
+   * @param {number} ruleId - rule ID。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   async function toggleOutputRule(ruleId) {
     const rule = fixtures.outputRules.find((item) => item.id === ruleId);
     if (!rule) return;
@@ -1900,6 +2313,12 @@
     showToast(enabled ? `${rule.name}を有効にしました` : `${rule.name}を無効にしました`);
   }
 
+  /**
+   * 入力channel selectにoptionを入れ、指定値を選択する。
+   * @param {HTMLSelectElement} select - select element。
+   * @param {string|number} selectedId - 初期選択ID。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function populateInputSelect(select, selectedId) {
     select.innerHTML = fixtures.channels.map((channel) => (
       `<option value="IN${channel.id}">${escapeHtml(channelLabel(channel))}</option>`
@@ -1907,12 +2326,21 @@
     select.value = selectedId || "IN1";
   }
 
+  /**
+   * 選択したrule kindに応じた条件項目を表示する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function updateRuleConditionFields() {
     const absence = document.querySelector("#rule-condition").value === "event_absence";
     document.querySelector("#rule-value-field").hidden = absence;
     document.querySelector("#rule-edge-field").hidden = !absence;
   }
 
+  /**
+   * 新規または既存ruleの編集dialogを開く。
+   * @param {number} ruleId - rule ID。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function openOutputRuleDialog(ruleId = null) {
     editingOutputRuleId = ruleId;
     const rule = fixtures.outputRules.find((item) => item.id === ruleId);
@@ -1935,6 +2363,12 @@
     document.querySelector("#output-rule-dialog").showModal();
   }
 
+  /**
+   * 同じOUTを別ruleが所有する競合を判定する。
+   * @param {number} outputId - 出力番号。
+   * @param {number} ignoredRuleId - 除外するrule ID。
+   * @returns {boolean} 指定OUTを別ruleがすでに所有する場合true。
+   */
   function outputConflict(outputId, ignoredRuleId = null) {
     const heartbeat = fixtures.settings.heartbeat;
     if (heartbeat.enabled && heartbeat.outputId === outputId) return "Heartbeat";
@@ -1942,11 +2376,20 @@
     return rule?.name || "";
   }
 
+  /**
+   * rule継続時間の入力が許可範囲か判定する。
+   * @param {string} value - 変換対象の値。
+   * @returns {boolean} rule durationが整数かつ実装で許可した範囲内ならtrue。
+   */
   function validRuleDuration(value) {
     const duration = Number(value);
     return Number.isInteger(duration) && duration >= 1 && duration <= 86400;
   }
 
+  /**
+   * dialog入力を検証し、条件ruleをAPIへ保存する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   async function saveOutputRule() {
     const error = document.querySelector("#rule-error");
     const name = document.querySelector("#rule-name").value.trim();
@@ -2022,6 +2465,11 @@
     editingOutputRuleId = null;
   }
 
+  /**
+   * loggerdへロギング開始・停止要求を送信する。
+   * @param {string} nextLogging - 次にするロギング状態。
+   * @returns {Promise<void>} start/stop要求のACK後にlive stateを再取得する。loggerd拒否・通信失敗はrejectする。
+   */
   async function setLoggingState(nextLogging) {
     if (liveMode) {
       try {
@@ -2080,6 +2528,14 @@
     showToast(logging ? "記録を再開しました" : "記録を停止してメンテナンス状態へ移行しました");
   }
 
+  /**
+   * 利用者確認dialogを開き、確定後にactionを実行する。
+   * @param {string} title - dialog title。
+   * @param {string} message - 利用者向け説明。
+   * @param {string} confirmLabel - 確認button文言。
+   * @param {Function} action - 確認後のaction。
+   * @returns {void} dialogへtitle/message/button文言を設定して開き、確定時にactionを呼び出す。
+   */
   function openConfirmation(title, message, confirmLabel, action) {
     const dialog = document.querySelector("#confirm-dialog");
     document.querySelector("#dialog-title").textContent = title;
@@ -2089,6 +2545,10 @@
     dialog.showModal();
   }
 
+  /**
+   * 現在の検索条件でCSVを取得し、downloadを開始する。
+   * @returns {Promise<void>} CSV responseをbrowser downloadとして保存する。非成功responseではerror通知する。
+   */
   function downloadCsv() {
     if (liveMode) {
       const anchor = document.createElement("a");
@@ -2112,6 +2572,11 @@
     showToast(`${rows.length}件のイベントを書き出しました`);
   }
 
+  /**
+   * 指定した設定sectionを表示する。
+   * @param {string} sectionId - 設定section ID。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function openSettingsSection(sectionId) {
     switchView("settings");
     document.querySelectorAll(".settings-section").forEach((section) => {
@@ -2123,6 +2588,11 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  /**
+   * widget wizardの指定stepを表示する。
+   * @param {number} step - wizard step番号。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function showWidgetStep(step) {
     currentWidgetStep = step;
     document.querySelectorAll("[data-widget-step]").forEach((panel) => {
@@ -2134,6 +2604,12 @@
     document.querySelector("#confirm-add-widget").classList.toggle("is-hidden", step !== 3);
   }
 
+  /**
+   * groupに適用可能なwidget type選択肢を設定する。
+   * @param {string} group - widget group。
+   * @param {string} selectedType - 選択type。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function setWidgetTypeOptions(group, selectedType) {
     const types = group === "realtime"
       ? ["現在状態"]
@@ -2144,6 +2620,10 @@
     document.querySelector("#widget-type-help").textContent = widgetTypeHelp[typeSelect.value];
   }
 
+  /**
+   * widget用channel選択肢を描画する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function renderWidgetChannelOptions() {
     const select = document.querySelector("#new-widget-channel");
     select.innerHTML = fixtures.channels.map((channel) => (
@@ -2158,6 +2638,11 @@
     document.querySelector("#widget-channel-checks").innerHTML = [...inputs, ...outputs].join("");
   }
 
+  /**
+   * 選択channel群を画面状態へ設定する。
+   * @param {string} value - 変換対象の値。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function setWidgetChannels(value) {
     const ids = signalIds(value);
     document.querySelector("#new-widget-channel").value = ids[0] || "IN1";
@@ -2166,6 +2651,10 @@
     });
   }
 
+  /**
+   * 現在選択されているwidget channel群を返す。
+   * @returns {Array<string>} widget画面で現在選択中のIN/OUT signal ID列。
+   */
   function selectedWidgetChannels() {
     const type = document.querySelector("#new-widget-type").value;
     if (!["タイムライン", "イベント一覧"].includes(type)) return document.querySelector("#new-widget-channel").value;
@@ -2173,6 +2662,12 @@
     return checked.join(",");
   }
 
+  /**
+   * widget追加・編集dialogを初期化して開く。
+   * @param {boolean} isEditing - 編集modeか。
+   * @param {string} widgetGroup - widget group。
+   * @returns {void} 選択mode/groupに合わせてfieldを初期化し、modalを開く。
+   */
   function openWidgetDialog(isEditing, widgetGroup = "realtime") {
     const typeSelect = document.querySelector("#new-widget-type");
     typeSelect.disabled = isEditing;
@@ -2223,6 +2718,10 @@
     document.querySelector("#widget-dialog").showModal();
   }
 
+  /**
+   * widget typeに応じて編集fieldの表示を切り替える。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function updateWidgetTypeFields() {
     const type = document.querySelector("#new-widget-type").value;
     const isCurrentState = type === "現在状態";
@@ -2246,6 +2745,10 @@
     document.querySelector("#widget-list-fields").hidden = type !== "イベント一覧";
   }
 
+  /**
+   * widget順序に応じて上下移動buttonの状態を更新する。
+   * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
+   */
   function updateMoveButtons() {
     document.querySelectorAll("#widget-settings-list .widget-group-list").forEach((group) => {
       const rows = [...group.querySelectorAll(".widget-setting-row")];
@@ -2258,6 +2761,11 @@
     });
   }
 
+  /**
+   * 設定rowからwidget typeを読む。
+   * @param {HTMLElement} row - widget row element。
+   * @returns {string} widget setting rowが表すAPI/UI type。
+   */
   function widgetTypeForRow(row) {
     const types = {
       "current-state": "現在状態",
@@ -2270,6 +2778,11 @@
     return row.dataset.widgetType || types[row.dataset.widgetRow] || "現在状態";
   }
 
+  /**
+   * 設定rowから対象channelを読む。
+   * @param {HTMLElement} row - widget row element。
+   * @returns {string} widget setting rowから得たchannel選択値。
+   */
   function widgetChannelForRow(row) {
     const channels = {
       "current-state": "IN1",
@@ -2282,6 +2795,11 @@
     return row.dataset.widgetChannel || channels[row.dataset.widgetRow] || "IN1";
   }
 
+  /**
+   * 画面row値をAPI設定形式へまとめる。
+   * @param {HTMLElement} row - widget row element。
+   * @returns {Object} 保存APIへ渡すwidget種別別config object。
+   */
   function widgetApiConfigForRow(row) {
     try {
       const config = JSON.parse(row.dataset.apiConfig || "{}");
@@ -2291,6 +2809,14 @@
     }
   }
 
+  /**
+   * widget設定を一覧表示用の短い説明にする。
+   * @param {string} type - widget type key。
+   * @param {string} channelId - 製品上のIN/OUT番号。
+   * @param {string} period - 期間選択値。
+   * @param {Object} config - widget config。
+   * @returns {string} type・channel・period・configから作る設定一覧向け説明。
+   */
   function widgetSettingSummary(type, channelId, period, config = {}) {
     const periodText = period === "follow" ? "ダッシュボード期間に追従" : fixtures.dashboardPeriods[period].label;
     if (type === "現在状態") return `現在状態・${channelId}${config.showElapsed ? "・継続時間を表示" : ""}`;
@@ -2306,6 +2832,10 @@
     return `${type}・${channelId.replaceAll(",", "・")}・${periodText}`;
   }
 
+  /**
+   * widget設定順・groupに合わせてDashboard layoutを同期する。
+   * @returns {void} widget rowのgroup順に従ってDashboard cardをDOM上で並べ直す。
+   */
   function syncDashboardLayout() {
     const dashboardTargets = {
       realtime: document.querySelector("#dashboard-realtime-grid"),
@@ -2323,11 +2853,22 @@
     updateMoveButtons();
   }
 
+  /**
+   * IDに一致するDashboard widgetを検索する。
+   * @param {string} widgetId - widget ID。
+   * @returns {Object|null} ID一致widget。見つからない場合はnull。
+   */
   function dashboardWidgetById(widgetId) {
     return [...document.querySelectorAll("#dashboard-realtime-grid [data-widget], #dashboard-history-grid [data-widget]")]
       .find((widget) => widget.dataset.widget === widgetId) || null;
   }
 
+  /**
+   * widget rowを同じgroup内で指定方向へ移動する。
+   * @param {HTMLElement} row - widget row element。
+   * @param {number} direction - 移動方向。
+   * @returns {void} rowを同group内で上下へ移し、設定dirty stateを更新する。
+   */
   function moveWidgetRow(row, direction) {
     const sibling = direction === "up" ? row.previousElementSibling : row.nextElementSibling;
     if (!sibling) return;
@@ -2342,12 +2883,23 @@
     showToast("表示順を変更しました");
   }
 
+  /**
+   * 既存IDと衝突しないwidget IDを生成する。
+   * @param {string} prefix - ID prefix。
+   * @returns {string} 指定prefixから生成した新しいwidget ID。
+   */
   function uniqueWidgetId(prefix = "widget") {
     let number = 1;
     while (document.querySelector(`[data-widget="${prefix}-${number}"], [data-widget-row="${prefix}-${number}"]`)) number += 1;
     return `${prefix}-${number}`;
   }
 
+  /**
+   * rowからwidget設定を読み、overrideを適用する。
+   * @param {HTMLElement} row - widget row element。
+   * @param {string} overrides - 設定override値。
+   * @returns {Object} row fieldとoverrideから作るwidget編集config。channelId、type、periodなど保存値を含む。
+   */
   function widgetConfigFromRow(row, overrides = {}) {
     return {
       id: row.dataset.widgetRow,
@@ -2376,6 +2928,11 @@
     };
   }
 
+  /**
+   * widget設定を複製し、新しいIDと表示位置を割り当てる。
+   * @param {HTMLElement} row - widget row element。
+   * @returns {void} 現在rowの設定を複製し、新IDで保存する。
+   */
   function duplicateWidget(row) {
     const group = row.closest(".widget-group-list").dataset.widgetGroup;
     const config = widgetConfigFromRow(row, {
@@ -2397,6 +2954,11 @@
     showToast("表示項目を複製しました");
   }
 
+  /**
+   * widget設定の削除確認を行い、確定後に削除する。
+   * @param {HTMLElement} row - widget row element。
+   * @returns {void} 確認dialog後に削除APIを呼び、widget一覧を更新する。
+   */
   function deleteWidget(row) {
     const title = row.querySelector("strong").textContent;
     openConfirmation(
@@ -2416,6 +2978,11 @@
 
 
 
+  /**
+   * 選択widgetのsignalと期間をログ検索へ引き継ぐ。
+   * @param {Object} widget - widget設定。
+   * @returns {void} widgetのsignalとperiod条件をログviewへ設定して表示を切り替える。
+   */
   function openLogsForWidget(widget) {
     const period = periodKeyForWidget(widget.dataset.widgetPeriod || "follow");
     const periodSelect = document.querySelector("#log-period");

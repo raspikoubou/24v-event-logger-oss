@@ -59,14 +59,39 @@ class GitHubReleaseClient:
     """許可したrepositoryのlatest Releaseだけを取得する。"""
 
     def __init__(self, repository: str, *, timeout: float = 5.0) -> None:
-        """`owner/name`形式のrepositoryを受け取る。"""
+        """`owner/name`形式のrepositoryを受け取る。
+
+        Args:
+            repository: この処理が利用する保存・照会Repository。
+            timeout: 通信操作のtimeout（秒）。
+
+        Returns:
+            None。
+
+        Raises:
+            ValueError: 引数の形式・範囲が仕様外、または現在
+                の状態では要求を適用できない場合。
+        """
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
             raise ValueError("repository must be owner/name")
         self._repository = repository
         self._timeout = timeout
 
     def latest(self) -> ReleaseInfo:
-        """GitHub APIからdraft/prereleaseを除く最新Releaseを取得する。"""
+        """GitHub APIからdraft/prereleaseを除く最新Releaseを取得する。
+
+        Args:
+            なし。
+
+        Returns:
+            安定版最新Releaseのversion/tagと検証済みassetを含むReleaseInfo。
+
+        Raises:
+            UpdateError: release
+                metadata、asset、checksum、he
+                lperまたはagent通信がupdate条
+                件を満たさない場合。
+        """
         url = f"https://api.github.com/repos/{self._repository}/releases/latest"
         request = Request(
             url,
@@ -129,7 +154,15 @@ class GitHubReleaseClient:
 
 
 def is_newer_version(current: str, latest: str) -> bool:
-    """latestがcurrentより新しいsemver風Versionか返す。"""
+    """latestがcurrentより新しいsemver風Versionか返す。
+
+    Args:
+        current: インストール済みのnumeric version文字列。
+        latest: 比較対象のnumeric release version文字列。
+
+    Returns:
+        latestがcurrentより新しい場合True。同じ版または古い版ならFalse。
+    """
     return _version_key(latest) > _version_key(current)
 
 
@@ -151,6 +184,9 @@ def validate_update_candidate(
 
     Raises:
         UpdateError: metadata不正、Version不一致、pre-release、同一版または旧版。
+
+    Returns:
+        None。
     """
     installed_version = _project_version(installed_pyproject_path)
     candidate_version = _project_version(candidate_pyproject_path)
@@ -168,7 +204,20 @@ def validate_update_candidate(
 
 
 def _project_version(pyproject_path: str | os.PathLike[str]) -> str:
-    """pyproject.tomlから検証済みのproject.versionを読む。"""
+    """pyproject.tomlから検証済みのproject.versionを読む。
+
+    Args:
+        pyproject_path: version metadataを読むpyproject.toml path。
+
+    Returns:
+        pyproject.tomlから読み込んだ検証済みversion文字列。
+
+    Raises:
+        UpdateError: release
+            metadata、asset、checksum、he
+            lperまたはagent通信がupdate条
+            件を満たさない場合。
+    """
     try:
         with Path(pyproject_path).open("rb") as project_file:
             document = tomllib.load(project_file)
@@ -187,7 +236,24 @@ def download_and_verify(
     work_dir: str | os.PathLike[str],
     timeout: float = 30.0,
 ) -> tuple[Path, Path]:
-    """archiveとSHA256SUMSを一時領域へ取得し、対象archiveを検証する。"""
+    """archiveとSHA256SUMSを一時領域へ取得し、対象archiveを検証する。
+
+    Args:
+        release: 取得済みGitHub Release metadata。
+        work_dir: assetを配置してよい作業directory。
+        timeout: 通信操作のtimeout（秒）。
+
+    Returns:
+        検証済みarchive file pathとchecksum
+        file
+        pathのtuple。失敗時は取得した一時fileを回収する。
+
+    Raises:
+        UpdateError: release
+            metadata、asset、checksum、he
+            lperまたはagent通信がupdate条
+            件を満たさない場合。
+    """
     root = Path(work_dir)
     root.mkdir(mode=0o750, parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f"release-{release.version}-", dir=root))
@@ -240,6 +306,19 @@ def launch_updater(
 
     Returns:
         今回の処理ID。IDを返さない旧agentの場合だけNone。
+
+    Args:
+        helper_path: 起動を許可する固定updater helper path。
+        archive_path: update archiveのpath。
+        checksum_path: archive checksum一覧のpath。
+        version: update対象releaseのversion文字列。
+        socket_path: 接続先またはlistenするUnix socket path。
+
+    Raises:
+        UpdateError: release
+            metadata、asset、checksum、he
+            lperまたはagent通信がupdate条
+            件を満たさない場合。
     """
     if socket_path is not None:
         return _request_update_agent(
@@ -280,7 +359,16 @@ def launch_updater(
 
 
 def discard_update_download(archive_path: Path, checksum_path: Path) -> bool:
-    """当該downloadの2ファイルだけを回収する。実行中helperの元fileには使わない。"""
+    """当該downloadの2ファイルだけを回収する。実行中helperの元fileには使わない。
+
+    Args:
+        archive_path: update archiveのpath。
+        checksum_path: archive checksum一覧のpath。
+
+    Returns:
+        指定されたarchive/checksum
+        fileのどちらかを削除した場合True。対象がなければFalse。
+    """
     staging = archive_path.parent
     if (
         checksum_path.parent != staging
@@ -303,7 +391,23 @@ def discard_update_download(archive_path: Path, checksum_path: Path) -> bool:
 
 
 def _download(url: str, destination: Path, timeout: float, *, max_bytes: int) -> None:
-    """HTTPS assetを上限付きstreamとして保存する。"""
+    """HTTPS assetを上限付きstreamとして保存する。
+
+    Args:
+        url: 接続先HTTP/HTTPS URL。
+        destination: 生成またはcopyする出力file path。
+        timeout: 通信操作のtimeout（秒）。
+        max_bytes: assetに許す最大byte数。
+
+    Returns:
+        None。
+
+    Raises:
+        UpdateError: release
+            metadata、asset、checksum、he
+            lperまたはagent通信がupdate条
+            件を満たさない場合。
+    """
     request = Request(
         url,
         headers={
@@ -335,7 +439,14 @@ def _download(url: str, destination: Path, timeout: float, *, max_bytes: int) ->
 
 
 def _sha256_file(path: Path) -> str:
-    """大きなarchiveをメモリへ載せずSHA-256を計算する。"""
+    """大きなarchiveをメモリへ載せずSHA-256を計算する。
+
+    Args:
+        path: 対象fileまたはUnix socketのfilesystem path。
+
+    Returns:
+        対象file全体のSHA-256 hex digest。
+    """
     digest = hashlib.sha256()
     with path.open("rb") as file:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
@@ -350,7 +461,25 @@ def _request_update_agent(
     checksum_path: str | os.PathLike[str],
     version: str,
 ) -> str | None:
-    """root update-agentへ固定schemaの依頼を送る。"""
+    """root update-agentへ固定schemaの依頼を送る。
+
+    Args:
+        socket_path: 接続先またはlistenするUnix socket path。
+        archive_path: update archiveのpath。
+        checksum_path: archive checksum一覧のpath。
+        version: update対象releaseのversion文字列。
+
+    Returns:
+        agentが返したrequest
+        ID。旧agent応答などIDがない場合はNone。応答不明は別例外で通知する。
+
+    Raises:
+        UpdateError: release
+            metadata、asset、checksum、he
+            lperまたはagent通信がupdate条
+            件を満たさない場合。
+        UpdateOutcomeUnknown: 応答消失等によりagentが更新を開始したか確認できない場合。
+    """
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", version):
         raise UpdateError("release version is invalid")
     payload = (
@@ -400,7 +529,20 @@ def _request_update_agent(
 
 
 def request_reboot(socket_path: str | os.PathLike[str]) -> None:
-    """管理agentへ本体再起動だけを依頼し、任意コマンドは渡さない。"""
+    """管理agentへ本体再起動だけを依頼し、任意コマンドは渡さない。
+
+    Args:
+        socket_path: 接続先またはlistenするUnix socket path。
+
+    Returns:
+        None。
+
+    Raises:
+        UpdateError: release
+            metadata、asset、checksum、he
+            lperまたはagent通信がupdate条
+            件を満たさない場合。
+    """
     if not str(socket_path):
         raise UpdateError("再起動サービスが設定されていません。")
     try:
@@ -421,7 +563,20 @@ def request_reboot(socket_path: str | os.PathLike[str]) -> None:
 
 
 def _read_agent_response(connection: socket.socket) -> object:
-    """update-agentのnewline JSONをサイズ制限付きで読む。"""
+    """update-agentのnewline JSONをサイズ制限付きで読む。
+
+    Args:
+        connection: この関数が使うSQLite connection。
+
+    Returns:
+        newline JSON応答のdecode結果。schema検証は呼出側が行う。
+
+    Raises:
+        UpdateError: release
+            metadata、asset、checksum、he
+            lperまたはagent通信がupdate条
+            件を満たさない場合。
+    """
     buffer = bytearray()
     while len(buffer) <= 64 * 1024:
         chunk = connection.recv(4096)
@@ -439,7 +594,21 @@ def _read_agent_response(connection: socket.socket) -> object:
 
 
 def _checksum_for(path: Path, target_name: str) -> str:
-    """SHA256SUMSから対象archive名の一意なchecksumを取り出す。"""
+    """SHA256SUMSから対象archive名の一意なchecksumを取り出す。
+
+    Args:
+        path: 対象fileまたはUnix socketのfilesystem path。
+        target_name: checksum一覧で検索するasset filename。
+
+    Returns:
+        対象archiveに対する一意なSHA-256 hex digest。
+
+    Raises:
+        UpdateError: release
+            metadata、asset、checksum、he
+            lperまたはagent通信がupdate条
+            件を満たさない場合。
+    """
     matches: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         fields = line.split()
@@ -454,7 +623,20 @@ def _checksum_for(path: Path, target_name: str) -> str:
 
 
 def _normalize_version(tag: str) -> str:
-    """v prefixを除去し、固定asset名へ使えるVersionにする。"""
+    """v prefixを除去し、固定asset名へ使えるVersionにする。
+
+    Args:
+        tag: GitHub Releaseのtag文字列。先頭vの有無は正規化処理で扱う。
+
+    Returns:
+        v prefixを除いたrelease version文字列。
+
+    Raises:
+        UpdateError: release
+            metadata、asset、checksum、he
+            lperまたはagent通信がupdate条
+            件を満たさない場合。
+    """
     version = tag.removeprefix("v")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", version):
         raise UpdateError("release tag is invalid")
@@ -462,7 +644,15 @@ def _normalize_version(tag: str) -> str:
 
 
 def _is_github_asset_url(url: str, repository: str) -> bool:
-    """公開GitHub Release assetの初期URLだけを許可する。"""
+    """公開GitHub Release assetの初期URLだけを許可する。
+
+    Args:
+        url: 接続先HTTP/HTTPS URL。
+        repository: この処理が利用する保存・照会Repository。
+
+    Returns:
+        指定repositoryのRelease asset URLとして許可される場合True。
+    """
     parsed = urlparse(url)
     return (
         parsed.scheme == "https"
@@ -477,6 +667,16 @@ def _version_key(version: str) -> tuple[tuple[int, ...], int, int]:
     `packaging` はruntime dependencyへ追加せず、生成するVersion文法を明示的に
     制限する。リリース本体は各ドット区切りが数字、pre-releaseはa/b/rcと
     数字だけを許し、誤った辞書順比較で更新を拒否しない。
+
+    Args:
+        version: update対象releaseのversion文字列。
+
+    Returns:
+        許可したversionの順序比較用tuple。
+
+    Raises:
+        ValueError: 引数の形式・範囲が仕様外、または現在
+            の状態では要求を適用できない場合。
     """
     normalized = version.removeprefix("v")
     match = re.fullmatch(

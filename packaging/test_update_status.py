@@ -26,7 +26,14 @@ from event_logger.web.app import create_app
 def test_sent_update_with_lost_reply_has_unknown_outcome(
     failure: Exception, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """接続後に応答が失われても、未起動として再適用させない。"""
+    """接続後に応答が失われても、未起動として再適用させない。
+
+Args:
+    failure: 再現する例外または失敗条件。
+    monkeypatch: pytestが提供する一時的な属性・環境差し替えfixture。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     connection = MagicMock()
     monkeypatch.setattr("event_logger.maintenance.update.socket.socket", connection)
     monkeypatch.setattr(
@@ -45,7 +52,13 @@ def test_sent_update_with_lost_reply_has_unknown_outcome(
 
 
 def test_unconnected_update_is_not_sent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """agentへ接続できない場合は、起動結果不明と区別する。"""
+    """agentへ接続できない場合は、起動結果不明と区別する。
+
+Args:
+    monkeypatch: pytestが提供する一時的な属性・環境差し替えfixture。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     socket_factory = MagicMock()
     connection = socket_factory.return_value.__enter__.return_value
     connection.connect.side_effect = FileNotFoundError("agent unavailable")
@@ -65,7 +78,14 @@ def test_unconnected_update_is_not_sent(monkeypatch: pytest.MonkeyPatch) -> None
 def test_update_response_preserves_pre_launch_status(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """起動後に状態が変化しても、依頼前の記録を別に保持する。"""
+    """起動後に状態が変化しても、依頼前の記録を別に保持する。
+
+Args:
+    tmp_path: pytestが用意するテスト専用一時directory。
+    monkeypatch: pytestが提供する一時的な属性・環境差し替えfixture。
+
+Returns:
+    なし。呼出元は副作用の完了をもって処理結果を扱う。"""
     status_path = tmp_path / "update.json"
     previous = {"status": "failed", "version": "1.0.2", "attempt_id": "previous"}
     started = {"status": "started", "version": "1.0.2", "attempt_id": "current"}
@@ -89,7 +109,14 @@ def test_update_response_preserves_pre_launch_status(
     )
 
     def launch(**_kwargs: object) -> str:
-        """実際のupdaterを起動せず、状態の置き換えだけを再現する。"""
+        """実際のupdaterを起動せず、状態の置き換えだけを再現する。
+
+            Args:
+                **_kwargs: subprocess.runへ渡されるprocess options。stubでは無視する。
+
+            Returns:
+                試験updater statusのJSON文字列。外部processは起動しない。
+        """
         status_path.write_text(json.dumps(started))
         return "current"
 
@@ -126,7 +153,13 @@ def test_update_response_preserves_pre_launch_status(
 
 
 def test_shell_status_keeps_one_id_per_process(tmp_path: Path) -> None:
-    """1回の処理のIDは共通で、同じ版への次の処理では変わる。"""
+    """1回の処理のIDは共通で、同じ版への次の処理では変わる。
+
+Args:
+    tmp_path: pytestが用意するテスト専用一時directory。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     root = Path(__file__).resolve().parents[1]
     source = (root / "packaging/update.sh").read_text()
     assignment = next(
@@ -163,7 +196,14 @@ def test_shell_status_keeps_one_id_per_process(tmp_path: Path) -> None:
 def test_agent_returns_id_assigned_to_helper(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """agentの応答と、起動したhelperの環境変数は同じIDを持つ。"""
+    """agentの応答と、起動したhelperの環境変数は同じIDを持つ。
+
+Args:
+    tmp_path: pytestが用意するテスト専用一時directory。
+    monkeypatch: pytestが提供する一時的な属性・環境差し替えfixture。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     agent = UpdateAgent(
         socket_path=tmp_path / "socket",
         helper_path=tmp_path / "helper",
@@ -198,7 +238,14 @@ def test_agent_returns_id_assigned_to_helper(
 def test_agent_reply_id_reaches_web_caller(
     monkeypatch: pytest.MonkeyPatch, attempt_id: str | None
 ) -> None:
-    """旧agentのIDなし応答と、新agentのID付き応答を扱える。"""
+    """旧agentのIDなし応答と、新agentのID付き応答を扱える。
+
+Args:
+    monkeypatch: pytestが提供する一時的な属性・環境差し替えfixture。
+    attempt_id: test serverがupdate受付応答へ含める試行ID。Noneは旧形式agent応答を表す。
+
+Returns:
+    なし。結果は保存、応答送信、route登録などの副作用で反映する。"""
     monkeypatch.setattr("event_logger.maintenance.update.socket.socket", MagicMock())
     monkeypatch.setattr(
         "event_logger.maintenance.update._read_agent_response",

@@ -1,12 +1,32 @@
 "use strict";
 
+/**
+ * update panel APIをCommonJSまたはbrowser globalへ登録する。
+ * @param {Object} root browser global object。documentがある場合はpanelをmountする。
+ * @param {Function} factory controller APIを生成する関数。
+ * @returns {void} module.exportsまたはrootへAPIを公開する。
+ */
 (function initializeUpdatePanelModule(root, factory) {
   const api = factory();
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (root && root.document) api.mount(root.document, root);
-})(typeof globalThis === "object" ? globalThis : this, function createUpdatePanelApi() {
+})(typeof globalThis === "object" ? globalThis : this, /**
+ * 公開するupdate controller factoryを作る。
+ * @returns {Object} createUpdatePanelControllerとmountを公開するAPI。
+ */ function createUpdatePanelApi() {
   const BLOCKING_UPDATE_STATES = new Set(["started", "rollback_failed"]);
 
+  /**
+   * 更新確認、適用、結果監視を管理するpanel controllerを構築する。
+   * @param {Object} options - Release確認/適用、利用者確認、status読取と時刻供給callback群。
+   * @param {Function} options.checkRelease - release確認関数。
+   * @param {Function} options.applyRelease - release適用関数。
+   * @param {Function} options.confirmApply - 利用者確認関数。
+   * @param {Function} options.onChange - state変更callback。
+   * @param {Function|null} options.readStatus - local update statusを取得するasync callback。
+   * @param {Function} options.now - 現在時刻供給関数。
+   * @returns {Object} check/apply/monitor/getStateを公開するcontroller。内部state snapshotはcopyで返す。
+   */
   function createUpdatePanelController({
     checkRelease,
     applyRelease,
@@ -37,21 +57,39 @@
     let watchStartedAt = null;
     let previousStatusKey = null;
 
+    /**
+     * update statusを表示用分類keyへ正規化する。
+     * @param {Object} status - 更新status。
+     * @returns {string|null} attempt ID、status、version、message、updated_atをJSON化した比較key。statusなしはnull。
+     */
     function statusKey(status) {
       if (!status) return null;
       return JSON.stringify([status.attempt_id, status.status, status.version,
         status.message, status.updated_at]);
     }
 
+    /**
+     * 現在のupdate stateのcopyを返す。
+     * @returns {Object} update stateのshallow copy。呼出元の変更はcontroller内部stateへ反映されない。
+     */
     function snapshot() {
       return { ...state };
     }
 
+    /**
+     * update stateを更新し、購読者へ変更を通知する。
+     * @param {Object} changes - 更新するstate field群。
+     * @returns {void} changesを内部stateへ反映し、更新後snapshotをonChangeへ通知する。
+     */
     function updateState(changes) {
       Object.assign(state, changes);
       onChange(snapshot());
     }
 
+    /**
+     * Release候補を確認し、利用者表示stateを更新する。
+     * @returns {Promise<Object>} Release確認後のstate snapshot。通信・schema失敗はerror message付きstateに反映してsnapshotを返す。
+     */
     async function check() {
       if (state.checking || state.confirming || state.applying || state.processing) return snapshot();
       updateState({
@@ -120,6 +158,10 @@
       return snapshot();
     }
 
+    /**
+     * 確認済みReleaseの適用を要求して結果監視を開始する。
+     * @returns {Promise<Object>} 適用確認・依頼後のstate snapshot。利用者取消、開始失敗、受付後の状態不明もstateとして返す。
+     */
     async function apply() {
       if (!state.available || state.checking || state.confirming || state.applying || state.processing) {
         return snapshot();
@@ -191,6 +233,10 @@
       return snapshot();
     }
 
+    /**
+     * 更新結果待ちの監視期限を処理する。
+     * @returns {boolean} 処理中で監視開始から10分超過ならunknown stateへ移しtrue。期限未到達または監視外ならfalse。
+     */
     function expireWatch() {
       if (!state.processing || watchStartedAt === null || now() - watchStartedAt <= 10 * 60 * 1000) return false;
       statusRequestEpoch += 1;
@@ -201,6 +247,10 @@
       return true;
     }
 
+    /**
+     * 更新状態を一定間隔で確認し、終端状態まで監視する。
+     * @returns {Promise<Object>} local update statusを反映したstate snapshot。成功/失敗/不明をstatusとattempt IDで区別する。
+     */
     async function monitor() {
       // 状態取得が応答しない場合も、次回の定期確認で監視期限を判定する。
       if (expireWatch()) return snapshot();
@@ -259,6 +309,11 @@
     return { check, apply, monitor, getState: snapshot };
   }
 
+  /**
+   * update statusを利用者向けlabelへ変換する。
+   * @param {Object} status - 更新status。
+   * @returns {string} started/completed/failed/rollback_failed/unknownを日本語status labelへ変換する。
+   */
   function formatUpdateStatus(status) {
     if (!status) return "更新状態の記録はありません。";
     const label = { started: "処理中", completed: "完了", failed: "失敗",
@@ -266,9 +321,22 @@
     return status.version ? `${label} — ${status.version}` : label;
   }
 
+  /**
+   * 現在形式と旧形式の状態を安全に読むreaderを作る。
+   * @param {Object} options - local/legacy status reader、適用中判定、単調時計callback群。
+   * @param {Function} options.readLocal - local status reader。
+   * @param {Function} options.readLegacy - legacy status reader。
+   * @param {Function} options.isProcessing - 処理中判定関数。
+   * @param {Function} options.now - 現在時刻供給関数。
+   * @returns {Function} local statusを優先し、404かつ更新処理中なら20秒経過後一度だけlegacy statusを読むasync function。
+   */
   function createLegacyAwareStatusReader({ readLocal, readLegacy, isProcessing, now = () => Date.now() }) {
     let unavailableSince = null;
     let legacyRead = false;
+    /**
+     * local update statusを読み、旧endpointへ切り替える必要がある場合だけlegacy statusを読む。
+     * @returns {Promise<Object>} 現在versionとstatusを持つresponse data。旧endpointは404かつ更新中で20秒経過後に一度だけ読む。
+     */
     return async function readStatus() {
       try {
         const result = await readLocal();
@@ -290,6 +358,12 @@
     };
   }
 
+  /**
+   * 更新panelをDOMへ接続し、操作eventと初期表示を設定する。
+   * @param {Document} documentRef - document object。
+   * @param {Window} windowRef - window object。
+   * @returns {Object|null} panelが利用可能ならcontrollerを構築して返す。panel欠落・demo・非liveではnull。
+   */
   function mount(documentRef, windowRef) {
     const panel = documentRef.getElementById("update-panel");
     if (!panel) return null;
@@ -305,6 +379,11 @@
     };
     if (Object.values(elements).some((element) => !element)) return null;
 
+    /**
+     * update stateをpanelのDOMへ反映する。
+     * @param {Object} state - 現在のstate。
+     * @returns {void} current/latest version、status、message、notes、button enabled stateをpanel DOMへ反映する。
+     */
     function render(state) {
       const progress = documentRef.getElementById("update-progress");
       const processing = state.processing || state.applying;
@@ -336,6 +415,13 @@
     }
 
     const csrfToken = documentRef.querySelector('meta[name="csrf-token"]')?.content || "";
+    /**
+     * 更新APIへmethod/path/bodyを指定してrequestする。
+     * @param {string} method - HTTP method。
+     * @param {string} path - API path。
+     * @param {Object|null} body - HTTP body。
+     * @returns {Promise<Object>} JSON API response data。method別timeout、same-origin credential、CSRF tokenを適用し、失敗はErrorをrejectする。
+     */
     async function requestUpdate(method, path = "/api/update", body = null) {
       const headers = { Accept: "application/json" };
       if (method !== "GET" && csrfToken) headers["X-CSRF-Token"] = csrfToken;
@@ -374,9 +460,14 @@
     }
 
     const controller = createUpdatePanelController({
-      checkRelease: () => requestUpdate("GET"),
-      applyRelease: (body) => requestUpdate("POST", "/api/update", body),
-      confirmApply: ({ currentVersion, targetVersion }) => {
+      checkRelease: /** @returns {Promise<Object>} GitHub release情報とtokenを含む確認結果。 */
+        () => requestUpdate("GET"),
+      applyRelease: /** @param {Object} body POSTするrelease tokenと確認済みversion。
+       * @returns {Promise<Object>} 更新開始受付結果。
+       */ (body) => requestUpdate("POST", "/api/update", body),
+      confirmApply: /** @param {Object} versions 現行版と適用対象版。
+       * @returns {Promise<boolean>} dialogでの利用者確認結果。
+       */ ({ currentVersion, targetVersion }) => {
         const message = `設備イベントロガーを ${currentVersion} から ${targetVersion} へ更新します。\n\n`
           + "更新中は記録が一時停止し、その区間はUNKNOWNになります。"
           + "更新前にDBバックアップを取得し、失敗時は旧版への復帰を試みます。";
@@ -391,12 +482,16 @@
         });
       },
       onChange: render,
-      readStatus: () => readStatus(),
+      readStatus: /** @returns {Promise<Object>} ローカル更新状態または互換endpointの状態。
+       */ () => readStatus(),
     });
     const readStatus = createLegacyAwareStatusReader({
-      readLocal: () => requestUpdate("GET", "/api/update/status"),
-      readLegacy: () => requestUpdate("GET"),
-      isProcessing: () => controller.getState().processing,
+      readLocal: /** @returns {Promise<Object>} ローカル専用更新状態APIの応答。
+       */ () => requestUpdate("GET", "/api/update/status"),
+      readLegacy: /** @returns {Promise<Object>} 旧更新状態endpointの応答。
+       */ () => requestUpdate("GET"),
+      isProcessing: /** @returns {boolean} controllerが更新結果待ち状態か。
+       */ () => controller.getState().processing,
     });
     elements.check.addEventListener("click", () => controller.check());
     elements.apply.addEventListener("click", () => controller.apply());
