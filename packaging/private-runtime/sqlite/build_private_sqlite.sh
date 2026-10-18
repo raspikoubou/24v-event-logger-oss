@@ -21,6 +21,7 @@ done
 )
 
 WORK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/event-logger-sqlite-build.XXXXXX")"
+# 一時ディレクトリを終了時に削除し、ビルド生成物と混在させない。
 cleanup() {
   rm -rf -- "$WORK_ROOT"
 }

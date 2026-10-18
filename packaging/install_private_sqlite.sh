@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 APP_ROOT="${EVENT_LOGGER_APP_ROOT:-/opt/event-logger}"
 RUNTIME_ROOT="${EVENT_LOGGER_PRIVATE_SQLITE_ROOT:-$APP_ROOT/runtime/sqlite}"
+# 配布物に含めたSQLiteの固定バージョンを使い、実行中のDB環境を揃える。
 VERSION="3.53.4"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SQLITE_BUNDLE_ROOT="$SCRIPT_DIR/private-runtime/sqlite"
@@ -10,6 +11,7 @@ SOURCE_LIBRARY="$SQLITE_BUNDLE_ROOT/libsqlite3.so.$VERSION"
 VERSION_ROOT="$RUNTIME_ROOT/$VERSION"
 CURRENT_LINK="$RUNTIME_ROOT/current"
 
+# 専用SQLiteライブラリの配置で失敗した場合は中断する。
 die() {
   printf 'private SQLite install: %s\n' "$*" >&2
   exit 1

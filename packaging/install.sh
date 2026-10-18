@@ -127,6 +127,7 @@ for unit in "${PRODUCT_UNITS[@]}"; do
   fi
 done
 
+# 更新・配置前に関連systemdサービスを停止する。
 stop_product_services() {
   local unit
   SERVICES_STOPPED=1
@@ -137,6 +138,7 @@ stop_product_services() {
   done
 }
 
+# インストール途中の失敗後に元の起動状態を回復する。
 restore_product_services() {
   local unit
   local failed=0
@@ -159,6 +161,7 @@ restore_product_services() {
   return "$failed"
 }
 
+# 失敗時にサービス定義が不整合のまま残らないよう戻す。
 restore_product_units() {
   local unit
   for unit in "${PRODUCT_UNITS[@]}"; do
@@ -171,6 +174,7 @@ restore_product_units() {
   systemctl daemon-reload
 }
 
+# 終了シグナルやエラー時も配置途中の資源を後始末する。
 cleanup_install() {
   local exit_status=$?
   local rollback_failed=0

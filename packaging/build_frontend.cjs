@@ -9,6 +9,7 @@ for (const [src, target] of jobs) {
   const dir = path.join(root, src);
   const parts = fs.readdirSync(dir).filter((x) => x.endsWith(".jsfrag")).sort();
   if (parts.length < 2) throw new Error("frontend parts missing");
+  // 分割ソースをファイル名順で結合する。生成済みapp.jsとは常に同じ内容に保つ。
   const output = parts.map((p) => fs.readFileSync(path.join(dir, p), "utf8")).join("");
   const targetPath = path.join(root, target);
   if (process.argv.includes("--check")) {

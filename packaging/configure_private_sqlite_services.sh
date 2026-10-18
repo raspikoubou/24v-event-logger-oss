@@ -5,6 +5,7 @@ APP_ROOT="${EVENT_LOGGER_APP_ROOT:-/opt/event-logger}"
 RUNTIME_ROOT="${EVENT_LOGGER_PRIVATE_SQLITE_ROOT:-$APP_ROOT/runtime/sqlite}"
 LIBRARY_DIR="$RUNTIME_ROOT/current/lib"
 DROPIN_NAME="99-event-logger-private-sqlite.conf"
+# loggerd・Web・保守・更新で同じSQLiteランタイムを使用する。
 UNIT_NAMES=(
   event-loggerd.service
   event-logger-web.service
@@ -13,6 +14,7 @@ UNIT_NAMES=(
   event-logger-update.service
 )
 
+# systemdドロップイン設定の異常を検出したらその場で中断する。
 die() {
   printf 'private SQLite services: %s\n' "$*" >&2
   exit 1

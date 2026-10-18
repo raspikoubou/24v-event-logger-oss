@@ -66,6 +66,7 @@ SOURCE_DATE_EPOCH_NAME = "SOURCE_DATE_EPOCH"
 VERSION_PATTERN = re.compile(r"^[0-9][A-Za-z0-9.+_-]*$")
 
 
+# 生成時刻を固定して配布物を再現可能にする。
 def _read_source_date_epoch() -> int:
     """SOURCE_DATE_EPOCHを検証して返す。"""
     raw_value = os.environ.get(SOURCE_DATE_EPOCH_NAME)
@@ -89,6 +90,7 @@ def _read_version() -> str:
     return version
 
 
+# 公開対象と格納先パスを確定してからアーカイブを生成する。
 def _archive_entries() -> list[tuple[PurePosixPath, Path, bool]]:
     """release allow-listから安全なarchive entryを作る。"""
     entries: list[tuple[PurePosixPath, Path, bool]] = []
@@ -147,6 +149,7 @@ def _archive_entries() -> list[tuple[PurePosixPath, Path, bool]]:
     return sorted(entries, key=lambda entry: entry[0].as_posix())
 
 
+# アーカイブ内のファイル属性と順序を一定にする。
 def _add_entry(
     archive: tarfile.TarFile,
     relative_path: PurePosixPath,
@@ -176,6 +179,7 @@ def _add_entry(
         archive.addfile(info, source_file)
 
 
+# 検証済みのエントリを配布アーカイブへ格納する。
 def _write_archive(
     path: Path, entries: list[tuple[PurePosixPath, Path, bool]], epoch: int
 ) -> None:
@@ -197,6 +201,7 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+# 公開範囲・版番号・ハッシュを揃えた配布ファイルを生成する。
 def create_release_asset(
     output_directory: Path, source_date_epoch: int
 ) -> tuple[Path, Path]:

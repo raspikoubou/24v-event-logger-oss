@@ -2,6 +2,7 @@
 
 # lgpioのwheelが対象Python/ARM64向けに提供されない場合でも、
 # install/updateのvenv構築を同じOS前提で再現できるようにする。
+# 対象Pythonでwheelを利用できない場合だけビルド依存の導入を検討する。
 ensure_python_build_dependencies() {
   # wheelhouseを指定した導入では、依存wheelが揃っていればコンパイル不要である。
   # オフライン復旧時にAPT更新を要求して導入不能にしない。

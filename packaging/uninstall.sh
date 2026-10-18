@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# インストール先と保存データは別管理し、削除範囲を明示する。
 APP_ROOT="${EVENT_LOGGER_APP_ROOT:-/opt/event-logger}"
 DATA_ROOT="${EVENT_LOGGER_DATA_ROOT:-/var/lib/event-logger}"
 CONFIG_ROOT="${EVENT_LOGGER_CONFIG_ROOT:-/etc/event-logger}"
 SERVICE_USER="event-logger"
 
+# 異常時は終了コードを返し、部分削除を成功と扱わない。
 die() {
   printf 'event-logger uninstall: %s\n' "$*" >&2
   exit 1

@@ -14,6 +14,7 @@ _KEY_NAME = "EVENT_LOGGER_SECRET_KEY"
 _KEY_ASSIGNMENT = re.compile(r"^[ \t]*EVENT_LOGGER_SECRET_KEY[ \t]*=(.*)$")
 
 
+# 既存の署名鍵が設定されている場合は新しい鍵で上書きしない。
 def _configured_assignment(contents: str) -> str | None:
     """既存の非空キー設定を返す。空設定は初回生成の対象にする。"""
     for line in contents.splitlines():
@@ -28,6 +29,7 @@ def _configured_assignment(contents: str) -> str | None:
     return None
 
 
+# 複数Web workerで共有できる署名鍵を安全に永続化する。
 def ensure_web_secret(env_path: Path) -> str:
     """設定に署名鍵を一つだけ残し、原子的に保存する。
 

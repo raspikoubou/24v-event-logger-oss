@@ -5,6 +5,7 @@ APP_ROOT="${EVENT_LOGGER_APP_ROOT:-/opt/event-logger}"
 RUNTIME_ROOT="${EVENT_LOGGER_PRIVATE_SQLITE_ROOT:-$APP_ROOT/runtime/sqlite}"
 LIBRARY_DIR="$RUNTIME_ROOT/current/lib"
 
+# 必須コマンドが与えられていない場合にライブラリ設定だけを行わない。
 if [[ "$#" -eq 0 ]]; then
   printf 'private SQLite runner: command is required\n' >&2
   exit 2

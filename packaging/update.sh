@@ -17,6 +17,7 @@ VERSION=""
 UPDATE_ATTEMPT_ID="${EVENT_LOGGER_UPDATE_ATTEMPT_ID:-$(date -u +%Y%m%dT%H%M%S)-$$}"
 SOURCE_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# 更新の進捗・成否をWebから読める状態ファイルへ反映する。
 write_status() {
   local state="$1"
   local message="$2"
@@ -125,6 +126,7 @@ for unit in "${UNIT_NAMES[@]}"; do
 done
 mkdir -p "$STAGING" "$DATA_ROOT/backups"
 
+# 新しい配布物のsystemd定義をインストールする。
 install_release_units() {
   local release_root="$1"
   local unit
@@ -136,6 +138,7 @@ install_release_units() {
   systemctl daemon-reload
 }
 
+# 失敗時は更新前のservice定義へ戻す。
 restore_product_units() {
   local unit
   local restore_path
@@ -151,6 +154,7 @@ restore_product_units() {
   systemctl daemon-reload
 }
 
+# 更新前の自動起動設定を復元する。
 restore_product_enabled_states() {
   local unit
   local failed=0
@@ -164,6 +168,7 @@ restore_product_enabled_states() {
   return "$failed"
 }
 
+# 更新前の稼働状態を復元する。
 restore_product_active_states() {
   local unit
   local failed=0
@@ -179,6 +184,7 @@ restore_product_active_states() {
   return "$failed"
 }
 
+# 途中失敗後のrollbackと一時資源の解放をまとめる。
 cleanup_update() {
   local exit_status=$?
   if [[ "$exit_status" -ne 0 ]]; then
@@ -342,6 +348,7 @@ systemctl start event-loggerd.service event-logger-web.service
 # 別の通常shellから遅延・非同期でrestart要求だけをsystemdへ渡し、この処理が
 # 終了してからcurrent symlink先の新releaseを常駐agentへ読み込ませる。
 
+# 配布物切替え後に各サービスが正常に動くことを検証する。
 health_check() {
   local attempt
   for attempt in $(seq 1 15); do

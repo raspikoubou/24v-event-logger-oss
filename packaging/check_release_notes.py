@@ -14,6 +14,7 @@ INTERNAL_PATTERNS = (
 )
 
 
+# リリース文に内部検証結果など利用者向けでない情報が混入していないか判定する。
 def violations(body: str) -> list[int]:
     """内部情報候補の行番号を返す。意味と事実は別途レビューする。"""
     return [

@@ -40,6 +40,7 @@ def git(*arguments: str) -> bytes:
     return subprocess.check_output(["git", "-C", str(ROOT), *arguments])
 
 
+# 公開対象から除外すべきファイルがGit履歴に残っていないか確認する。
 def inspect(revision: str, approved: set[str]) -> list[str]:
     """snapshotのfile名、mode、内容を検査し、値を含まない診断を返す。"""
     errors: list[str] = []
@@ -88,6 +89,7 @@ def inspect(revision: str, approved: set[str]) -> list[str]:
     return errors
 
 
+# 公開ファイルの許容リストを読み込んで検査する。
 def main() -> int:
     """公開snapshot検査、またはローカルGit hook設定を実行する。"""
     parser = argparse.ArgumentParser(description=__doc__)
