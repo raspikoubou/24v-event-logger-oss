@@ -377,14 +377,29 @@ class LoggerService:
                 self.status = LoggerStatus.CRITICAL
                 raise
 
+    def check_writer_health(self) -> None:
+        """DB writerの保存失敗を確認し、失敗時はCriticalへ移行する。
+
+        非同期writerのcommitを待たず、保存済み件数も消費しない。
+        """
+        with self._lock:
+            if self.status is LoggerStatus.CRITICAL:
+                return
+        try:
+            self._event_writer.raise_if_failed()
+        except Exception:
+            with self._lock:
+                self.status = LoggerStatus.CRITICAL
+            raise
+
     def drain_events(self) -> int:
-        """DB writerを進め、保存件数を返す。
+        """writerから完了件数を回収する。同期writerではQueueも保存する。
 
         Args:
             なし。
 
         Returns:
-            writerが保持する未commit eventの件数。Queue待機中とcommit中を含む。
+            前回回収以降の保存完了件数（同期writerでは今回保存した件数）。
         """
         with self._lock:
             if self.status is LoggerStatus.CRITICAL:

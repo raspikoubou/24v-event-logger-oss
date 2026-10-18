@@ -337,18 +337,18 @@ class LoggerDaemon:
         self._complete_watchdog_trip_if_needed()
         try:
             if self._service.status is LoggerStatus.LOGGING:
-                # queue済み確定eventをdebounce前に処理し、候補のpoll後にもdrainする。
-                # この二段階で既存eventと今回確定したeventの両方を同じloopで反映する。
-                if self._set_loop_phase("input_queue_drain_before_debounce"):
-                    self._service.drain_events()
+                # 入力確定の前後でDB writerの保存失敗を確認する。
+                # 保存処理自体は別threadが進めるため、ここではcommitを待たない。
+                if self._set_loop_phase("input_writer_health_before_debounce"):
+                    self._service.check_writer_health()
                 self._complete_watchdog_trip_if_needed()
                 if self._service.status is LoggerStatus.LOGGING:
                     if self._set_loop_phase("input_debounce"):
                         self._service.tick_debounce()
                     self._complete_watchdog_trip_if_needed()
                 if self._service.status is LoggerStatus.LOGGING:
-                    if self._set_loop_phase("input_queue_drain_after_debounce"):
-                        self._service.drain_events()
+                    if self._set_loop_phase("input_writer_health_after_debounce"):
+                        self._service.check_writer_health()
                     self._complete_watchdog_trip_if_needed()
                 if self._service.status is LoggerStatus.LOGGING:
                     # 出力制御は入力状態の反映後に実行する。heartbeat/rule間もtripを
