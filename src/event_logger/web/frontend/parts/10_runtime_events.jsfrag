@@ -1,3 +1,4 @@
+  // 記録の停止・再開は出力状態にも関わるため、確認ダイアログを経由する。
   document.querySelector("#toggle-logging").addEventListener("click", () => {
     if (fixtures.loggerStatus === "critical") return;
     if (logging) {
@@ -11,6 +12,7 @@
       setLoggingState(true);
     }
   });
+  // 設定反映の再試行はユーザーの明示操作として実施する。
   document.querySelector("#retry-config-sync").addEventListener("click", async (event) => {
     const button = event.currentTarget;
     if (!liveMode) return;
@@ -25,6 +27,7 @@
       button.disabled = false;
     }
   });
+  // 出力テストの各ボタンは共通の親要素でイベントを受ける。
   document.querySelector("#output-tests").addEventListener("click", (event) => {
     const button = event.target.closest(".test-button");
     if (!button || logging || fixtures.loggerStatus === "critical") return;

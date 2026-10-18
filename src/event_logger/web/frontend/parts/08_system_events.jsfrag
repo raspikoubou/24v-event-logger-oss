@@ -1,3 +1,4 @@
+  // 設定を保存する入口。入力・システム設定の変更可否は後段のAPIでも検証する。
   document.querySelector("#save-settings").addEventListener("click", async () => {
     const pendingChannels = [...document.querySelectorAll("#channel-settings .channel-row")].map((row) => {
       const debounceValue = row.querySelector(".channel-debounce").value.trim();
@@ -111,6 +112,7 @@
     renderChannelSettings();
     showToast("設定を保存しました");
   });
+  // ここからは設定画面内の操作をイベント委譲・各ダイアログへ接続する。
   document.querySelectorAll("[data-settings-target]").forEach((button) => {
     button.addEventListener("click", () => openSettingsSection(button.dataset.settingsTarget));
   });
@@ -155,6 +157,7 @@
   });
   document.querySelector("#rule-condition").addEventListener("change", updateRuleConditionFields);
   document.querySelector("#save-output-rule").addEventListener("click", saveOutputRule);
+  // 削除操作も確認・再取得を通して画面と永続設定の不一致を避ける。
   document.querySelector("#delete-output-rule").addEventListener("click", async () => {
     const rule = fixtures.outputRules.find((item) => item.id === editingOutputRuleId);
     if (!rule) return;

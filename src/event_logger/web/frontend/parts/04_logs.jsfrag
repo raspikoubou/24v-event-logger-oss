@@ -1,3 +1,4 @@
+  // 実機ではAPI側のページ結果を表示し、デモではローカルイベントをページ分割する。
   function renderLogs() {
     const pageSize = Number(document.querySelector("#log-page-size").value);
     const events = liveMode ? logPageEvents : filteredEvents();
@@ -39,6 +40,7 @@
     }).join("");
   }
 
+  // 選択中のフィルター・時間範囲・ページを同じクエリ形式にまとめる。
   function logApiQuery(includePaging) {
     const periodKey = document.querySelector("#log-period").value;
     return buildLogApiQuery({
@@ -56,6 +58,7 @@
     });
   }
 
+  // ログ一覧を非同期取得する。古い要求の応答が新しい検索結果を上書きしないよう要求IDで判定する。
   async function loadLiveLogPage() {
     const requestId = ++logRequestId;
     logPageLoading = true;
@@ -95,6 +98,7 @@
     }
   }
 
+  // 検索条件変更時はページ番号と時間範囲をリセットして検索し直す。
   function reloadLogQuery() {
     logPage = 1;
     // フィルター変更後は新たな時間範囲を検索する。ページ送りの間だけ範囲を固定する。
@@ -110,6 +114,7 @@
     }
   }
 
+  // 設定・ログ・ウィジェットなどの各表示内容を更新する。
   function renderDataViews() {
     renderLogSignalOptions();
     renderRecentEvents();
@@ -130,6 +135,7 @@
     `).join("");
   }
 
+  // 初期セットアップの入力欄を現在の設定から構成する。
   function renderSetupWizard() {
     setSwitchState(document.querySelector("#setup-password-protection"), fixtures.settings.passwordProtection);
     document.querySelector("#setup-password-field").hidden = !fixtures.settings.passwordProtection;
@@ -145,6 +151,7 @@
     }
   }
 
+  // 初期設定を検証し、実機ではAPIへ送信して設定完了を反映する。
   async function completeSetup() {
     const deviceName = document.querySelector("#setup-device-name").value.trim();
     const passwordProtection = switchIsOn(document.querySelector("#setup-password-protection"));
@@ -225,6 +232,7 @@
     showToast("初回設定を完了し、記録を開始しました");
   }
 
+  // 通信・保存状態などの診断情報を画面へ反映する。
   function renderHealth() {
     const heartbeatHealth = fixtures.health.find((item) => item.label === "Heartbeat状態");
     const heartbeat = fixtures.settings.heartbeat;
@@ -271,6 +279,7 @@
     }).join("");
   }
 
+  // 明示終了またはタイムアウト後に出力テストの画面状態を解放する。
   async function finishOutputTest(showMessage = true) {
     if (!activeOutputTest) return;
     if (liveMode) {
@@ -296,6 +305,7 @@
     if (showMessage) showToast(`OUT${outputId}をOFFに戻しました`);
   }
 
+  // メンテナンス時の出力テストを開始し、終了処理との整合を保つ。
   async function startOutputTest(outputId) {
     if (liveMode) {
       try {
@@ -320,6 +330,7 @@
     renderHealth();
   }
 
+  // Heartbeat・条件ルール・テストの出力占有関係を表示に反映する。
   function updateOutputOwners() {
     fixtures.outputs.forEach((output) => {
       output.owner = "未使用";

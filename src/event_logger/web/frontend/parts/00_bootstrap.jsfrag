@@ -12,6 +12,7 @@
     shouldRefreshLogPage
   } = window.EventLoggerRefreshPolicy;
 
+  // API呼び出しを一本化する。更新系だけCSRFヘッダーを付け、認証切れとAPIエラーを画面へ伝える。
   async function liveJson(path, options = {}) {
     const requestOptions = { ...options, headers: { ...(options.headers || {}) } };
     if (requestOptions.body && !requestOptions.headers["Content-Type"]) {
@@ -42,6 +43,7 @@
   } = window.EventLoggerRetentionPolicy;
   const { serializeDemoCsv } = window.EventLoggerCsvFormat;
 
+  // 実機では複数APIの結果を画面用fixturesへまとめる。デモでは通信せず固定データを返す。
   async function loadLiveFixtures(
     period = null,
     includeDashboard = false,
@@ -239,6 +241,7 @@
     storageWarningMessage
   } = window.EventLoggerStoragePolicy;
 
+  // 初期データ取得が完了してから画面の状態管理とイベント登録を開始する。
   async function start() {
     const fixtures = await loadLiveFixtures(null, liveMode);
     runApp(fixtures);

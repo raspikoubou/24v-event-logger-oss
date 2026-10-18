@@ -1,3 +1,4 @@
+  // 画面遷移、期間変更、検索・ページ送りなど、表示系の操作イベントを登録する。
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => switchView(button.dataset.view));
   });
@@ -10,6 +11,7 @@
       switchView(button.dataset.viewLink);
     });
   });
+  // カード内のボタンは動的に生成されるため、親要素でクリックを委譲する。
   document.querySelector("#dashboard-history-grid").addEventListener("click", (event) => {
     const miniZoomButton = event.target.closest("[data-mini-zoom]");
     if (miniZoomButton) {
@@ -165,6 +167,7 @@
   window.addEventListener("resize", () => {
     if (pinnedTimelineEvent) positionTimelineDetail(pinnedTimelineEvent);
   });
+  // 検索条件変更時はページ番号と検索範囲をリセットする。
   document.querySelectorAll("#log-period, #log-signal, #log-value, #log-kind, #log-source").forEach((select) => {
       select.addEventListener("change", () => {
       if (select.id === "log-period") {

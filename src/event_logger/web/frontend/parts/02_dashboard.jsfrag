@@ -1,3 +1,4 @@
+  // 選択信号と表示期間に合致する直近イベントだけをカードへ描画する。
   function renderRecentEvents() {
     const card = document.querySelector('[data-widget="recent-events"]');
     const list = document.querySelector("#recent-events");
@@ -61,6 +62,7 @@
     return formatDuration(durationMs);
   }
 
+  // 確定済みの入力状態と時刻情報から現在値カードに必要な値を組み立てる。
   function currentStateValues(channelId, onLabel, offLabel, widgetId) {
     const channel = fixtures.channels.find((item) => `IN${item.id}` === channelId);
     if (liveMode) {
@@ -141,6 +143,7 @@
     )).join("");
   }
 
+  // 表示対象の現在値カードをまとめて更新する。
   function refreshCurrentStateCards() {
     document.querySelectorAll("#dashboard-realtime-grid [data-widget-type='現在状態']").forEach((card) => {
       updateCurrentStateCard(card, {
@@ -154,10 +157,12 @@
     });
   }
 
+  // 「共通期間に追従」を現在のダッシュボード期間へ解決する。
   function periodKeyForWidget(periodSetting) {
     return periodSetting === "follow" ? currentPeriod : periodSetting;
   }
 
+  // 保存済みの固定期間ならその境界を使い、ローリング期間だけ現在時刻から逆算する。
   function periodBounds(periodKey, durationOverrideMs = 0) {
     const period = fixtures.dashboardPeriods[periodKey];
     const endMs = period.endAt ? Date.parse(period.endAt) : demoNowMs();
@@ -172,6 +177,7 @@
     return event.timestamp ? Date.parse(event.timestamp) : Date.parse(`2026-09-12T${event.time}+09:00`);
   }
 
+  // 利用者入力の開始・終了を検証し、画面内のカスタム期間境界へ反映する。
   function applyCustomPeriod(fromInput, toInput) {
     const startMs = parseLocalDateTime(fromInput.value);
     const endMs = parseLocalDateTime(toInput.value);
@@ -192,12 +198,14 @@
     });
   }
 
+  // UNKNOWNをON/OFFへ算入せず、確定している区間だけを集計する。
   function stateDurationInPeriod(channelId, periodKey, targetState = "ON", durationOverrideMs = 0) {
     return timelineIntervals(channelId, periodKey, durationOverrideMs)
       .filter((interval) => interval.state === targetState)
       .reduce((total, interval) => total + interval.endMs - interval.startMs, 0);
   }
 
+  // イベントから連続区間を復元する。記録停止後と欠落区間はUNKNOWNとして保持する。
   function timelineIntervals(channelId, periodKey, durationOverrideMs = 0) {
     const bounds = periodBounds(periodKey, durationOverrideMs);
     const observedEndMs = Math.max(bounds.startMs, Math.min(bounds.endMs, loggingStoppedAtMs || demoNowMs()));
@@ -254,6 +262,7 @@
     return `${classPrefix}-${isNarrow ? "marker" : "segment"}`;
   }
 
+  // 状態区間を横幅比率へ変換し、タイムラインの表示要素を生成する。
   function timelineMarksHtml(
     channelId,
     periodKey,
@@ -286,6 +295,7 @@
     }).join("");
   }
 
+  // 個別ウィジェット用の縮小タイムラインを構築する。
   function miniTimelineHtml(channelId, periodKey, durationOverrideMs = 0, dashboardValue = null) {
     const domainIntervals = dashboardValue?.channels?.find((item) => item.signal === channelId)?.intervals;
     const marks = timelineMarksHtml(
@@ -298,6 +308,7 @@
     return `<div class="custom-mini-timeline"><div class="custom-mini-track" data-mini-timeline-track>${marks}</div></div>`;
   }
 
+  // ウィジェット種別に応じて履歴表示の本文を切り替える。
   function historyWidgetBodyHtml(config) {
     if (liveMode && fixtures.dashboardWarning) {
       return `<p class="custom-widget-empty" role="status">${escapeHtml(fixtures.dashboardWarning.message)}</p>`;

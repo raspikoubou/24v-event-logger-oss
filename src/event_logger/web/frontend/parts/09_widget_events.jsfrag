@@ -1,3 +1,4 @@
+  // ウィジェット行は動的に入れ替わるため、親リストで追加・移動・編集を受け取る。
   document.querySelector("#widget-settings-list").addEventListener("click", (event) => {
     const addButton = event.target.closest("[data-add-widget-group]");
     if (addButton) {
@@ -45,6 +46,7 @@
     markWidgetSettingsDirty();
     showToast("表示幅を変更しました");
   });
+  // ドラッグ中の順序はローカルに反映し、保存操作とは分離する。
   document.querySelector("#widget-settings-list").addEventListener("dragstart", (event) => {
     const row = event.target.closest(".widget-setting-row");
     if (!row || event.target.closest("button, select, input")) {
@@ -116,6 +118,7 @@
       showToast("表示する信号を1つ以上選択してください");
     }
   });
+  // ダイアログ終了時に編集中フラグと一時状態を整理する。
   document.querySelector("#widget-dialog").addEventListener("close", (event) => {
     if (event.target.returnValue !== "confirm") return;
     const title = document.querySelector("#new-widget-title").value || document.querySelector("#new-widget-type").value;

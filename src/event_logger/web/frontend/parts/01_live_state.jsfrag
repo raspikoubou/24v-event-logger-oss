@@ -1,3 +1,4 @@
+  // この関数のローカル変数が画面全体の状態を保持する。各画面処理は同じfixturesを参照する。
   function runApp(fixtures) {
   let currentPeriod = fixtures.settings.dashboardPeriod || "8h";
   let dashboardCustomRangeDraft = null;
@@ -47,12 +48,14 @@
     "イベント一覧": "ダッシュボード内に簡易ログを表示します。"
   };
 
+  // デモ用の仮想時計。壁時計の変更に影響されないperformance.now()の差分で進める。
   function demoNowMs() {
     return demoClockBaseMs + performance.now() - demoClockStartedAtMs;
   }
 
   const refreshLiveState = createRefreshCoordinator(refreshLiveStateOnce);
 
+  // 定期ポーリングで取得した状態を反映する。編集中のフォームや開いた詳細表示は不要に作り直さない。
   async function refreshLiveStateOnce(forceDashboard = false) {
     const nowMs = Date.now();
     const customRangeForRefresh = (
@@ -153,6 +156,7 @@
     refreshCurrentStateCards();
   }
 
+  // loggerdの状態から操作可否・表示を同期する。画面の見た目だけで運転状態を決めない。
   function syncLiveControls() {
     const critical = fixtures.loggerStatus === "critical";
     const configurationBlocked = Boolean(fixtures.configurationSync?.outOfSync);
@@ -194,6 +198,7 @@
     banner.hidden = logging && loggerStateKnown;
   }
 
+  // 時刻同期できなかったイベントと保存上の注意を表示する。
   function renderUnsynchronizedWarnings() {
     const count = fixtures.unsynchronizedCount;
     const latencyWarning = Boolean(fixtures.writeLatency?.warning);
@@ -294,6 +299,7 @@
     toastTimer = window.setTimeout(() => toast.classList.remove("is-visible"), 2400);
   }
 
+  // タブ切替時に必要な画面だけ描画・更新する。
   function switchView(viewName) {
     activeView = viewName;
     renderUnsynchronizedWarnings();
@@ -310,6 +316,7 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  // 表示時刻を更新する。時刻は選択タイムゾーンに従って整形する。
   function renderClock() {
     const nowMs = demoNowMs();
     const demoNow = new Date(nowMs);

@@ -1,3 +1,4 @@
+  // 履歴カードの表示を更新する。タイムライン操作中はDOM再生成によるフォーカス喪失を避ける。
   function renderHistoryWidgetCard(card) {
     if (card.dataset.widgetType === "タイムライン") {
       const focusedEvent = document.activeElement?.matches("[data-timeline-event]")
@@ -46,6 +47,7 @@
     bindTimelineEvents();
   }
 
+  // 縮小タイムラインの倍率を適用し、表示位置の維持を助ける。
   function applyMiniTimelineZoom(card) {
     const label = card.querySelector("[data-mini-zoom-label]");
     if (!label) return;
@@ -96,6 +98,7 @@
   const { widgetConfigFromApi, widgetPayloadFromConfig } =
     window.EventLoggerWidgetConfig;
 
+  // 編集行をAPI保存用の設定データへ変換する。
   function widgetApiPayloadFromRow(row, sortOrder) {
     // DOMの読取りはUI側、形式変換は専用モジュールに分離する。
     return widgetPayloadFromConfig(
@@ -106,6 +109,7 @@
     );
   }
 
+  // サーバーに保存されているウィジェット構成を画面へ反映する。
   function renderPersistedWidgets(items) {
     const realtimeList = document.querySelector('[data-widget-group="realtime"]');
     const historyList = document.querySelector('[data-widget-group="history"]');
@@ -130,10 +134,12 @@
     renderCustomHistoryWidgets();
   }
 
+  // 未保存のローカル編集を定期ポーリングから保護するため変更フラグを立てる。
   function markWidgetSettingsDirty() {
     if (liveMode) widgetSettingsDirty = true;
   }
 
+  // 保存前に最新のサーバー状態を取り直し、追加・更新・削除を順に反映する。
   async function saveWidgetSettings() {
     if (!liveMode || !widgetSettingsDirty) return;
     // 途中の通信失敗で一部だけ保存された場合も、再試行時はDBの最新状態を
@@ -167,6 +173,7 @@
   }
 
   // rolling期間の境界は更新されるため、描画済み区間の詳細は絶対時刻を優先する。
+  // イベントの詳細表示で用いる時刻範囲を決定する。
   function timelineEventTimeBounds(dataset, periodBoundsValue) {
     const periodDurationMs = periodBoundsValue.endMs - periodBoundsValue.startMs;
     const storedStartMs = Number(dataset.startMs);
@@ -213,6 +220,7 @@
     detail.style.top = `${top}px`;
   }
 
+  // イベントの詳細を表示し、クリック固定の場合は自動非表示を抑止する。
   function showTimelineDetail(button, pin = false) {
     const detail = document.querySelector("#timeline-event-detail");
     const timelineEvent = timelineEventDetails(button);
@@ -239,6 +247,7 @@
     positionTimelineDetail(button);
   }
 
+  // ホバーとクリック固定の違いを考慮して詳細を閉じる。
   function hideTimelineDetail(force = false) {
     if (pinnedTimelineEvent && !force) return;
     document.querySelector("#timeline-event-detail").hidden = true;
@@ -252,6 +261,7 @@
     }
   }
 
+  // 再描画されたタイムライン要素へ、重複登録を避けて操作イベントを結び直す。
   function bindTimelineEvents() {
     document.querySelectorAll("[data-timeline-event]:not([data-timeline-bound])").forEach((button) => {
       button.dataset.timelineBound = "true";
@@ -278,6 +288,7 @@
     });
   }
 
+  // 共通タイムラインを描画する。イベント詳細の閲覧中は更新を延期する。
   function renderTimeline() {
     const card = document.querySelector('[data-widget="timeline"]');
     const timeline = document.querySelector("#timeline");
@@ -327,6 +338,7 @@
     applyTimelineZoom();
   }
 
+  // 拡大率とスクロール位置をタイムライン表示へ適用する。
   function applyTimelineZoom() {
     const timeline = document.querySelector("#timeline");
     const zoomLabel = document.querySelector("#timeline-zoom-label");
@@ -342,6 +354,7 @@
     if (timelineZoomIndex === 0) timelineScroll.scrollLeft = 0;
   }
 
+  // 現在の表示期間と時間軸をダッシュボードへ反映する。
   function renderDashboardPeriod() {
     const countCard = document.querySelector('[data-widget="cycle-count"]');
     if (countCard && document.querySelector("#cycle-count") && document.querySelector("#count-period-label")) {
@@ -423,6 +436,7 @@
     return "入力の変化";
   }
 
+  // デモ用の履歴を現在の検索条件で絞り込む。
   function filteredEvents() {
     const periodKey = document.querySelector("#log-period").value;
     const { startMs, endMs } = periodBounds(periodKey);

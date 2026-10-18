@@ -1,3 +1,4 @@
+  // 設定画面の再描画時に、編集中の入力内容を上書きするかどうかを切り替える。
   function renderOutputSettings(preserveForm = false) {
     const heartbeat = fixtures.settings.heartbeat;
     if (!preserveForm) {
@@ -32,6 +33,7 @@
     }).join("") || '<p class="empty-rule-list">条件ルールはありません。</p>';
   }
 
+  // ルール有効状態を切り替え、実機ではサーバーの結果を取り直す。
   async function toggleOutputRule(ruleId) {
     const rule = fixtures.outputRules.find((item) => item.id === ruleId);
     if (!rule) return;
@@ -87,12 +89,14 @@
     select.value = selectedId || "IN1";
   }
 
+  // 条件種別に応じて必要な入力項目の表示を切り替える。
   function updateRuleConditionFields() {
     const absence = document.querySelector("#rule-condition").value === "event_absence";
     document.querySelector("#rule-value-field").hidden = absence;
     document.querySelector("#rule-edge-field").hidden = !absence;
   }
 
+  // 新規登録と既存ルール編集の双方で同じダイアログを使用する。
   function openOutputRuleDialog(ruleId = null) {
     editingOutputRuleId = ruleId;
     const rule = fixtures.outputRules.find((item) => item.id === ruleId);
@@ -115,6 +119,7 @@
     document.querySelector("#output-rule-dialog").showModal();
   }
 
+  // 同一OUTへの競合割当てを保存前に確認する。
   function outputConflict(outputId, ignoredRuleId = null) {
     const heartbeat = fixtures.settings.heartbeat;
     if (heartbeat.enabled && heartbeat.outputId === outputId) return "Heartbeat";
@@ -127,6 +132,7 @@
     return Number.isInteger(duration) && duration >= 1 && duration <= 86400;
   }
 
+  // 入力値と出力の競合を検証してから保存し、実機とデモで更新先を分ける。
   async function saveOutputRule() {
     const error = document.querySelector("#rule-error");
     const name = document.querySelector("#rule-name").value.trim();
@@ -202,6 +208,7 @@
     editingOutputRuleId = null;
   }
 
+  // 記録の停止・再開を実行する。実機ではAPIを正とし、デモでは状態と履歴を模擬する。
   async function setLoggingState(nextLogging) {
     if (liveMode) {
       try {
@@ -260,6 +267,7 @@
     showToast(logging ? "記録を再開しました" : "記録を停止してメンテナンス状態へ移行しました");
   }
 
+  // 危険な操作を確定するための共通確認ダイアログを表示する。
   function openConfirmation(title, message, confirmLabel, action) {
     const dialog = document.querySelector("#confirm-dialog");
     document.querySelector("#dialog-title").textContent = title;
@@ -269,6 +277,7 @@
     dialog.showModal();
   }
 
+  // 画面条件に基づくログCSVを実機APIまたはデモデータから取得する。
   function downloadCsv() {
     if (liveMode) {
       const anchor = document.createElement("a");
@@ -324,6 +333,7 @@
     document.querySelector("#widget-type-help").textContent = widgetTypeHelp[typeSelect.value];
   }
 
+  // ウィジェット種別に合わせて選択可能な信号を組み立てる。
   function renderWidgetChannelOptions() {
     const select = document.querySelector("#new-widget-channel");
     select.innerHTML = fixtures.channels.map((channel) => (
