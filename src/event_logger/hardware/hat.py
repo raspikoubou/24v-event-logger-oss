@@ -40,6 +40,7 @@ OUTPUT_ACTIVE_HIGH: Final[bool] = True
 """PNP出力を論理ONにするGPIOレベル。実機で必ず照合する。"""
 
 
+# HATの端子定義が製品の入出力仕様と矛盾しないことを確認する。
 def validate_definition() -> None:
     """固定定義のチャンネル数と重複を検証する。"""
     expected_channels = set(range(1, 7))

@@ -22,6 +22,7 @@ class GPIOInitializationError(RuntimeError):
     """GPIO Zeroまたはlgpioを初期化できない。"""
 
 
+# 生のGPIO通知を追跡する診断用の記録経路。
 class _GPIOCallbackTrace:
     """lgpio edgeからGPIO Zero callbackまでの遅れを一時記録する。"""
 
@@ -66,6 +67,7 @@ class _GPIOCallbackTrace:
         self._fd = None
 
 
+# HAT端子を論理IN/OUTとして上位層へ公開する。
 class GpioZeroHat:
     """GPIO Zero deviceを論理IN/OUTへ変換する。
 
@@ -85,6 +87,7 @@ class GpioZeroHat:
         self._callback_trace = callback_trace
 
     @classmethod
+    # 実機GPIOの確保を一箇所へ集め、失敗時の後始末を行う。
     def create(cls) -> GpioZeroHat:
         """lgpio backendを明示してHATの全deviceを作る。"""
         # 実機GPIOを掴む前に、固定定義のチャンネル重複や欠落を拒否する。
@@ -156,6 +159,7 @@ class GpioZeroHat:
             for channel_id, device in self._inputs.items()
         }
 
+    # 監視開始時に各入力の変更通知を結び付ける。
     def attach_input_callbacks(
         self,
         callback: Callable[[int, bool], None],
@@ -186,6 +190,7 @@ class GpioZeroHat:
         """OutputManagerへ渡す論理OUT port mappingを返す。"""
         return self._outputs
 
+    # 停止時には管理対象の物理出力をまとめてOFFへ戻す。
     def all_outputs_off(self) -> None:
         """全OUTをOFFにする。"""
         first_error: Exception | None = None
@@ -224,6 +229,7 @@ class GpioZeroHat:
             raise first_error
 
 
+# GPIO Zeroのコールバックを論理値と入力番号へ変換する。
 def _make_callback(
     callback: Callable[[int, bool], None],
     channel_id: int,

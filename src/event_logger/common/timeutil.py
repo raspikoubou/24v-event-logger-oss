@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 
+# 保存上のUTC時刻を利用者が指定したタイムゾーンで表示する。
 def format_timestamp(timestamp_ms: int, timezone_name: str) -> str:
     """Unix epochミリ秒を設定timezoneのISO風文字列へ変換する。"""
     timezone = ZoneInfo(timezone_name)

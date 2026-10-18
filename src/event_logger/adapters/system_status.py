@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
+# OSの時刻同期状態を確認し、イベントに同期可否を記録できるようにする。
 def is_clock_synchronized(
     status_path: str | Path = "/run/systemd/timesync/synchronized",
 ) -> bool:

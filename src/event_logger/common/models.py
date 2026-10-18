@@ -7,6 +7,7 @@ from enum import IntEnum, StrEnum
 from typing import Literal
 
 
+# 開始時のsnapshotと監視中の確定edgeを区別して保存する。
 class EventKind(IntEnum):
     """入力イベントの種別。"""
 
@@ -14,6 +15,7 @@ class EventKind(IntEnum):
     SNAPSHOT = 1
 
 
+# OUT操作の原因をHeartbeat・条件ルール・テストで識別する。
 class OutputSource(StrEnum):
     """出力状態を変更したロガー内機能。"""
 
@@ -30,6 +32,7 @@ LogKind = Literal["edge", "snapshot", "output"]
 
 
 @dataclass(frozen=True, slots=True)
+# 監視の開始・終了を区切り、未監視区間の判定に使う。
 class Session:
     """連続して入力監視できた区間を表す。"""
 
@@ -42,6 +45,7 @@ class Session:
 
 
 @dataclass(frozen=True, slots=True)
+# カウンタ値を集計し直す境界を表す。
 class CounterReset:
     """ウィジェットのリセット基準とretention繰越値を表す。"""
 
@@ -62,6 +66,7 @@ class CounterReset:
 
 
 @dataclass(frozen=True, slots=True)
+# 入力ごとの有効状態とデバウンス設定を保持する。
 class ChannelConfig:
     """ユーザーが設定できる入力チャンネル情報を表す。"""
 
@@ -82,6 +87,7 @@ class ChannelConfig:
 
 
 @dataclass(frozen=True, slots=True)
+# OUT状態変化と操作元の情報を一緒に保持する。
 class OutputEvent:
     """ロガー自身が変更したOUT状態履歴を表す。"""
 
@@ -107,6 +113,7 @@ class OutputEvent:
 
 
 @dataclass(frozen=True, slots=True)
+# IN/OUTの履歴を同じ表示形式へまとめる。
 class LogRecord:
     """IN/OUTを同じ時間軸へ並べたログ表示用レコードを表す。"""
 
@@ -142,6 +149,7 @@ class LogRecord:
 
 
 @dataclass(frozen=True, slots=True)
+# 入力値・取得時刻・時計同期状態を保持する。
 class InputEvent:
     """1件の論理入力状態変化または監視開始snapshotを表す。"""
 
@@ -169,6 +177,7 @@ class InputEvent:
 
 
 @dataclass(frozen=True, slots=True)
+# ON・OFFに加え、記録のないUNKNOWN区間も表現する。
 class StateInterval:
     """ある入力状態が確実に観測できた期間を表す。"""
 

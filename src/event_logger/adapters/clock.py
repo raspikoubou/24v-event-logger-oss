@@ -10,6 +10,7 @@ from typing import Protocol
 from event_logger.adapters.system_status import is_clock_synchronized
 
 
+# 履歴用のUTC時刻と継続時間測定用のmonotonic時刻を明確に分離する。
 class Clock(Protocol):
     """イベント時刻に必要なwall clockとmonotonic clockを提供する。"""
 
@@ -23,6 +24,7 @@ class Clock(Protocol):
         """取得時点でシステム時計が同期済みかを返す。"""
 
 
+# 実機の時計を使用し、同期状態も外部へ公開する。
 class SystemClock:
     """Python標準時計を使う本番用Clock。"""
 
@@ -48,6 +50,7 @@ class SystemClock:
 
 
 @dataclass
+# テストで時刻の経過とUTC補正を個別に模擬する。
 class FakeClock:
     """sleepを使わず時刻を進められるテスト用Clock。"""
 
@@ -67,6 +70,7 @@ class FakeClock:
         """固定された同期状態を返す。"""
         return self.synchronized
 
+    # 経過時間をUTCとmonotonicの双方へ反映する。
     def advance(self, milliseconds: int) -> None:
         """wall clockとmonotonic clockを同じ時間だけ進める。"""
         if milliseconds < 0:
@@ -74,6 +78,7 @@ class FakeClock:
         self.utc_ms += milliseconds
         self.monotonic_ns += milliseconds * 1_000_000
 
+    # NTP補正を模擬するため、monotonic時刻を動かさずUTCだけ変更する。
     def set_utc_ms(self, utc_ms: int) -> None:
         """NTP補正を表現するためwall clockだけを変更する。"""
         if utc_ms < 0:

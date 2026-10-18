@@ -10,6 +10,7 @@ from event_logger.common.models import ChannelConfig
 from event_logger.domain.rules import OutputRule
 
 
+# Webとdaemonの監視設定を比較するために、共通表現の指紋を計算する。
 def configuration_fingerprint(
     channels: Sequence[ChannelConfig],
     rules: Sequence[OutputRule],

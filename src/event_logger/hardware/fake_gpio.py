@@ -9,6 +9,7 @@ Callback = Callable[[], None]
 
 
 @dataclass
+# テストでは論理入力変化からコールバックを再現する。
 class FakeInput:
     """論理入力値を手動変更できるテスト用入力。"""
 
@@ -27,6 +28,7 @@ class FakeInput:
 
 
 @dataclass
+# 物理出力なしでON/OFF操作を検証する。
 class FakeOutput:
     """論理出力状態を保持するテスト用出力。"""
 
@@ -45,6 +47,7 @@ class FakeOutput:
         self.is_active = not self.is_active
 
 
+# loggerdのGPIO境界を実機なしで再現する。
 class FakeGPIO:
     """IN1〜IN6とOUT1〜OUT6を保持するFakeGPIO集合。"""
 
@@ -53,6 +56,7 @@ class FakeGPIO:
         self.inputs = {channel_id: FakeInput() for channel_id in range(1, 7)}
         self.outputs = {channel_id: FakeOutput() for channel_id in range(1, 7)}
 
+    # 入力値を模擬的に変更して監視コールバックへ伝える。
     def set_input(self, channel_id: int, value: bool) -> None:
         """指定入力へ論理値を注入する。"""
         self._validate_channel(channel_id)
@@ -86,6 +90,7 @@ class FakeGPIO:
         for output in self.outputs.values():
             output.off()
 
+    # テスト終了時のGPIO解放を模擬する。
     def close(self) -> None:
         """FakeGPIOのcloseを実機adapterと同じAPIで提供する。"""
         self.all_outputs_off()

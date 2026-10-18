@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 
+# OSへ渡すホスト名は許容文字・長さを制限する。
 def validate_hostname(hostname: str) -> None:
     """systemdへ渡す単一ラベルhostnameを検証する。"""
     if not 1 <= len(hostname) <= 63:
@@ -18,6 +19,7 @@ def validate_hostname(hostname: str) -> None:
         )
 
 
+# デバイス固有の既定ホスト名を一つの手順で作る。
 def default_hostname(
     *, machine_id_path: str | Path = "/etc/machine-id", mac_address: int | None = None
 ) -> str:
