@@ -4,6 +4,8 @@
    * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
    */
   function runApp(fixtures) {
+  // 画面固有の一時状態はrunAppのclosure内に置き、poll更新後も入力draftやfocusを
+  // 同じ画面instanceで扱う。固定fixtureとlive modeで状態モデルを共有する。
   let currentPeriod = fixtures.settings.dashboardPeriod || "8h";
   let dashboardCustomRangeDraft = null;
   let logging = fixtures.loggerStatus === "logging";
@@ -68,6 +70,8 @@
    * @returns {Promise<void>} live statusと必要なDashboard dataをDOMへ反映後resolveする。通信失敗時はErrorをrejectする。
    */
   async function refreshLiveStateOnce(forceDashboard = false) {
+    // API取得前にdashboard更新の要否を判定し、表示周期を別に制御する。
+    // status/logのpollで重いdashboard集計まで毎回再取得しない。
     const nowMs = Date.now();
     const customRangeForRefresh = (
       dashboardCustomRangeDraft || fixtures.settings.dashboardCustomRange
@@ -89,6 +93,8 @@
       customRangeForRefresh,
       activeView !== "logs"
     );
+    // 取得したsnapshotをまとめて置き換えてから描画する。custom範囲draftだけは
+    // statusの保存値に上書きさせず、「適用」前の画面入力を保持する。
     fixtures.nowMs = next.nowMs;
     fixtures.channels = next.channels;
     fixtures.outputs = next.outputs;
@@ -116,6 +122,8 @@
       if (bounds) fixtures.dashboardPeriods[currentPeriod] = bounds;
     }
     if (next.dashboardWarning) nextDashboardRefreshAtMs = Date.now() + 30_000;
+    // output testのtimerは一時状態を追跡する。daemon側でOFFになった場合もtimerを
+    // 残さず、別のOUTへ切り替わった場合は以前の表示を終了してから同期する。
     if (liveMode) {
       if (next.outputTestChannel === null) {
         if (activeOutputTest?.timerId) window.clearTimeout(activeOutputTest.timerId);
@@ -141,6 +149,8 @@
       fixtures.widgets = nextWidgets;
       renderPersistedWidgets(nextWidgets);
     }
+    // poll stateを先にDOMへ反映し、ログだけは現在viewと5秒期限に従って別取得する。
+    // channel編集やwidget modalの入力中はそのフォームを後続描画で壊さない。
     renderDataViews();
     if (
       shouldRefreshLogPage({

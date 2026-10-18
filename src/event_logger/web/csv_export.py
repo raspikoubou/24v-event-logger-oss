@@ -37,6 +37,8 @@ def generate_csv(
     """
     if rows_per_chunk < 1:
         raise ValueError("rows_per_chunk must be positive")
+    # BOMとheaderを最初に個別yieldするため、空resultでも表計算ソフトが列を認識し、
+    # 応答全体を一度にメモリへ組み立てずに済む。
     yield "\ufeff"
     output = io.StringIO()
     writer = csv.writer(output, lineterminator="\r\n")
@@ -54,6 +56,8 @@ def generate_csv(
     yield output.getvalue()
     output.seek(0)
     output.truncate(0)
+    # writerのbufferはchunkごとに再利用する。DB iterableの順序は変えず、出力行数
+    # だけを上限化するため、大きなCSVも一定量ずつHTTPへ渡せる。
     rows_since_yield = 0
     for event in events:
         channel = channel_map[event.channel_id]

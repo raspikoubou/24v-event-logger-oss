@@ -90,6 +90,8 @@ def _validated_system_settings(
             型・文字数・hostname・timezoneを検証したsystem設定dict。
                 新passwordがある場合はhashだけを含み、平文は返さない。
     """
+    # 既存値を初期値に使うpartial updateでも、最終結果は完全な設定mappingとして
+    # 検証する。hostname規則とtimezone databaseを確認してから保存へ渡す。
     current = _system_settings_payload(context, app, auth)
     device_name = _json_text(
         payload.get("device_name", current["device_name"]), "device_name"
@@ -104,6 +106,8 @@ def _validated_system_settings(
     _validate_hostname(hostname)
     timezone_name = _json_text(payload.get("timezone", current["timezone"]), "timezone")
     ZoneInfo(timezone_name)
+    # 認証fieldは他の値の検証後に処理し、保存済みhashを維持するか新passwordを
+    # hash化するかを決める。平文は戻り値にもRepositoryにも残さない。
     password_enabled = _json_bool(
         payload.get("password_protection", current["password_protection"]),
         "password_protection",

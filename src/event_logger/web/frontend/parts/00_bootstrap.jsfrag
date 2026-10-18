@@ -75,6 +75,8 @@
         configurationSync: { outOfSync: false, stopped: false, message: "" }
       };
     }
+    // statusを先に読み、timezone・状態・更新済みcustom rangeを以降のAPI requestの
+    // 基準にする。status取得前に各endpointを並列化すると表示世代が混在する。
     const status = await liveJson("/api/status");
     const storageWarning = storageWarningFor(
       status.storage,
@@ -83,6 +85,8 @@
     const selectedPeriod = period || status.dashboard_period || "8h";
     const selectedCustomRange = customRange || status.dashboard_custom_range;
     let dashboardReceivedAtMs = null;
+    // statusで選択条件を確定してから独立endpointを並列取得する。dashboard/logは
+    // 呼出元が必要とした時だけ要求し、不要な大きな履歴payloadを避ける。
     const [widgets, rules, setup, logs, dashboard] = await Promise.all([
       liveJson("/api/widgets"),
       liveJson("/api/output-rules"),
@@ -120,6 +124,8 @@
         durationMs: dashboard.to_ms - dashboard.from_ms
       };
     }
+    // APIのsnake_case payloadを画面のcamelCase fixtureへ一度だけ変換する。
+    // 不明なlogger状態をOFFと誤表示しないよう、IN/OUT値はUNKNOWNに保つ。
     const knownLoggerState = ["logging", "maintenance", "critical"].includes(status.logger_status);
     /**
      * channelsの処理を行い、画面状態の該当部分を扱う。
@@ -264,6 +270,8 @@
    * @returns {Promise<void>} 初期データ取得と初期描画が完了した時にresolveする。取得失敗はrejectする。
    */
   async function start() {
+    // 初期fixtureが揃うまではrunAppを呼ばず、nullなwidget/channel配列でevent handlerが
+    // 起動しないようにする。取得後は画面instanceを一度だけ作る。
     const fixtures = await loadLiveFixtures(null, liveMode);
     runApp(fixtures);
   }

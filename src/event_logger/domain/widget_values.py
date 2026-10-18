@@ -83,6 +83,7 @@ def evaluate_widget(
     Raises:
         ValueError: 「start_ms must be before now_ms」に該当すると判定した場合。
     """
+    # Web層が渡した暦期間を優先し、それ以外はwidget設定の期間を同じ境界形式へ解決する。
     effective_start_ms = (
         fixed_period_range[0]
         if fixed_period_range is not None
@@ -104,11 +105,13 @@ def evaluate_widget(
     )
     if effective_start_ms >= effective_end_ms:
         raise ValueError("start_ms must be before now_ms")
+    # 終了境界より後の履歴を先に除外し、以後のwidget分岐へ同じsnapshotを渡す。
     period_events = [event for event in events if event.ts_utc_ms < effective_end_ms]
     period_output_events = [
         event for event in output_events if event.ts_utc_ms < effective_end_ms
     ]
     period_session_id = active_session_id if effective_end_ms >= now_ms else None
+    # 全widgetで共通の識別・並び替え情報を先に作り、個別表示値へ合成する。
     base: dict[str, object] = {
         "widget_id": widget.id,
         "type": widget.widget_type.value,
@@ -116,6 +119,8 @@ def evaluate_widget(
         "size": widget.size.value,
         "sort_order": widget.sort_order,
     }
+    # 回数はevent ID境界とretention carryで求めるため、
+    # 状態区間を使うwidgetとは別経路で計算する。
     if widget.widget_type is WidgetType.EVENT_COUNT:
         # event_count自身はconfigを読むが、他の単一入力widgetと同じ境界検証を
         # ここでも通し、不正なchannels設定を表示計算まで持ち込まない。
@@ -141,6 +146,7 @@ def evaluate_widget(
             # after_event_idに保持する。リセット前の値を時刻で再計算しない。
             "reset_at_ms": reset_at_ms if count_mode == "reset" else None,
         }
+    # timelineは設定されたIN/OUT signalごとに時系列区間を構成する。
     if widget.widget_type is WidgetType.TIMELINE:
         return {
             **base,
@@ -155,6 +161,7 @@ def evaluate_widget(
                 now_mono_ns=(now_mono_ns if period_session_id is not None else None),
             ),
         }
+    # event listは状態区間へ集約せず、期間内の元eventを並べて返す。
     if widget.widget_type is WidgetType.EVENT_LIST:
         return {
             **base,
@@ -166,7 +173,10 @@ def evaluate_widget(
                 end_ms=effective_end_ms,
             ),
         }
+    # ここからは単一入力channelを使うwidget群。
+    # 複数signal対応のtimeline/listは上で処理済み。
     channel_id = _single_channel(widget)
+    # 監視中は現在値snapshotを優先し、無効channelはUNKNOWNのまま表示する。
     if widget.widget_type is WidgetType.CURRENT_STATE:
         if channel_id in disabled_channel_ids:
             return {
@@ -201,6 +211,7 @@ def evaluate_widget(
                     0, (now_mono_ns - direct_since_ns) // 1_000_000
                 )
             return result
+    # event基準は最後の一致edge、state基準は対象状態の継続区間から経過時間を求める。
     if widget.widget_type is WidgetType.ELAPSED_TIME:
         if widget.config.get("source", "state") == "event":
             event = _last_edge(events, channel_id, _edge_value(widget))
@@ -236,6 +247,7 @@ def evaluate_widget(
                     else None
                 ),
             }
+    # last eventは選択期間内の一致edgeを探し、記録時刻と経過時間を返す。
     if widget.widget_type is WidgetType.LAST_EVENT:
         event = _last_edge(
             period_events,
@@ -258,6 +270,7 @@ def evaluate_widget(
                 else None
             ),
         }
+    # ON/OFF時間・継続時間の集計に使う状態区間を生成する。
     intervals = build_state_intervals(
         events,
         sessions,
@@ -299,6 +312,8 @@ def evaluate_widget(
             "duration_ms": total_duration_ms(intervals, state=state),
         }
     if widget.widget_type is WidgetType.ELAPSED_TIME:
+        # 経過時間widgetは期間内だけでなくsession開始以降の区間が必要なため、
+        # 全履歴範囲を作り直す。
         elapsed_intervals = build_state_intervals(
             events,
             sessions,
@@ -397,6 +412,7 @@ def _timeline_rows(
     Returns:
         条件に一致したrowまたは表示値列。 該当なしは空list。
     """
+    # 信号ごとにINのtimeline区間またはOUT event由来区間を生成して行へまとめる。
     rows: list[dict[str, object]] = []
     for signal in _widget_signals(widget):
         if signal.startswith("IN"):
@@ -485,6 +501,7 @@ def _output_interval_payloads(
     Returns:
         条件に一致したrowまたは表示値列。 該当なしは空list。
     """
+    # ID順で隣接eventを確定してから、次eventまたはsession終端までの既知状態を作る。
     channel_events = sorted(
         (event for event in output_events if event.output_channel == channel_id),
         key=lambda event: event.id,
@@ -515,6 +532,8 @@ def _output_interval_payloads(
                 session_by_id=session_by_id,
                 end_ms=end_ms,
             )
+        # 検索期間で切り詰めた既知区間を追加する。
+        # session境界の空白はUNKNOWNとして保持する。
         segment_start = max(start_ms, event.ts_utc_ms)
         segment_end = min(end_ms, max(segment_end, event.ts_utc_ms))
         payload: dict[str, object] = {
@@ -605,6 +624,7 @@ def _fill_output_unknown_gaps(
     Returns:
         条件に一致したrowまたは表示値列。 該当なしは空list。
     """
+    # 入力区間を時刻順に走査し、重複を切り詰めながら未観測の前後をUNKNOWNで補う。
     result: list[dict[str, object]] = []
     cursor = start_ms
     for interval in sorted(
@@ -672,6 +692,7 @@ def _event_list_rows(
     Raises:
         ValueError: 「event_list limit must be an integer」に該当すると判定した場合。
     """
+    # limitを検証してから、各signalの期間内eventを同じrow形式で集める。
     raw_limit = widget.config.get("limit", 10)
     if isinstance(raw_limit, bool) or not isinstance(raw_limit, int):
         raise ValueError("event_list limit must be an integer")
@@ -766,6 +787,7 @@ def _event_count(
         ValueError: configのchannelsがlistでない、 または空listの場合。
             channelsの先頭要素が整数でない場合。
     """
+    # mode別分岐の前にcount対象とedge方向を確定し、事前計算値があれば履歴走査を省く。
     channels = widget.config["channels"]
     if not isinstance(channels, list) or not channels:
         raise ValueError("event count channels are missing")
@@ -776,6 +798,7 @@ def _event_count(
     mode = widget.config.get("count_mode", "period")
     event_list = list(events)
     if mode == "period":
+        # 期間モードだけはtimestamp境界でevent列を絞り、期間内edge数を求める。
         if period_count is not None:
             return period_count
         event_list = [
@@ -783,6 +806,7 @@ def _event_count(
         ]
         return count_edges(event_list, channel_id=channel_id, value=edge_value)
     if mode == "reset":
+        # resetモードは時刻ではなくevent ID境界を使い、削除済みedge carryも合算する。
         if reset_count is not None:
             return reset_count
         if after_event_id is None:
@@ -793,6 +817,7 @@ def _event_count(
             value=edge_value,
             after_event_id=after_event_id,
         )
+    # stored modeではDB値を優先し、それ以外のfallbackは残存履歴から同じ条件で数える。
     if mode == "stored" and stored_count is not None:
         return stored_count
     return count_edges(event_list, channel_id=channel_id, value=edge_value)

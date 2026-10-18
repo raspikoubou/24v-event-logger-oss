@@ -20,7 +20,9 @@ def backup_database(source_path: str | Path, destination_path: str | Path) -> No
         None。 sourceのSQLite snapshotをdestination fileへbackupし、
             両connectionを閉じる。 sourceの内容は変更しない。
     """
+    # sourceは通常接続設定で開き、SQLite backup APIにsnapshot整合性を委ねる。
     source = connect_database(source_path)
+    # destination側のtransactionと両接続のcloseを、失敗経路も含めて対称に管理する。
     try:
         destination = sqlite3.connect(str(destination_path))
     except BaseException:

@@ -66,6 +66,8 @@ def _register_log_routes(app: Flask, context: WebContext) -> None:
         try:
             timezone_name = _effective_timezone(context)
             filters = _parse_log_filters(context.clock, timezone_name)
+            # next-pageの有無だけ判定できるよう要求limitより1件多く読み、応答には
+            # 利用者が指定した件数まで戻す。
             page_filters = dict(filters)
             page_filters["limit"] = filters["limit"] + 1
             events = context.logs.list_between(**page_filters)
@@ -78,6 +80,8 @@ def _register_log_routes(app: Flask, context: WebContext) -> None:
             rule.condition.output_channel: rule.name
             for rule in context.output_rules.list_all()
         }
+        # DB行から表示payloadを作り、境界値は検索に使った同じ半開区間で返す。
+        # 総件数は高コストなので明示queryがある場合だけ別COUNTを実行する。
         payload = {
             "items": [
                 _log_payload(event, channel_map, rule_names, timezone_name)
@@ -190,6 +194,8 @@ def _register_status_routes(
                     storage読取失敗はcritical状態とstorage_errorをpayloadへ含める。
         """
         channels = context.channels.list_all()
+        # statusとfingerprintを先に照合し、設定の反映済み判定を計数値やpayloadへ
+        # 反映する。古いdaemonのdigest欠落も同期済みと誤判定しない。
         daemon_status, daemon_error, daemon_data = _daemon_status(context)
         event_count = context.events.count_all()
         output_event_count = context.output_events.count_all()
@@ -228,6 +234,8 @@ def _register_status_routes(
             configuration_sync = context.settings.get_json(
                 "daemon_config_sync", {"out_of_sync": True}
             )
+        # failure-proneなstorage inspectは他の状態構築後に独立して実行する。
+        # filesystem確認だけ失敗しても診断API全体を500にせずcritical情報を返す。
         payload: dict[str, Any] = {
             "logger_status": daemon_status,
             "app_version": str(
@@ -330,6 +338,8 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
         """
         now_ms = context.clock.now_utc_ms()
         timezone_name = _effective_timezone(context)
+        # URLに期間がない場合だけ保存済み選択を使う。明示されたcustom範囲を
+        # 保存値で上書きしないよう、query解決はRepository検索より先に終える。
         period = request.args.get("period")
         if period is None and request.args.get("from_ms") is None:
             period = _stored_dashboard_period(context)
@@ -360,6 +370,7 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
                 )
         except ValueError as error:
             return _error("INVALID_FILTER", str(error), 400)
+        # API範囲は過去の半開区間に丸め、未来だけの範囲や空区間をDBへ渡さない。
         start_ms = max(0, min(requested_start, now_ms - 1))
         period_end_ms = min(requested_end, now_ms)
         if start_ms >= period_end_ms:
@@ -383,6 +394,8 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
             )
         except ValueError as error:
             return _error("INVALID_FILTER", str(error), 400)
+        # timelineが重いと判明したら、COUNT系の個別集計やdaemon IPCを始める前に
+        # 説明payloadを返す。部分的なwidget表示を正常応答に見せない。
         if _dashboard_timeline_event_count_exceeds_limit(
             context,
             widgets,
@@ -420,6 +433,8 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
             )
             for widget in widgets
         }
+        # 先にreset境界と集計値を揃える。後続のイベント取得をwidget評価に必要な
+        # 範囲へ絞り、retentionに依存した全件走査を避ける。
         resets = {
             widget.id: context.counter_resets.latest(widget.id) for widget in widgets
         }
@@ -431,6 +446,8 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
             if widget.config.get("count_mode", "period") == "stored"
         }
         sessions = context.sessions.list_all()
+        # 現在値はDBの最新eventから推測せず、同じdaemon status snapshotに含まれる
+        # session・入力値・monotonic開始時刻を一組として使う。
         daemon_status, _, daemon_data = _daemon_status(context)
         raw_session_id = daemon_data.get("session_id")
         active_session_id = (
@@ -479,6 +496,8 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
             ]
             if len(open_sessions) == 1:
                 active_session_id = open_sessions[0]
+        # 入力と出力を別Repositoryから取得する。評価時に必要な直前状態も含めて
+        # からDomain計算へ渡すことで、route内で履歴を再解釈しない。
         events = _dashboard_events(
             context,
             widgets,
@@ -491,6 +510,8 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
             widgets,
             widget_ranges=widget_ranges,
         )
+        # Repository結果と現在snapshotをDomain widget評価へまとめて渡し、表示用
+        # timestampの変換は計算後に行う。保存値のepoch millisecondは保持する。
         items: list[dict[str, object]] = []
         for widget in widgets:
             reset = resets[widget.id]
@@ -559,6 +580,8 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
             "timezone": timezone_name,
             "items": items,
         }
+        # 最終JSONのbyte数も制限する。件数上限内でも各eventの長い文字列により
+        # 応答が膨らむ場合があるため、送信前に同じ絞込み案内へ切り替える。
         response = _ok(data)
         if len(response.get_data()) > _DASHBOARD_TIMELINE_MAX_JSON_BYTES:
             return _ok(

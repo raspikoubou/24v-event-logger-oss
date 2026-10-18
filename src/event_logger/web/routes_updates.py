@@ -187,6 +187,8 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
         archive_path: Path | None = None
         checksum_path: Path | None = None
         try:
+            # 確認画面で見たtokenを現在のReleaseへ照合し直す。画面表示後にtagや
+            # assetが差し替わっていれば、downloadやhelper起動より前に止める。
             release = GitHubReleaseClient(repository).latest()
             if (
                 release.version != payload["expected_version"]
@@ -203,6 +205,8 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
                     "no newer stable release is available",
                     409,
                 )
+            # 固定work directoryへ取得・checksum検証を完了してからだけagentを起動する。
+            # 検証中のファイルは失敗時にexcept節から破棄する。
             archive_path, checksum_path = download_and_verify(
                 release,
                 work_dir=str(app.config["UPDATE_WORK_DIR"]),

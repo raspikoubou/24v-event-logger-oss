@@ -183,6 +183,8 @@
     // 基準に差分を作る。古い一覧のままPOSTすると重複IDで復旧できなくなる。
     const current = await liveJson("/api/widgets");
     fixtures.widgets = current.items || [];
+    // 行を直接全件POSTすると、更新済みIDと新規IDを区別できない。最新DB一覧を
+    // 基準にupsertし、画面から消えたwidgetだけを最後に削除する。
     const currentById = new Map(fixtures.widgets.map((widget) => [widget.id, widget]));
     const rowsById = new Set();
     for (const group of document.querySelectorAll("#widget-settings-list .widget-group-list")) {
@@ -203,6 +205,8 @@
         await liveJson(`/api/widgets/${encodeURIComponent(widget.id)}`, { method: "DELETE" });
       }
     }
+    // 部分成功した通信状態でも、保存結果を再読込してUIとDBを一致させてから
+    // dirty flagを落とす。途中throwならdirtyを保持し、次回は再び最新値から始める。
     const response = await liveJson("/api/widgets");
     fixtures.widgets = response.items || [];
     widgetSettingsDirty = false;
@@ -377,6 +381,8 @@
       // 現在の区間DOMを保ち、mouseleave/blur/Esc後の次回更新で追従する。
       return;
     }
+    // 操作中DOMを維持できると判断した後で期間・軸・signal rowを再構築する。
+    // 先にinnerHTMLを置き換えるとpinned detailやkeyboard focusが失われる。
     const periodKey = periodKeyForWidget(card.dataset.widgetPeriod || "follow");
     const bounds = periodBounds(periodKey);
     const axis = Array.from({ length: 5 }, (_, index) => {

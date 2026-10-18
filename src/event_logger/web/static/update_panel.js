@@ -92,6 +92,8 @@
      */
     async function check() {
       if (state.checking || state.confirming || state.applying || state.processing) return snapshot();
+      // 先stateをbusyへ進め、次にnetwork payloadの型・設定有無・blocking statusを
+      // 検査する。形式が不明な応答を「更新なし」として表示しない。
       updateState({
         checking: true,
         available: false,
@@ -167,6 +169,8 @@
         return snapshot();
       }
       updateState({ confirming: true, message: "適用前の確認を待っています。" });
+      // 利用者確認中はtarget stateをまだ変更しない。取消・dialog失敗なら更新依頼を
+      // 送らず、適用可能な表示状態を保つ。
       let accepted = false;
       try {
         accepted = await confirmApply({
@@ -185,6 +189,8 @@
         return snapshot();
       }
 
+      // 今回の依頼より前から走るpollをepochで無効化し、過去attemptの遅い応答が
+      // 新しい依頼状態を巻き戻さないようにしてからPOSTする。
       previousStatusKey = statusKey(state.status);
       // 起動前に走っていた状態取得が、今回の依頼後へ遅れて反映されないようにする。
       statusRequestEpoch += 1;
@@ -254,6 +260,8 @@
     async function monitor() {
       // 状態取得が応答しない場合も、次回の定期確認で監視期限を判定する。
       if (expireWatch()) return snapshot();
+      // 同時pollを一つに抑え、apply完了中は起動前のstatusを再反映しない。
+      // requestEpochは応答後にも照合して、invalidate済み応答を捨てる。
       if (!readStatus || statusRequestRunning || state.applying) return snapshot();
       statusRequestRunning = true;
       const requestEpoch = statusRequestEpoch;
@@ -264,6 +272,8 @@
           throw new Error("更新状態の応答を確認できません。");
         }
         updateState({ currentVersion: result.current_version });
+        // versionだけでは再試行した同一版の古い結果と区別できないため、attempt ID
+        // または依頼前status全体を照合してから終端状態へ進める。
         const status = result.status;
         const previousOrOtherAttempt = state.targetAttemptId !== null
           ? status?.attempt_id !== state.targetAttemptId

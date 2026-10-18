@@ -91,9 +91,13 @@ class ControlRequest:
             "widget_id",
             "widget",
         }
+        # 先にfieldを閉じたallowlistで検証し、未知keyやcommandごとの不正fieldが
+        # 応答上は無視されても操作意図を変えないよう、黙って受理しない。
         unknown = set(payload) - allowed
         if unknown:
             raise IpcProtocolError(f"unknown request fields: {sorted(unknown)}")
+        # commandと共通数値fieldを先に型・範囲検証する。以降の条件分岐では
+        # 型変換済みの値だけを扱う。
         raw_command = payload.get("command")
         if not isinstance(raw_command, str):
             raise IpcProtocolError("command must be a string")
@@ -112,6 +116,7 @@ class ControlRequest:
             not isinstance(request_id, str) or not 0 < len(request_id) <= 64
         ):
             raise IpcProtocolError("request_id must be a non-empty string <= 64 chars")
+        # channel/durationはTEST_OUTPUTだけに許し、ほかの命令へ付いた追加値を拒否する。
         if command is ControlCommand.TEST_OUTPUT:
             if channel is None:
                 raise IpcProtocolError("test_output requires channel")
@@ -119,6 +124,8 @@ class ControlRequest:
             raise IpcProtocolError(
                 "channel and duration_ms are only valid for test_output"
             )
+        # reset payloadは要求IDとwidget IDを必須にし、任意widget snapshotも
+        # target IDと一致する場合だけ採用する。
         widget_id = payload.get("widget_id")
         widget = None
         if command is ControlCommand.RESET_COUNTER:
@@ -481,6 +488,8 @@ def _counter_widget(payload: object) -> Widget:
     Raises:
         IpcProtocolError: IPC JSON、size、request/response schemaが規約に合わない場合。
     """
+    # 不要未知fieldを無視して正規化しない。IPC schema拡張や余分な設定を
+    # reset operationへ意図せず持ち込まないよう、key集合を完全一致させる。
     if not isinstance(payload, dict) or set(payload) != {
         "id",
         "type",
@@ -492,6 +501,7 @@ def _counter_widget(payload: object) -> Widget:
         "updated_at_ms",
     }:
         raise IpcProtocolError("counter widget fields are invalid")
+    # field型を先に確認し、後続Widget/Enum変換の例外をprotocol errorへ揃える。
     if not all(
         isinstance(payload[key], str) for key in ("id", "type", "title", "size")
     ):
@@ -503,6 +513,8 @@ def _counter_widget(payload: object) -> Widget:
     updated_ms = _optional_int(payload["updated_at_ms"], "updated_at_ms")
     if order is None or updated_ms is None or updated_ms < 0:
         raise IpcProtocolError("counter widget order or timestamp is invalid")
+    # project共通normalizerとenum constructorで値を正規化し、domain検証失敗も
+    # IPC境界の同じエラー型として呼出側へ返す。
     try:
         widget = Widget(
             id=payload["id"],
@@ -516,6 +528,7 @@ def _counter_widget(payload: object) -> Widget:
         )
     except (TypeError, ValueError) as error:
         raise IpcProtocolError(str(error)) from error
+    # 任意のwidgetではなくreset-based counterだけをwriterのFIFO resetへ渡す。
     if (
         widget.widget_type is not WidgetType.EVENT_COUNT
         or config.get("count_mode") != "reset"

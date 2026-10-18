@@ -140,6 +140,8 @@ Returns:
                 Fake状態を反映したstatus mapping snapshot。
                     request処理中はlockを保持する。
         """
+        # STATUSは読み取りsnapshotとして早期returnし、変更commandだけを下の状態
+        # 遷移へ通す。外側request()がlockを保持するためFake状態も一操作単位になる。
         command = control_request.command
         if command is ControlCommand.STATUS:
             return {
@@ -156,6 +158,8 @@ Returns:
                     for channel_id in range(1, 7)
                 },
             }
+        # Fakeは実daemonと同じmaintenance/logging境界を守る。無効な遷移を許すと
+        # UIのdemo/testが実機では拒否される操作を成功表示してしまう。
         if command is ControlCommand.STOP_LOGGING:
             if self._status != "logging":
                 raise RuntimeError("logger is not logging")
@@ -486,6 +490,8 @@ def _save_counter_reset(
         widget_id=widget_id,
         widget=widget,
     )
+    # writer FIFOへ一度だけ送信し、timeout時も同じrequest IDのpending結果をpollする。
+    # 新IDで再送すると応答消失時にreset境界が二重作成される。
     deadline = time.monotonic() + 30.0
     pause = threading.Event()
     while True:

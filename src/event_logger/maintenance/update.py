@@ -92,6 +92,8 @@ class GitHubReleaseClient:
                 lperまたはagent通信がupdate条
                 件を満たさない場合。
         """
+        # GitHubのlatest endpointからstable candidateを取得し、schema検証後に
+        # asset名・IDを構築する。未検証URLをdownload先へ直接流さない。
         url = f"https://api.github.com/repos/{self._repository}/releases/latest"
         request = Request(
             url,
@@ -119,6 +121,7 @@ class GitHubReleaseClient:
             raise UpdateError("release response is missing tag or URL")
         if not isinstance(notes, str) or not isinstance(raw_assets, list):
             raise UpdateError("release response has invalid assets")
+        # 不完全なassetは候補から外し、validなassetだけIDベースのAPI URLを保持する。
         assets: dict[str, ReleaseAsset] = {}
         for raw_asset in raw_assets:
             if not isinstance(raw_asset, dict):
@@ -480,6 +483,8 @@ def _request_update_agent(
             件を満たさない場合。
         UpdateOutcomeUnknown: 応答消失等によりagentが更新を開始したか確認できない場合。
     """
+    # 依頼は「version/schema検証→newline JSON生成→Unix socket送信→応答分類」。
+    # 接続後の応答消失は未起動と断定できないため、明示的に不確定結果へ分ける。
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", version):
         raise UpdateError("release version is invalid")
     payload = (

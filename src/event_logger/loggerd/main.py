@@ -123,6 +123,8 @@ class LoggerDaemon:
         Returns:
             None。
         """
+        # DB schemaとGPIO adapterを先に用意する。GPIO初期化失敗時は既に開いた
+        # 接続を閉じ、構築途中のresource leakを避ける。
         self._connection = connect_database(database_path)
         try:
             initialize_connection(self._connection)
@@ -131,6 +133,8 @@ class LoggerDaemon:
             # GPIO初期化失敗時も先に開いたWAL接続を残さない。
             self._connection.close()
             raise
+        # Repository群はdaemon lifetimeで同じconnectionを使い、background writer
+        # だけはSQLite thread affinityのため別connectionを持つ。
         self._clock = clock or SystemClock()
         self._socket_path = Path(socket_path)
         self._app_version = app_version
@@ -144,6 +148,8 @@ class LoggerDaemon:
             database_path=database_path,
             event_queue=self._event_queue,
         )
+        # 起動時設定を読み込んでからrule/output/serviceを組み立て、adapter間の
+        # callback参照が使われる前に初期設定を適用する。
         channels = self._channels.list_all()
         rules = self._rule_repository.list_all()
         enabled_channels = {
@@ -262,12 +268,16 @@ class LoggerDaemon:
         if self._started:
             raise RuntimeError("logger daemon is already started")
         try:
+            # 永続化threadとIPCを先に準備する。以降のsession開始やcallbackからの
+            # eventを、writer/socketの未準備状態へ流さない。
             self._event_writer.start()
             self._control.start()
             setup_completed = self._settings.get_json("setup_completed", False)
             if not isinstance(setup_completed, bool):
                 raise ValueError("setup_completed setting must be boolean")
             if not setup_completed or self._logging_is_paused():
+                # 初回設定未完了または明示停止中は、GPIO監視・OUT動作を始めず
+                # maintenanceのまま起動する。
                 self._rule_runner.pause()
                 self._outputs.disable_heartbeat()
                 self._service.enter_initial_maintenance()
@@ -275,6 +285,8 @@ class LoggerDaemon:
                 return
             self._start_logging_session()
         except Exception:
+            # 部分起動で作成済みのsocket/threadを巻き戻す。cleanup失敗はログに
+            # 残しつつ、呼出側には元の起動例外を返す。
             self._control.close()
             try:
                 self._event_writer.stop()
@@ -318,11 +330,15 @@ class LoggerDaemon:
                 、writerなどの状態が成立していない場合、または
                 副作用処理に失敗した場合。
         """
+        # 1周は「入力確定→Heartbeat/rule→OUT test→IPC」。watchdog判定を各段階で
+        # 挟み、異常trip後に後続処理が出力を再度ONにしない。
         if not self._started:
             raise RuntimeError("logger daemon is not started")
         self._complete_watchdog_trip_if_needed()
         try:
             if self._service.status is LoggerStatus.LOGGING:
+                # queue済み確定eventをdebounce前に処理し、候補のpoll後にもdrainする。
+                # この二段階で既存eventと今回確定したeventの両方を同じloopで反映する。
                 if self._set_loop_phase("input_queue_drain_before_debounce"):
                     self._service.drain_events()
                 self._complete_watchdog_trip_if_needed()
@@ -335,6 +351,8 @@ class LoggerDaemon:
                         self._service.drain_events()
                     self._complete_watchdog_trip_if_needed()
                 if self._service.status is LoggerStatus.LOGGING:
+                    # 出力制御は入力状態の反映後に実行する。heartbeat/rule間もtripを
+                    # 確認し、watchdogが停止した後の再出力を避ける。
                     # 入力処理中にwatchdogがtrip済みなら、出力操作を再開しない。
                     # checkpoint更新とwatchdog判定を同じlockで直列化する。
                     if self._refresh_loop_progress("heartbeat"):
@@ -346,11 +364,13 @@ class LoggerDaemon:
                     if self._set_loop_phase("output_rules"):
                         self._rule_runner.tick()
                     self._complete_watchdog_trip_if_needed()
+            # 診断テストの期限切れ確認は通常loop末尾で行う。
             if self._set_loop_phase("output_test"):
                 self._outputs.output_test_tick()
         except Exception:
             with self._watchdog_state_lock:
                 watchdog_tripped = self._watchdog_tripped.is_set()
+            # trip起因の例外は物理OFF済み状態を確定し、通常障害だけをcritical化する。
             if watchdog_tripped:
                 # watchdogが先に物理OFFした直後の再出力要求は、通常loop例外と
                 # 誤分類せず、trip状態の確定だけを行う。
@@ -358,6 +378,7 @@ class LoggerDaemon:
             else:
                 _LOGGER.exception("loggerd loop failed; entering critical state")
                 self._mark_critical()
+        # Critical時も照会・停止のcontrol IPCを処理できるようacceptを続ける。
         self._complete_watchdog_trip_if_needed()
         # Critical中もstatus照会を処理できるようIPC acceptは継続する。
         self._set_loop_phase("control_ipc")
@@ -488,6 +509,8 @@ class LoggerDaemon:
         Returns:
             None。終了通知後にdaemon資源を解放する。
         """
+        # 起動・通常運転・終了処理をこの関数でまとめて管理する。
+        # 起動途中で失敗しても、作成済み資源を解放する。
         try:
             self.start()
         except Exception:
@@ -496,6 +519,7 @@ class LoggerDaemon:
             self.close()
             raise
         try:
+            # 長いloopへ入る前にwatchdog基準時刻を更新して監視threadを開始する。
             self._refresh_loop_progress("run_loop")
             self._watchdog_stop.clear()
             self._watchdog_thread = threading.Thread(
@@ -504,13 +528,17 @@ class LoggerDaemon:
                 daemon=True,
             )
             self._watchdog_thread.start()
+            # 各周回で入力確定・出力制御・IPC要求を進め、周回の間に終了通知を確認する。
             while not stop_event.is_set():
                 self.run_once()
         finally:
+            # 制御loopを抜けたらwatchdogへ終了を通知し、物理OFF監視threadが
+            # 残らないようjoinしてからdaemon資源をcloseする。
             self._watchdog_stop.set()
             if self._watchdog_thread is not None:
                 self._watchdog_thread.join()
                 self._watchdog_thread = None
+            # service/session、control socket、GPIO、writer、DBの順に解放する。
             self.close()
 
     def close(self) -> None:
@@ -522,6 +550,7 @@ class LoggerDaemon:
         Returns:
             None。出力停止を試み、session・socket・GPIO・DBを順に解放する。
         """
+        # 停止失敗を保持しながらも後続資源の解放を続け、最後に最初の障害を返す。
         stop_error: Exception | None = None
         was_logging = self._service.status is LoggerStatus.LOGGING
         if self._started or self._service.status not in {
@@ -653,6 +682,8 @@ class LoggerDaemon:
             self._record_audit("logging_stopped")
             return self._status_payload()
         if request.command is ControlCommand.START_LOGGING:
+            # setup完了とOUT test終了を確認し、pause状態を開始前に保存してから
+            # sessionを作る。開始途中で失敗しても次回起動の自動再開を防ぐ。
             # 出力テスト中の明示的な再開はテストを終了させてから新sessionを
             # 作る。テスト状態を残したままloggingへ戻すと、expiry callbackが
             # 通常監視中のOUTを後から変更してしまう。
@@ -696,6 +727,8 @@ class LoggerDaemon:
                 raise
             return self._status_payload()
         if request.command is ControlCommand.TEST_OUTPUT:
+            # request schemaで検証済みでもchannelは明示確認し、監査記録は
+            # OutputManagerがテスト開始を受理した後だけ残す。
             if request.channel is None:
                 raise ValueError("test_output requires channel")
             self._outputs.begin_output_test(
@@ -732,6 +765,9 @@ class LoggerDaemon:
         """
         if self._service.status is not LoggerStatus.LOGGING:
             raise RuntimeError("logger is not logging")
+        # 順序は受付停止とpause保存、続いてrule owner/Heartbeat停止。
+        # 各停止処理は独立して試し、最初のerrorだけを保持する。
+        # 1段階の失敗で後続停止を飛ばすとOUT所有者が残るためである。
         stop_error: Exception | None = None
         pause_attempted = False
 
@@ -758,6 +794,7 @@ class LoggerDaemon:
                 if stop_error is None:
                     stop_error = error
 
+        # serviceがMAINTENANCEへ遷移すると入力callback受付が閉じる。
         try:
             self._service.enter_maintenance(on_quiesced=persist_pause)
         except Exception as error:
@@ -768,6 +805,7 @@ class LoggerDaemon:
         finally:
             if not pause_attempted:
                 persist_pause()
+        # service stop後にも各OUT ownerを明示停止する。1つの例外で残りを省略しない。
         for stop_operation in (
             self._rule_runner.pause,
             self._outputs.disable_heartbeat,
@@ -779,6 +817,7 @@ class LoggerDaemon:
                 self._mark_critical()
                 if stop_error is None:
                     stop_error = error
+        # 停止試行をすべて済ませた後に、最初に保存したfailureを呼出側へ返す。
         if stop_error is not None:
             raise stop_error
 
@@ -804,6 +843,8 @@ class LoggerDaemon:
         self._event_writer.raise_if_failed()
         saved = self._counter_reset_requests.get(request.request_id)
         if saved is None:
+            # 再送識別の履歴を上限付きで保持し、完了済みだけを整理する。
+            # 未完了requestを追い出すと同一IDの再送で二重resetになる。
             # 応答消失時の再送を二重resetにしない。完了分だけを有界に保持する。
             if len(self._counter_reset_requests) >= 64:
                 for key, (_, operation) in tuple(self._counter_reset_requests.items()):
@@ -812,6 +853,7 @@ class LoggerDaemon:
                         break
             if len(self._counter_reset_requests) >= 64:
                 raise RuntimeError("too many pending counter resets")
+            # caller snapshotがなければDBから読み、reset modeのcounterだけ受け付ける。
             widget = request.widget or WidgetRepository(self._connection).get(
                 request.widget_id
             )
@@ -822,6 +864,7 @@ class LoggerDaemon:
                 or widget.config.get("count_mode") != "reset"
             ):
                 raise ValueError("widget is not a reset-based counter")
+            # reset recordをFIFOへ一度だけ追加し、HTTP/IPC loopはcommitを待たない。
             pending = PendingCounterReset(
                 widget_id=request.widget_id,
                 reset_at_ms=self._clock.now_utc_ms(),
@@ -835,6 +878,7 @@ class LoggerDaemon:
                 raise ValueError(
                     "counter reset request_id was reused with other values"
                 )
+        # 同じrequest IDの再送は既存operationを参照し、未完了ならpendingを返す。
         if not pending.completed.is_set():
             return {"pending": True}
         if pending.error is not None:
@@ -862,6 +906,8 @@ class LoggerDaemon:
         Returns:
             None。入力snapshotを保存してcallbackを有効化し、新sessionを開始する。
         """
+        # 開始段階は入力snapshot共有、rule/service初期化、callback接続、
+        # 差分再読、OUT開始の順。
         # session開始とrule evaluator開始で異なるsnapshotを読むと、同時に
         # 変化した入力だけが片方へ反映されるため、一つのsnapshotを共有する。
         input_values = self._gpio.input_values()
@@ -1029,12 +1075,15 @@ class LoggerDaemon:
         write_latency = self._event_writer.latency_snapshot()
         oldest_pending_ms = self._event_queue.oldest_pending_ms()
         if self._service.status is LoggerStatus.LOGGING:
+            # logging中はdebounce確定済み状態とmonotonic起点を返す。
+            # retentionに影響されるevent履歴から現在値を再構成しない。
             # dashboardの現在値はGPIOの生値ではなく、debounceを通過して
             # Queueへ受理された論理値を使う。DB retention後も現在状態を
             # UNKNOWNへ戻さず、表示時刻は別のmonotonic mapで計算できる。
             input_values = self._service.confirmed_inputs
             input_since_ns = self._service.confirmed_input_since_ns
         else:
+            # 停止・maintenance中は物理入力を読み、継続時間を推測しない。
             input_values = self._gpio.input_values()
             input_since_ns = {}
         return {

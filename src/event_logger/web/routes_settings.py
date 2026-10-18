@@ -60,6 +60,8 @@ def _register_channel_routes(app: Flask, context: WebContext) -> None:
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return _error("INVALID_REQUEST", "JSON object is required", 400)
+        # bodyを検証し、旧channelを保持してから保存する。daemon ACK前にDB値だけ
+        # を成功扱いにするとWebと入力監視設定がずれるため、後段失敗時に復元する。
         try:
             updated = context.channels.update(
                 channel_id=channel_id,
@@ -86,6 +88,8 @@ def _register_channel_routes(app: Flask, context: WebContext) -> None:
                 "loggerd reload was not acknowledged",
                 503,
             )
+        # settingsはまずDBへ保存し、loggerdのreload ACKを成功条件にする。
+        # Webだけが新設定を使い始めないよう、IPC失敗時は保存値も旧値へ戻す。
         try:
             _request_config_reload(context)
         except IpcRemoteError as error:
@@ -150,6 +154,8 @@ def _register_basic_settings_routes(app: Flask, context: WebContext) -> None:
         )
         if not isinstance(old, dict):
             return _error("CONFIG_INVALID", "stored heartbeat setting is invalid", 500)
+        # 保存済み値をfallbackにしながら全項目を検証し、OUT owner競合も確認してから
+        # 新しいmappingを作る。検証途中で一部fieldだけ永続化しない。
         try:
             enabled = _json_bool(
                 payload.get("enabled", old.get("enabled", False)),
@@ -180,6 +186,8 @@ def _register_basic_settings_routes(app: Flask, context: WebContext) -> None:
             }
         except (TypeError, ValueError) as error:
             return _error("INVALID_REQUEST", str(error), 400)
+        # 先にDBを更新してからACKを待ち、失敗なら旧値を戻してdaemonにも再同期を
+        # 試みる。この順序でAPI応答と両プロセスの設定世代を揃える。
         context.settings.set_json(
             key="heartbeat",
             value=new,
@@ -267,6 +275,8 @@ def _register_basic_settings_routes(app: Flask, context: WebContext) -> None:
             )
         custom_range = _stored_dashboard_custom_range(context)
         if period == "custom":
+            # custom以外を選ぶときは以前の有効custom rangeを保持する。
+            # 値の検証は一括保存前に完了させ、periodだけ先に更新される状態を避ける。
             try:
                 start_ms = _json_int(payload.get("from_ms"), "from_ms")
                 end_ms = _json_int(payload.get("to_ms"), "to_ms")
@@ -349,6 +359,8 @@ def _register_system_settings_routes(
         if not isinstance(payload, dict):
             return _error("INVALID_REQUEST", "JSON object is required", 400)
         current = _system_settings_payload(context, app, auth)
+        # hostname/timezone/passwordをすべて検証しhash化してから一括保存する。
+        # 平文passwordを設定Repositoryや返却payloadへ置かない。
         try:
             device_name = _json_text(
                 payload.get("device_name", current["device_name"]),
@@ -483,6 +495,8 @@ def _register_setup_routes(
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return _error("INVALID_REQUEST", "JSON object is required", 400)
+        # channel/system/retentionを永続化する前に全入力を正規化する。設定途中の
+        # validation errorで一部だけ初期化済みになる状態を作らない。
         try:
             channel_values = _parse_setup_channels(context, payload.get("channels"))
             raw_retention = payload.get("retention_days", 365)
@@ -505,6 +519,8 @@ def _register_setup_routes(
             return _error("LOGGERD_UNAVAILABLE", daemon_error or daemon_status, 503)
         stopped_here = daemon_status == "logging"
         start_after_setup = daemon_status in {"logging", "maintenance"}
+        # 以降の複数repository更新は一つのSQLite transactionではないため、現在値を
+        # 個別保存しておき、reloadや再開の失敗時にroute側で復元できるようにする。
         old_settings = {
             "device_name": context.settings.get_json("device_name", ""),
             "hostname": context.settings.get_json("hostname", _safe_default_hostname()),
@@ -516,6 +532,8 @@ def _register_setup_routes(
             "retention_days": context.settings.get_json("retention_days", 365),
             "setup_completed": context.settings.get_json("setup_completed", False),
         }
+        # loggerdが記録中なら先に停止し、channel・本体設定とsetup flagを保存して
+        # reload ACKを得てから再開する。start後にflagを書くとsnapshot境界が崩れる。
         try:
             if stopped_here:
                 context.control_client.request(

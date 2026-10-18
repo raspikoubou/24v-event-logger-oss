@@ -32,6 +32,7 @@ def connect_database(
         SchemaVersionError: 既存の0 byte fileを初期DBと誤認しそうな場合。
         sqlite3.Error: DBを開く、 またはPRAGMAを設定できない場合。
     """
+    # SQLiteの暗黙新規作成が既存の空DB破損を隠さないよう、open前にfile状態を判定する。
     path = str(database_path)
     if path != ":memory:":
         database_file = Path(path)
@@ -46,6 +47,7 @@ def connect_database(
             raise SchemaVersionError(
                 "existing database file is empty; refusing to initialize it"
             )
+    # connection作成後に共通row/locking設定を適用し、PRAGMA失敗時は漏らさず閉じる。
     connection = sqlite3.connect(path, timeout=5.0)
     try:
         connection.row_factory = sqlite3.Row
@@ -105,6 +107,7 @@ def initialize_connection(connection: sqlite3.Connection) -> None:
         SchemaVersionError: 「existing tables have no schema version; explicit migration
             is required」に該当すると判定した場合。
     """
+    # versionと既存tableの組合せを先に判定し、通常起動で暗黙migrationしない。
     current_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
     has_tables = _has_user_tables(connection)
     if current_version > LATEST_SCHEMA_VERSION:
@@ -134,6 +137,7 @@ def _create_schema_latest(connection: sqlite3.Connection) -> None:
         None。 schema・channel seed・user_versionを一つの明示transactionで作成し、
             受け取ったconnectionは閉じない。
     """
+    # schema本体と初期channel seedを同じscriptへまとめ、初期化の途中状態を残さない。
     schema = _SCHEMA_PATH.read_text(encoding="utf-8")
     seed_statements = "\n".join(
         "INSERT INTO channels (id, enabled, name, debounce_ms, updated_at_ms) "

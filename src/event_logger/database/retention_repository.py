@@ -66,6 +66,7 @@ class CounterResetRepository:
                 after_event_id = int(row[0])
             if after_event_id < 0:
                 raise ValueError("after_event_id must not be negative")
+            # reset境界と監査行を同時に保存し、両者が食い違う記録を残さない。
             cursor = self._connection.execute(
                 """
                 INSERT INTO counter_resets (
@@ -188,8 +189,10 @@ class RetentionRepository:
         """
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
+        # 対象選択からcarry加算・削除までを同一writer transactionに閉じ込める。
         self._connection.execute("BEGIN IMMEDIATE")
         try:
+            # 期限なしなら最古rowを取り、期限指定時は境界より古いrowだけに限定する。
             if cutoff_ms is None:
                 event_rows = self._connection.execute(
                     "SELECT * FROM events ORDER BY ts_utc_ms, id LIMIT ?",
@@ -221,6 +224,8 @@ class RetentionRepository:
             if not event_rows and not output_rows:
                 self._connection.commit()
                 return None
+            # 削除で失われるreset後edge数を先にcarryへ移す。
+            # 履歴を消した後もcounter totalを保つため。
             carried_by_reset = self._counter_carry(event_rows)
             for reset_id, count in carried_by_reset.items():
                 self._connection.execute(
@@ -231,6 +236,7 @@ class RetentionRepository:
                     """,
                     (count, reset_id),
                 )
+            # carry更新と両履歴の削除がそろってからcommitし、途中失敗時は全体を戻す。
             _delete_ids(self._connection, "events", event_rows)
             _delete_ids(self._connection, "output_events", output_rows)
             self._connection.commit()
@@ -329,6 +335,7 @@ class RetentionRepository:
         Returns:
             結果値を識別keyへ対応させたdict。 入力mappingを変更しない。
         """
+        # resetごとの設定を読み、同じ条件のresetは削除batch内で一度だけ照合する。
         rows = self._connection.execute(
             """
             SELECT counter_resets.*, widgets.config_json
@@ -362,6 +369,7 @@ class RetentionRepository:
                     for event_row in event_rows
                     if _counter_event_matches(event_row, config)
                 )
+            # 削除対象IDのうちreset境界より後にある分だけを、二分探索でcarryへ数える。
             after_event_id = int(reset_row["after_event_id"])
             ids = matching_ids[key]
             count = len(ids) - bisect_right(ids, after_event_id)

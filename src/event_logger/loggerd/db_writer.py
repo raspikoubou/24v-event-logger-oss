@@ -109,6 +109,8 @@ class WriteLatencyMonitor:
             mmit、最長遅延、直近commit、処理中時間、警
             告状態を表す。
         """
+        # 古いdelay sampleを窓から外してから、処理中時間・最古待ち・容量・保存障害を
+        # 組み合わせて危険状態を判定する。commit件数だけでは損失とみなさない。
         self._expire(now_ns)
         # 5秒は正常負荷の最大保存追従時間。容量80%では残り20%を
         # 回復余地として残す。commit回数だけでは欠損とは判断しない。
@@ -124,6 +126,7 @@ class WriteLatencyMonitor:
             and oldest_pending_ms < 1_000
             and pending_count * 2 < capacity
         )
+        # 危険条件は即時warning、回復条件は継続時間を満たすまで解除を保留する。
         if unhealthy:
             self._warning = True
             self._healthy_since_ns = None
@@ -135,6 +138,7 @@ class WriteLatencyMonitor:
             elif now_ns - self._healthy_since_ns >= _WARNING_RECOVERY_NS:
                 self._warning = False
                 self._healthy_since_ns = None
+        # warningが解除されてもdelay履歴または短時間遅延が残ればattentionを返す。
         severity = (
             "warning"
             if self._warning
@@ -531,22 +535,30 @@ class BackgroundEventWriter:
         """
         connection: sqlite3.Connection | None = None
         try:
+            # 専用threadに接続を作る。SQLite connectionを別threadと共有せず、
+            # writerの全DB操作を同じthreadへ閉じ込める。
             connection = connect_database(self._database_path)
             batch_repository = EventBatchRepository(connection)
         except Exception as error:
+            # 失敗を記録してready待ちを解除し、startup callerに原因を伝える。
             self._set_failure(error)
             self._ready.set()
             if connection is not None:
                 connection.close()
             return
+        # DB準備後にreadyを通知し、以降の保存障害はfailureで知らせる。
         self._ready.set()
         try:
             while True:
+                # 有限timeoutでstop flagを再確認し、wake通知を取りこぼしても
+                # 終了可能にする。
                 pending_events = self._event_queue.wait_get_batch(
                     max_count=_MAX_EVENT_BATCH_SIZE,
                     timeout_s=0.1,
                 )
                 if not pending_events:
+                    # batchなしならqueue状態を見て停止を判定する。停止要求だけで
+                    # 受付済みeventを捨てず、未emptyなら次のwaitへ戻る。
                     if self._stop_requested.is_set() and len(self._event_queue) == 0:
                         return
                     continue
@@ -571,12 +583,15 @@ class BackgroundEventWriter:
                         self._commit_event_batch(batch_repository, remaining[:count])
                         remaining = remaining[count:]
                 except Exception as error:
+                    # 未保存eventを元の順序で先頭へ戻してからwriter障害を記録し、
+                    # 後続eventが失敗分を追い越さないよう、このthreadを終了する。
                     with self._state_lock:
                         self._commit_started_ns = None
                     self._event_queue.requeue_front_many(remaining)
                     self._set_failure(error)
                     return
         finally:
+            # batch処理の正常return・commit失敗のどちらでもconnectionを閉じる。
             connection.close()
 
     def _commit_event_batch(
