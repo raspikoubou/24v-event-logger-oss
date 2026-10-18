@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from event_logger.web.app import WebContext
 
 
+# HTML表示・CSRFトークンの入口をまとめて登録する。
 def _register_page_routes(app: Flask, context: WebContext) -> None:
     """製品画面とCSRF tokenのrouteを登録する。"""
 
@@ -55,6 +56,7 @@ def _register_auth_routes(app: Flask, auth: SharedPasswordAuth) -> None:
 
 
     @app.before_request
+    # ログイン・CSRFチェックをAPIごとに書き散らさず共通の前処理で実行する。
     def protect_request() -> ResponseReturnValue | None:
         """認証とPOST CSRFをroute実行前に適用する。"""
         if (
@@ -95,6 +97,7 @@ def _register_auth_routes(app: Flask, auth: SharedPasswordAuth) -> None:
         return render_template("login.html", csrf_token=_ensure_csrf_token())
 
     @app.post("/login")
+    # ログイン成功後だけ認証セッションを設定する。
     def login() -> ResponseReturnValue:
         """共有パスワードを検証してsessionへ保存する。"""
         if not auth.enabled:
@@ -123,6 +126,7 @@ def _register_auth_routes(app: Flask, auth: SharedPasswordAuth) -> None:
         return redirect("/login" if auth.enabled else "/")
 
 
+# 記録開始・停止・出力テストのHTTP操作を専用IPCコマンドに対応付ける。
 def _register_control_routes(app: Flask, context: WebContext) -> None:
     """loggerd制御系のHTTP routeをappへ登録する。"""
 

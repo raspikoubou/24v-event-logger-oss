@@ -55,6 +55,7 @@ def _control_client(app: Flask, demo: bool) -> ControlClient | None:
     return _DemoControlClient() if demo else None
 
 
+# デモ表示では実機daemonを起動せず、同じ制御コマンドの結果を模擬する。
 class _DemoControlClient:
     """Web demo専用のloggerd状態Fake。"""
 
@@ -150,6 +151,7 @@ def _daemon_status(
     return raw_status, None, data
 
 
+# DB保存後はdaemonへの反映結果を確認し、保存成功と適用成功を区別する。
 def _request_config_reload(context: WebContext) -> Mapping[str, object]:
     """DBに保存した現行設定をloggerdへ再読込させる。"""
     if context.control_client is None:
@@ -166,6 +168,7 @@ def _request_config_reload(context: WebContext) -> Mapping[str, object]:
     return result
 
 
+# 設定の書き戻し後にdaemon側も旧設定へ戻す経路。
 def _reload_after_rollback(context: WebContext) -> bool:
     """旧設定の再読込を確認し、失敗時は停止と診断状態を残す。"""
     expected_digest = _configuration_fingerprint(context)
@@ -195,6 +198,7 @@ def _reload_after_rollback(context: WebContext) -> bool:
     return False
 
 
+# 設定反映の失敗時は安全を優先し、必要なら監視停止へ移す。
 def _stop_for_configuration_recovery(context: WebContext) -> bool:
     """停止または出力テスト終了のACKで通常OUTのOFF状態を確認する。"""
     if context.control_client is None:
@@ -221,6 +225,7 @@ def _stop_for_configuration_recovery(context: WebContext) -> bool:
         return False
 
 
+# 停止したという表示だけでなく、出力がOFFであることも状態応答から確認する。
 def _outputs_confirmed_off(status: Mapping[str, object]) -> bool:
     """loggerd STATUSの6出力値とtest状態がすべてOFFかを検証する。"""
     outputs = status.get("outputs")
@@ -231,6 +236,7 @@ def _outputs_confirmed_off(status: Mapping[str, object]) -> bool:
     )
 
 
+# DBとdaemonの構成差異を明示し、画面に再同期が必要なことを伝える。
 def _mark_configuration_out_of_sync(context: WebContext, *, stopped: bool) -> None:
     """daemon設定の不一致を永続化し、diagnosticsで判断できるようにする。"""
     message = (
@@ -314,6 +320,7 @@ def _restore_heartbeat(context: WebContext, value: Mapping[str, object]) -> None
     )
 
 
+# ウィジェットのカウンタ操作はdaemonのFIFOを経由させ、記録との順序を守る。
 def _save_counter_reset(
     context: WebContext, widget_id: str, *, widget: Widget | None = None
 ) -> CounterReset:

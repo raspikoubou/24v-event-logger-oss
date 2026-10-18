@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from event_logger.web.app import WebContext
 
 
+# JSONでは真偽値が整数の派生型なので、整数欄の値としては明示的に拒否する。
 def _json_int(value: object, field_name: str) -> int:
     """JSON payloadの整数を検証する。boolを整数として受理しない。"""
     if isinstance(value, bool) or not isinstance(value, int):
@@ -43,6 +44,7 @@ def _json_text(value: object, field_name: str) -> str:
     return value
 
 
+# GUIからの条件設定を検証し、ドメインが扱うルールへ変換する。
 def _build_output_rule(
     context: WebContext,
     payload: Mapping[str, object],
@@ -112,6 +114,7 @@ def _build_output_rule(
     )
 
 
+# ウィジェットの設定項目を型検証し、保存前に正規化する。
 def _build_widget(
     context: WebContext,
     payload: Mapping[str, object],
@@ -184,6 +187,7 @@ def _build_widget(
     )
 
 
+# カウンタ対象そのものが変わった編集だけをreset境界の更新対象とする。
 def _counter_definition_changed(before: Widget, after: Widget) -> bool:
     """reset counterの対象条件が変わったか返す。"""
     if before.widget_type is not WidgetType.EVENT_COUNT:

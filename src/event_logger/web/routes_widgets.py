@@ -32,6 +32,7 @@ def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
     )
 
     @app.post("/api/output-rules")
+    # OUT所有権の競合と入力条件を検証してからルールを保存する。
     def create_output_rule() -> Response:
         """固定スキーマの条件ルールを保存し、loggerd reloadを確認する。"""
         payload = request.get_json(silent=True)
@@ -60,6 +61,7 @@ def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
         return _ok(_output_rule_payload(rule))
 
     @app.put("/api/output-rules/<int:rule_id>")
+    # 変更後のルールがdaemonに適用できることまで確認する。
     def update_output_rule(rule_id: int) -> Response:
         """条件ルールを編集・無効化し、loggerd reloadを確認する。"""
         current = context.output_rules.get(rule_id)
@@ -117,6 +119,7 @@ def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
         )
 
     @app.delete("/api/output-rules/<int:rule_id>")
+    # 削除後のdaemon反映が失敗した場合も構成差異を扱う。
     def delete_output_rule(rule_id: int) -> Response:
         """ルールを削除し、reload失敗時は設定を復元する。"""
         rule = context.output_rules.get(rule_id)
@@ -168,6 +171,7 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
         )
 
     @app.post("/api/widgets")
+    # ウィジェット構成は受信JSONを正規化してからDBへ登録する。
     def create_widget() -> Response:
         """固定種別のDashboard widgetを作成する。"""
         payload = request.get_json(silent=True)
@@ -181,6 +185,7 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
         return _ok(_widget_payload(widget))
 
     @app.put("/api/widgets/<widget_id>")
+    # 集計条件の編集に伴うカウンタ境界の変更を同時に処理する。
     def update_widget(widget_id: str) -> Response:
         """Dashboard widgetを更新する。"""
         current = context.widgets.get(widget_id)
@@ -236,6 +241,7 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
         return _ok(_widget_payload(duplicate))
 
     @app.post("/api/widgets/<widget_id>/reset")
+    # resetは単純なDB時刻更新にせず、イベントFIFOを経由する。
     def reset_widget_counter(widget_id: str) -> Response:
         """リセット後カウントwidgetの基準event IDを保存する。"""
         widget = context.widgets.get(widget_id)

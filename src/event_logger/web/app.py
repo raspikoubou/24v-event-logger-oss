@@ -171,6 +171,7 @@ _LOGGER = logging.getLogger(__name__)
 _DASHBOARD_TIMELINE_MAX_JSON_BYTES = 2 * 1024 * 1024
 
 
+# Flaskアプリの生成と外部資源の初期化を分け、importだけでDBやGPIOを起動しない。
 def create_app(config: Mapping[str, Any] | None = None) -> Flask:
     """Flask appを作成する。
 
@@ -235,6 +236,7 @@ def create_app(config: Mapping[str, Any] | None = None) -> Flask:
         raise
 
 
+# 認証・HTTPルート・DBアクセスの共通設定を一度だけ結び付ける。
 def _finish_app_creation(
     app: Flask,
     *,
@@ -318,6 +320,7 @@ def _finish_app_creation(
     return app
 
 
+# systemd/Gunicorn起動では環境変数から実機設定を組み立てる。
 def create_production_app() -> Flask:
     """Gunicorn用に環境変数から本番Web設定を読み込む。"""
     demo = os.environ.get("EVENT_LOGGER_DEMO") == "1"
@@ -371,6 +374,7 @@ def _default_clock(demo: bool) -> Clock:
     return SystemClock()
 
 
+# WebからGPIOを直接触らず、制御要求をloggerdへ転送する。
 def _control_endpoint(
     context: WebContext,
     control_request: ControlRequest,
@@ -489,6 +493,7 @@ def _control_endpoint(
     return _ok(data)
 
 
+# 認証セッションに紐づくCSRFトークンを再利用し、変更系リクエストへ要求する。
 def _ensure_csrf_token() -> str:
     """sessionにCSRF tokenを一度だけ発行する。"""
     token = session.get("csrf_token")
@@ -580,6 +585,7 @@ def _log_payload(
     }
 
 
+# updaterの状態ファイルは外部入力として扱い、読み取り失敗をHTTP例外へ露出させない。
 def _read_update_status(path_value: object) -> dict[str, object] | None:
     """root updaterが出力した状態を表示用に読み取る。"""
     if not isinstance(path_value, str) or not path_value:

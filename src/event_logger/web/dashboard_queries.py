@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 _DASHBOARD_TIMELINE_MAX_INTERVALS = 10_000
 
 
+# ウィジェット計算に必要な入力履歴だけを取得し、期間開始前の状態も考慮する。
 def _dashboard_events(
     context: WebContext,
     widgets: list[Widget],
@@ -137,6 +138,7 @@ def _dashboard_events(
     return sorted(events_by_id.values(), key=lambda event: event.id)
 
 
+# 共通期間で使うイベント数集計をまとめる。
 def _dashboard_period_counts(
     context: WebContext,
     widgets: list[Widget],
@@ -181,6 +183,7 @@ def _dashboard_period_counts(
     return counts
 
 
+# 同じ入力が複数のウィジェットに必要でも、取得範囲を統合して重複読取りを抑える。
 def _merge_channel_range(
     channel_ranges: dict[int, tuple[int, int]],
     channel_id: int,
@@ -197,6 +200,7 @@ def _merge_channel_range(
     )
 
 
+# カウンタのreset境界を踏まえた集計値を用意する。
 def _dashboard_reset_counts(
     context: WebContext,
     widgets: list[Widget],
@@ -231,6 +235,7 @@ def _dashboard_reset_counts(
     return counts
 
 
+# 出力履歴も入力とは別に取得し、タイムラインへ渡す。
 def _dashboard_output_events(
     context: WebContext,
     widgets: list[Widget],
@@ -298,6 +303,7 @@ def _dashboard_output_events(
     )
 
 
+# 描画・レスポンス負荷を避けるため、イベント数の上限を取得段階で判定する。
 def _dashboard_timeline_event_count_exceeds_limit(
     context: WebContext,
     widgets: list[Widget],
@@ -386,6 +392,7 @@ def _dashboard_timeline_interval_count(items: list[dict[str, object]]) -> int:
     return count
 
 
+# 上限超過を単なる空データと区別し、画面側へ理由を返す。
 def _dashboard_timeline_limit_warning(
     *,
     start_ms: int,

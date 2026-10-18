@@ -9,6 +9,7 @@ import secrets
 from threading import RLock
 
 
+# 共通パスワードの有効状態とセッション世代を管理する。
 class SharedPasswordAuth:
     """ユーザー管理を持たない共有パスワード認証。"""
 
@@ -51,6 +52,7 @@ class SharedPasswordAuth:
                 return None
             return self._session_generation
 
+    # パスワード設定変更後の古いログインセッションは再利用させない。
     def accepts_session(self, generation: object) -> bool:
         """現在の共有認証に対応するログインだけを受け付ける。"""
         with self._lock:
@@ -60,6 +62,7 @@ class SharedPasswordAuth:
                 and secrets.compare_digest(generation, self._session_generation)
             )
 
+    # 認証設定の更新時にセッション有効期限の境界を切り替える。
     def configure(self, *, enabled: bool, password_hash: str | None) -> None:
         """設定画面から共有認証の有効状態を更新する。"""
         if enabled and not password_hash:
@@ -72,6 +75,7 @@ class SharedPasswordAuth:
             self._password_hash = password_hash
 
 
+# パスワード原文をDBへ置かず、検証可能なハッシュへ変換する。
 def hash_password(password: str) -> str:
     """scryptで共有パスワードをhash化し、設定保存用文字列を返す。"""
     if not password:
@@ -90,6 +94,7 @@ def hash_password(password: str) -> str:
     )
 
 
+# 保存形式に従って入力パスワードを検証する。
 def verify_password(password: str, encoded: str) -> bool:
     """scrypt形式を検証し、不正形式はFalseとして扱う。"""
     try:

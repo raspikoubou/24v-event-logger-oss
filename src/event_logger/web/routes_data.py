@@ -43,6 +43,7 @@ def _register_log_routes(app: Flask, context: WebContext) -> None:
 
 
     @app.get("/api/logs")
+    # フィルターとページ条件を検証して統一ログを取得する。
     def logs() -> Response:
         """期間・チャンネルで絞った入力eventをJSONで返す。"""
         try:
@@ -85,6 +86,7 @@ def _register_log_routes(app: Flask, context: WebContext) -> None:
         return _ok(payload)
 
     @app.get("/api/logs.csv")
+    # 画面での検索条件をCSVへ引き継ぎ、一覧とは別の出力方式で返す。
     def logs_csv() -> Response:
         """現在の検索条件に一致するIN/OUTログをUTF-8 BOM付きCSVで返す。"""
         try:
@@ -141,6 +143,7 @@ def _register_status_routes(
 
 
     @app.get("/api/status")
+    # loggerd状態・DB・時刻・ストレージ情報をUI向けの状態にまとめる。
     def status() -> Response:
         """診断画面用の現在状態を返す。"""
         channels = context.channels.list_all()
@@ -260,6 +263,7 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
 
 
     @app.get("/api/dashboard")
+    # 複数ウィジェットの表示値を必要な履歴から計算する。
     def dashboard() -> Response:
         """保存済みwidgetをDomain計算値付きで返す。"""
         now_ms = context.clock.now_utc_ms()

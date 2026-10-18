@@ -63,6 +63,7 @@ _REQUEST_WEB_CONTEXT: ContextVar[WebContext | None] = ContextVar(
 )
 
 
+# 過大・低速なリクエスト本文に対する入口側の制限を適用する。
 class _HttpInputLimitMiddleware:
     """製品UIが送らない転送形式と過大bodyを、解析・DB接続前に拒否する。"""
 
@@ -82,6 +83,7 @@ class _HttpInputLimitMiddleware:
             return response
         return self._application(environ, start_response)
 
+    # Flaskへ渡す前に入力サイズと読み取り時間の条件を確認する。
     def prepare_request(
         self, environ: dict[str, Any], start_response: Callable[..., Any]
     ) -> Iterable[bytes] | None:
@@ -185,6 +187,7 @@ def _shutdown_request_input(transport: Any) -> None:
         pass
 
 
+# 同時の設定変更を直列化し、競合する操作が部分的に上書きしないようにする。
 class _ConfigurationRequestMiddleware:
     """設定の保存・daemon反映・復元を、認証確認前から要求単位で直列化する。"""
 
@@ -215,6 +218,7 @@ class _ConfigurationRequestMiddleware:
             return self._application(environ, start_response)
 
 
+# 要求ごとに生成したDB接続を共通のWebContext経由で利用する。
 class _RequestScopedWebContext:
     """各HTTP要求のSQLite connectionをrouteへ透過的に渡す。"""
 
@@ -228,6 +232,7 @@ class _RequestScopedWebContext:
         return getattr(context, name)
 
 
+# ストリーミング応答が終わるまで接続を保持し、その後に解放する。
 class _DatabaseScopedResponse:
     """streaming responseの完了までrequest DB接続を保持する。"""
 
@@ -266,6 +271,7 @@ class _DatabaseScopedResponse:
                 self._connection.close()
 
 
+# リクエスト単位でDB接続の生成と後始末を担当する。
 class _DatabaseRequestMiddleware:
     """Gunicorn threadごとにSQLite接続を分け、応答終了時に閉じる。"""
 

@@ -13,6 +13,7 @@ from event_logger.adapters.clock import Clock
 from event_logger.domain.widgets import WIDGET_PERIOD_DURATIONS_MS, Widget
 
 
+# カレンダー期間と直近N時間では期間境界の決め方が異なる。
 def _dashboard_range_ms(
     clock: Clock,
     *,
@@ -43,6 +44,7 @@ def _dashboard_range_ms(
     raise ValueError("period is not a supported dashboard period")
 
 
+# 日・週などの区切りは表示用タイムゾーンの暦を基準にする。
 def _fixed_widget_calendar_ranges(
     widgets: Sequence[Widget],
     clock: Clock,

@@ -13,6 +13,7 @@ from event_logger.common.models import ChannelConfig, LogRecord, OutputSource
 from event_logger.common.timeutil import format_timestamp
 
 
+# 長い履歴をCSV化するときはログ取得順と表記規則を一定に保つ。
 def generate_csv(
     events: Iterable[LogRecord],
     channel_map: Mapping[int, ChannelConfig],
@@ -71,6 +72,7 @@ def generate_csv(
         yield output.getvalue()
 
 
+# 改行・引用符・区切り文字を含む値がCSVの列境界を壊さないようエスケープする。
 def _csv_text(value: str) -> str:
     """表計算ソフトが利用者の名称を式として扱わないよう文字列にする。"""
     # 引用符で囲むだけでは式解釈を防げない。制御文字や空白の後に式開始文字が
@@ -83,6 +85,7 @@ def _csv_text(value: str) -> str:
     return value
 
 
+# OUTの表示名は関連ルール名を参照して利用者が判別できる形にする。
 def _output_name(event: LogRecord, rule_names: Mapping[int, str]) -> str:
     """初期版でDBに保存するOUT用途名を返す。"""
     names = {

@@ -21,6 +21,7 @@ from event_logger.maintenance.update import (
 )
 
 
+# 確認したリリースと適用時に取得したリリースの一致を検証するための識別子。
 def _release_token(release: ReleaseInfo) -> str:
     """確認時の版とasset情報を、適用時の再取得結果へ対応付ける。"""
     identity = [
@@ -49,6 +50,7 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
     )
 
     @app.post("/api/system/reboot")
+    # Webが任意のrootコマンドを実行せず、固定操作として再起動を依頼する。
     def reboot_system() -> Response:
         """確認後の本体再起動を、root権限のないWebから管理agentへ依頼する。"""
         # 固定操作に任意引数を付けられると誤解させない。CSRF・共有passwordは
@@ -66,6 +68,7 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
         return response
 
     @app.get("/api/update/status")
+    # 定期ポーリングでGitHubへ問い合わせず、ローカルの更新状態だけを見る。
     def update_status() -> Response:
         """ローカルの更新結果だけを返す。定期確認ではGitHubへ通信しない。"""
         response = _ok(
@@ -78,6 +81,7 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
         return response
 
     @app.get("/api/update")
+    # 利用者の確認操作で公開Releaseの更新情報を取得する。
     def update_info() -> Response:
         """GitHub Releasesの安定版情報を確認する。"""
         current = str(app.config["APP_VERSION"])
@@ -110,6 +114,7 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
         )
 
     @app.post("/api/update")
+    # リリースを再検証してから更新agentへ渡し、事前確認との食い違いを防ぐ。
     def apply_update() -> Response:
         """ユーザー操作で検証済みReleaseを固定updaterへ渡す。"""
         repository = str(app.config.get("UPDATE_REPOSITORY", ""))

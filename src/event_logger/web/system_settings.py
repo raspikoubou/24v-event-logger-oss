@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from event_logger.web.app import WebContext
 
 
+# 認証情報を直接露出せず、画面表示に必要な設定だけを返す。
 def _system_settings_payload(
     context: WebContext,
     app: Flask,
@@ -59,6 +60,7 @@ def _system_settings_payload(
     }
 
 
+# 設備名・hostname・タイムゾーン等の入力検証を保存処理から分離する。
 def _validated_system_settings(
     context: WebContext,
     app: Flask,
@@ -109,6 +111,7 @@ def _validated_system_settings(
     }
 
 
+# 関連する設定の保存をまとめ、部分更新を回避する。
 def _save_system_settings(
     context: WebContext,
     system: Mapping[str, object],
@@ -132,6 +135,7 @@ def _save_system_settings(
     )
 
 
+# 初回設定で有効な入力チャンネルだけを正規化して受け取る。
 def _parse_setup_channels(
     context: WebContext,
     raw_channels: object,
@@ -176,6 +180,7 @@ def _parse_setup_channels(
     return result
 
 
+# 未設定時でも表示のタイムゾーンが必ず決まるよう既定値を扱う。
 def _effective_timezone(context: WebContext) -> str:
     """DB保存済みtimezoneを検証して返す。"""
     raw_timezone = context.settings.get_json("timezone", context.timezone_name)

@@ -17,6 +17,7 @@ from event_logger.domain.widgets import WIDGET_PERIOD_DURATIONS_MS
 from event_logger.web.dashboard_periods import _dashboard_range_ms
 
 
+# URLクエリの期間・信号・種別・件数を、SQLへ渡す前に一括検証する。
 def _parse_log_filters(clock: Clock, timezone_name: str) -> dict[str, Any]:
     """HTTP queryをRepository filterへ変換する。"""
     now_ms = clock.now_utc_ms()
@@ -102,6 +103,7 @@ def _parse_log_filters(clock: Clock, timezone_name: str) -> dict[str, Any]:
     }
 
 
+# 入力されたローカル日時をタイムゾーン付きの絶対時刻へ変換する。
 def _parse_local_input(value: str, timezone_name: str) -> int:
     """設定timezoneのdatetime-local文字列をUTCミリ秒へ変換する。"""
     try:
@@ -145,6 +147,7 @@ def _parse_log_values(value: str | None) -> list[int] | None:
     return values
 
 
+# 許容された選択肢だけをSQL条件に使い、未知の値をそのまま通さない。
 def _parse_log_choices(
     value: str | None,
     *,
@@ -164,6 +167,7 @@ def _parse_log_choices(
     return choices
 
 
+# 数値クエリは型と範囲の境界で検証する。
 def _query_int(name: str, default: int) -> int:
     """整数query parameterを検証する。"""
     value = request.args.get(name)

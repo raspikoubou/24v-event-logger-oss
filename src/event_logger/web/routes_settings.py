@@ -35,6 +35,7 @@ def _register_channel_routes(app: Flask, context: WebContext) -> None:
 
 
     @app.post("/api/channels/<int:channel_id>")
+    # 保存内容をdaemonへ反映できなかった場合に元の設定へ戻す。
     def update_channel(channel_id: int) -> Response:
         """入力設定を保存し、loggerd reload失敗時は旧値へ戻す。"""
         before = context.channels.get(channel_id)
@@ -104,6 +105,7 @@ def _register_basic_settings_routes(app: Flask, context: WebContext) -> None:
 
 
     @app.post("/api/settings/heartbeat")
+    # Heartbeatの使用OUTとルールの競合を検証してから反映する。
     def update_heartbeat() -> Response:
         """Heartbeat設定を保存し、loggerd reload ACKを確認する。"""
         payload = request.get_json(silent=True)
@@ -171,6 +173,7 @@ def _register_basic_settings_routes(app: Flask, context: WebContext) -> None:
         return _ok(new)
 
     @app.post("/api/settings/retention")
+    # 保存期間の候補を限定し、削除の実行自体は保守処理へ委ねる。
     def update_retention() -> Response:
         """保存期間を仕様で定義した選択肢へ限定して保存する。"""
         payload = request.get_json(silent=True)
@@ -195,6 +198,7 @@ def _register_basic_settings_routes(app: Flask, context: WebContext) -> None:
         return _ok({"retention_days": retention_days})
 
     @app.post("/api/settings/dashboard")
+    # 表示期間設定は入力監視の設定とは独立して保存する。
     def update_dashboard_settings() -> Response:
         """Dashboard共通期間を保存する。"""
         payload = request.get_json(silent=True)
@@ -267,6 +271,7 @@ def _register_system_settings_routes(
         return _ok(_system_settings_payload(context, app, auth))
 
     @app.post("/api/settings/system")
+    # 設備名・認証・時刻設定の入力を検証して保存する。
     def update_system_settings() -> Response:
         """設備名・hostname・timezone・共有認証を保存する。"""
         payload = request.get_json(silent=True)
@@ -374,6 +379,7 @@ def _register_setup_routes(
         )
 
     @app.post("/api/setup")
+    # 初回セットアップの複数項目を一貫した状態で適用する。
     def complete_setup() -> Response:
         """初回設定を一括保存し、監視再開時のsnapshotを作成する。"""
         if context.settings.get_json("setup_completed", False):
