@@ -62,6 +62,7 @@
   "packaging/test_update_status.py",
   "packaging/test_write_diagnostics.cjs",
   "packaging/test_write_diagnostics.py",
+  "packaging/test_writer_health.py",
   "packaging/uninstall.sh",
   "packaging/update.sh",
   "pyproject.toml",

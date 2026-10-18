@@ -33,6 +33,7 @@ EXCLUDED_FILE_NAMES = frozenset(
         "check_release_notes.py",
         "test_write_diagnostics.py",
         "test_write_diagnostics.cjs",
+        "test_writer_health.py",
         "test_auth_sessions.py",
         "test_auth_sessions.cjs",
         "test_update_monitor.cjs",
