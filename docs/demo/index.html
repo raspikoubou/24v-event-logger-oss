@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f2f4f6">
+    <meta name="description" content="設備イベントロガーの仮想入力信号を操作感とともに確認できるブラウザデモです。">
+    <title>入力状態デモ | 24V Event Logger</title>
+    <link rel="stylesheet" href="./style.css">
+    <script defer src="./app.js"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-main">
+        <a class="product-name" href="../">設備イベントロガー</a>
+        <span class="demo-label">ブラウザデモ</span>
+        <div class="header-right">
+          <div class="live-badge" id="simulation-badge" role="status" aria-live="polite">
+            <span class="pulse-dot" aria-hidden="true"></span>
+            <span id="simulation-status">自動実行中</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <div class="banner" role="note">
+        <span class="banner-icon" aria-hidden="true">!</span>
+        <p><strong>デモモード：</strong>入力信号はシミュレーションです。<br>実際の設備には接続されていません。</p>
+      </div>
+
+      <div class="page-heading">
+        <div>
+          <p class="eyebrow">入力信号の表示体験</p>
+          <h1>リアルタイム状態</h1>
+          <p>IN1〜IN6がそれぞれ異なる周期で自動的にON/OFFします。</p>
+        </div>
+        <div class="controls" aria-label="シミュレーション操作">
+          <button class="secondary-button" id="pause-toggle" type="button" aria-pressed="false">一時停止</button>
+          <button class="secondary-button" id="reset-demo" type="button">回数・履歴をリセット</button>
+        </div>
+      </div>
+
+      <section class="dashboard-zone dashboard-zone--realtime" aria-labelledby="realtime-heading">
+        <div class="section-heading">
+          <div>
+            <h2 id="realtime-heading">リアルタイム</h2>
+            <p>状態、ONイベント回数、ON継続時間</p>
+          </div>
+          <span class="realtime-label" id="realtime-status">自動切替中</span>
+        </div>
+        <div class="channel-grid" id="channel-grid" role="list" aria-label="IN1からIN6の現在状態"></div>
+      </section>
+
+      <section class="dashboard-zone dashboard-zone--history" aria-labelledby="history-heading">
+        <div class="history-heading">
+          <div>
+            <h2 id="history-heading">イベント履歴</h2>
+            <p>新しいイベントを上に表示します。履歴は最大20件です。</p>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">時刻</th>
+                <th scope="col">チャンネル</th>
+                <th scope="col">状態</th>
+              </tr>
+            </thead>
+            <tbody id="event-history">
+              <tr class="empty-row"><td colspan="3">最初の信号変化を待機しています。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <p class="demo-note">このデモはブラウザ内で動作し、信号や履歴は保存されません。ページを開き直すと初期状態に戻ります。</p>
+
+      <footer class="site-footer" aria-label="関連リンク">
+        <a href="https://github.com/raspikoubou/24v-event-logger-oss" target="_blank" rel="noopener noreferrer">ソフトウェア（GitHub）</a>
+        <a href="https://raspikoubou.theshop.jp/items/92486466" target="_blank" rel="noopener noreferrer">対応HAT基板（BASE）</a>
+      </footer>
+    </main>
+  </body>
+</html>
