@@ -15,6 +15,7 @@
     running: true,
     elapsedBeforeResumeMs: 0,
     resumedAtMs: performance.now(),
+    resumedAtEpochMs: Date.now(),
     events: []
   };
   const channels = channelSettings.map((setting) => ({
@@ -167,11 +168,15 @@
     if (historyChanged) renderHistory();
   }
 
-  function recordChange(channel) {
+  function recordChange(change) {
+    // 各実行区間の壁時計基準と予定シミュレーション時刻から発生日時を復元する。
+    // 一時停止で空いた時間は、再開時に新しい基準を置くため信号の経過時間へ混ざらない。
     simulation.events.unshift({
-      at: new Date(),
-      channelId: channel.id,
-      state: channel.state
+      at: new Date(
+        simulation.resumedAtEpochMs + change.atMs - simulation.elapsedBeforeResumeMs
+      ),
+      channelId: change.channel.id,
+      state: change.state
     });
     if (simulation.events.length > historyLimit) {
       simulation.events.length = historyLimit;
@@ -189,12 +194,12 @@
         } else {
           channel.onSinceMs = null;
         }
-        changes.push({ channel, atMs: channel.nextChangeAtMs });
+        changes.push({ channel, state: channel.state, atMs: channel.nextChangeAtMs });
         channel.nextChangeAtMs += channel.changeEveryMs;
       }
     });
     changes.sort((left, right) => left.atMs - right.atMs);
-    changes.forEach(({ channel }) => recordChange(channel));
+    changes.forEach((change) => recordChange(change));
     return changes.length > 0;
   }
 
@@ -218,6 +223,7 @@
       return;
     }
     simulation.resumedAtMs = performance.now();
+    simulation.resumedAtEpochMs = Date.now();
     simulation.running = true;
     render();
   });
