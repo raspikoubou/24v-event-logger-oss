@@ -4,80 +4,225 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#f2f4f6">
-    <meta name="description" content="設備イベントロガーの仮想入力信号を操作感とともに確認できるブラウザデモです。">
-    <title>入力状態デモ | 24V Event Logger</title>
+    <meta name="description" content="24V Event Loggerの実物GUIを参考にしたブラウザデモです。">
+    <title>設備イベントロガー | デモ</title>
+    <link rel="stylesheet" href="./app.css">
     <link rel="stylesheet" href="./style.css">
     <script defer src="./app.js"></script>
   </head>
   <body>
     <header class="app-header">
       <div class="header-main">
-        <a class="product-name" href="../">設備イベントロガー</a>
-        <span class="demo-label">ブラウザデモ</span>
+        <div class="product-name">設備イベントロガー</div>
+        <div class="equipment-name"><span>設備名</span><strong>第2組立機</strong></div>
         <div class="header-right">
-          <div class="live-badge" id="simulation-badge" role="status" aria-live="polite">
+          <div class="live-badge" id="logging-badge" role="status" aria-live="polite">
             <span class="pulse-dot" aria-hidden="true"></span>
-            <span id="simulation-status">自動実行中</span>
+            <span id="logging-status">記録中</span>
           </div>
+          <time class="system-clock mono" id="system-clock">--:--:--</time>
+          <span class="demo-header-label">デモ</span>
         </div>
       </div>
+      <nav class="main-nav" aria-label="メインメニュー">
+        <button class="nav-item is-active" data-view="dashboard" type="button">ダッシュボード</button>
+        <button class="nav-item" data-view="logs" type="button">ログ</button>
+        <button class="nav-item" data-view="settings" type="button">設定</button>
+        <button class="nav-item" data-view="diagnostics" type="button">診断</button>
+      </nav>
     </header>
 
     <main class="main-content">
-      <div class="banner" role="note">
-        <span class="banner-icon" aria-hidden="true">!</span>
-        <p><strong>デモモード：</strong>入力信号はシミュレーションです。<br>実際の設備には接続されていません。</p>
+      <div class="demo-notice" role="note">
+        <span class="demo-mark" aria-hidden="true">DEMO</span>
+        <p>デモモード：入力信号はシミュレーションです。実際の設備には接続されていません。</p>
       </div>
 
-      <div class="page-heading">
-        <div>
-          <p class="eyebrow">入力信号の表示体験</p>
-          <h1>リアルタイム状態</h1>
-          <p>IN1〜IN6がそれぞれ異なる周期で自動的にON/OFFします。</p>
-        </div>
-        <div class="controls" aria-label="シミュレーション操作">
-          <button class="secondary-button" id="pause-toggle" type="button" aria-pressed="false">一時停止</button>
-          <button class="secondary-button" id="reset-demo" type="button">回数・履歴をリセット</button>
-        </div>
-      </div>
+      <section class="view is-active" id="view-dashboard" aria-labelledby="dashboard-heading">
+        <div class="page-heading"><div><h1 id="dashboard-heading">ダッシュボード</h1></div></div>
 
-      <section class="dashboard-zone dashboard-zone--realtime" aria-labelledby="realtime-heading">
-        <div class="section-heading">
-          <div>
-            <h2 id="realtime-heading">リアルタイム</h2>
-            <p>状態、ONイベント回数、ON継続時間</p>
+        <section class="dashboard-zone dashboard-zone--realtime current-state-area" aria-labelledby="current-state-heading">
+          <div class="section-heading">
+            <div><h2 id="current-state-heading">リアルタイム</h2><p>現在の入力状態とON継続時間</p></div>
+            <span class="realtime-label" id="realtime-status">自動切替中</span>
           </div>
-          <span class="realtime-label" id="realtime-status">自動切替中</span>
-        </div>
-        <div class="channel-grid" id="channel-grid" role="list" aria-label="IN1からIN6の現在状態"></div>
+          <div class="demo-controls" aria-label="デモ操作">
+            <span class="demo-control-note">入力は一定周期で切り替わります</span>
+            <button class="secondary-button small-button" id="simulation-toggle" type="button" aria-pressed="false">一時停止</button>
+            <button class="secondary-button small-button" id="reset-demo" type="button">回数・履歴をリセット</button>
+          </div>
+          <div class="dashboard-widget-grid" id="channel-grid" role="list" aria-label="IN1からIN6の現在状態"></div>
+        </section>
+
+        <section class="dashboard-zone dashboard-zone--history history-area" aria-labelledby="history-heading">
+          <div class="history-heading">
+            <div><h2 id="history-heading">集計・履歴</h2></div>
+            <div class="period-control" aria-label="表示期間"><span>期間</span><span>デモ開始後</span></div>
+          </div>
+          <div class="dashboard-widget-grid" id="dashboard-history-grid">
+            <article class="summary-card" data-size="small">
+              <div><span>ONイベント回数</span><small>全入力・リセット後</small></div>
+              <div class="summary-value"><strong id="event-count">0</strong><span>回</span></div>
+            </article>
+            <article class="summary-card" data-size="small">
+              <div><span>現在ONの入力</span><small>IN1〜IN6</small></div>
+              <div class="summary-value"><strong id="active-count">0</strong><span>点</span></div>
+            </article>
+            <article class="last-event-card" data-size="small">
+              <div><span>最終イベント</span><small id="last-event-channel">入力変化を待機しています</small></div>
+              <strong class="mono" id="last-event-at">--:--:--</strong>
+            </article>
+            <article class="panel timeline-panel" data-size="large">
+              <div class="panel-head">
+                <div><h2>タイムライン</h2><button class="link-button" data-view-link="logs" type="button">ログで詳しく見る</button></div>
+                <span class="updated-time">直近60秒</span>
+              </div>
+              <div class="timeline-scroll" tabindex="0" aria-label="IN1からIN6の直近60秒のタイムライン">
+                <div class="timeline" id="timeline"></div>
+              </div>
+            </article>
+            <article class="panel recent-panel" data-size="medium">
+              <div class="panel-head"><div><h2>イベント一覧</h2><button class="link-button" data-view-link="logs" type="button">ログで詳しく見る</button></div></div>
+              <div class="event-list" id="demo-event-list" aria-live="polite"></div>
+            </article>
+          </div>
+        </section>
       </section>
 
-      <section class="dashboard-zone dashboard-zone--history" aria-labelledby="history-heading">
-        <div class="history-heading">
-          <div>
-            <h2 id="history-heading">イベント履歴</h2>
-            <p>新しいイベントを上に表示します。履歴は最大20件です。</p>
+      <section class="view" id="view-logs" aria-labelledby="logs-heading">
+        <div class="page-heading">
+          <div><h1 id="logs-heading">記録履歴</h1><p>デモ中に発生した入力の変化を表示します。</p></div>
+          <button class="primary-button" type="button" disabled title="デモでは利用できません">CSVに保存</button>
+        </div>
+        <div class="filter-panel" aria-label="ログの絞り込み（表示のみ）">
+          <label>期間<select disabled><option>デモ開始後</option></select></label>
+          <label>信号<select disabled><option>すべて</option></select></label>
+          <label>変化<select disabled><option>ONとOFF</option></select></label>
+          <label>記録の種類<select disabled><option>入力の変化</option></select></label>
+          <label>OUT発生源<select disabled><option>該当なし</option></select></label>
+        </div>
+        <div class="table-card">
+          <div class="table-summary"><strong id="log-total">0件</strong><span class="page-size-label">新しい順・最大20件</span></div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>日時</th><th>信号</th><th>変化</th><th>記録の種類</th><th>時刻</th></tr></thead>
+              <tbody id="log-table-body"><tr><td colspan="5">最初の信号変化を待機しています。</td></tr></tbody>
+            </table>
           </div>
+          <div class="pagination"><button type="button" disabled>前へ</button><span>1 / 1ページ</span><button type="button" disabled>次へ</button></div>
         </div>
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">時刻</th>
-                <th scope="col">チャンネル</th>
-                <th scope="col">状態</th>
-              </tr>
-            </thead>
-            <tbody id="event-history">
-              <tr class="empty-row"><td colspan="3">最初の信号変化を待機しています。</td></tr>
-            </tbody>
-          </table>
-        </div>
+        <p class="demo-static-note">絞り込み、ページ移動、CSV保存はデモでは利用できません。</p>
       </section>
 
-      <p class="demo-note">このデモはブラウザ内で動作し、信号や履歴は保存されません。ページを開き直すと初期状態に戻ります。</p>
+      <section class="view" id="view-settings" aria-labelledby="settings-heading">
+        <div class="page-heading"><div><h1 id="settings-heading">設定</h1><p>画面構成は製品GUIに準拠しています。設定の保存はできません。</p></div></div>
+        <nav class="settings-nav" aria-label="設定項目">
+          <button class="is-active" type="button" data-settings-target="dashboard-settings">ダッシュボード</button>
+          <button type="button" data-settings-target="input-settings">入力信号</button>
+          <button type="button" data-settings-target="output-settings">出力動作</button>
+          <button type="button" data-settings-target="system-settings">本体・データ</button>
+        </nav>
 
-      <footer class="site-footer" aria-label="関連リンク">
+        <section class="panel settings-section is-active-settings" id="dashboard-settings">
+          <div class="panel-head"><div><h2>ダッシュボード表示・配置</h2><p>表示する信号や集計方法、並び順を設定します。</p></div></div>
+          <div class="widget-settings-list">
+            <section class="widget-group">
+              <div class="widget-group-heading"><strong>リアルタイム</strong><button class="primary-button small-button" type="button" disabled>表示項目を追加</button></div>
+              <div class="widget-group-list">
+                <div class="widget-setting-row"><span class="drag-handle" aria-hidden="true">⋮⋮</span><div><strong>現在状態</strong><small>IN1〜IN6・ON継続時間を表示</small></div><span class="widget-size">表示幅　小</span><span>デモ表示</span></div>
+              </div>
+            </section>
+            <section class="widget-group">
+              <div class="widget-group-heading"><strong>集計・履歴</strong><button class="primary-button small-button" type="button" disabled>表示項目を追加</button></div>
+              <div class="widget-group-list">
+                <div class="widget-setting-row"><span class="drag-handle" aria-hidden="true">⋮⋮</span><div><strong>ONイベント回数・現在ON数</strong><small>入力信号の変化を集計</small></div><span class="widget-size">表示幅　小</span><span>デモ表示</span></div>
+                <div class="widget-setting-row"><span class="drag-handle" aria-hidden="true">⋮⋮</span><div><strong>タイムライン・イベント一覧</strong><small>IN1〜IN6の変化を表示</small></div><span class="widget-size">表示幅　大</span><span>デモ表示</span></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel settings-section" id="input-settings">
+          <div class="panel-head"><div><h2>入力信号</h2><p>記録するIN信号、名称、信号確定待ち時間を設定します。</p></div></div>
+          <div class="channel-settings">
+            <div class="channel-row"><div class="channel-identity"><strong>IN1</strong><small>入力信号</small></div><label>名称<input value="IN1" disabled></label><label>信号確定待ち時間<input value="50 ms" disabled></label><div class="channel-use"><span class="field-label">使用</span><button class="switch is-on" type="button" disabled aria-label="IN1を使用"><span></span></button></div></div>
+            <div class="channel-row"><div class="channel-identity"><strong>IN2</strong><small>入力信号</small></div><label>名称<input value="IN2" disabled></label><label>信号確定待ち時間<input value="50 ms" disabled></label><div class="channel-use"><span class="field-label">使用</span><button class="switch is-on" type="button" disabled aria-label="IN2を使用"><span></span></button></div></div>
+            <div class="channel-row"><div class="channel-identity"><strong>IN3</strong><small>入力信号</small></div><label>名称<input value="IN3" disabled></label><label>信号確定待ち時間<input value="50 ms" disabled></label><div class="channel-use"><span class="field-label">使用</span><button class="switch is-on" type="button" disabled aria-label="IN3を使用"><span></span></button></div></div>
+            <div class="channel-row"><div class="channel-identity"><strong>IN4</strong><small>入力信号</small></div><label>名称<input value="IN4" disabled></label><label>信号確定待ち時間<input value="50 ms" disabled></label><div class="channel-use"><span class="field-label">使用</span><button class="switch is-on" type="button" disabled aria-label="IN4を使用"><span></span></button></div></div>
+            <div class="channel-row"><div class="channel-identity"><strong>IN5</strong><small>入力信号</small></div><label>名称<input value="IN5" disabled></label><label>信号確定待ち時間<input value="50 ms" disabled></label><div class="channel-use"><span class="field-label">使用</span><button class="switch is-on" type="button" disabled aria-label="IN5を使用"><span></span></button></div></div>
+            <div class="channel-row"><div class="channel-identity"><strong>IN6</strong><small>入力信号</small></div><label>名称<input value="IN6" disabled></label><label>信号確定待ち時間<input value="50 ms" disabled></label><div class="channel-use"><span class="field-label">使用</span><button class="switch is-on" type="button" disabled aria-label="IN6を使用"><span></span></button></div></div>
+          </div>
+        </section>
+
+        <section class="panel settings-section" id="output-settings">
+          <div class="panel-head"><div><h2>出力動作</h2><p>OUT信号をどの条件で動かすかを設定します。</p></div></div>
+          <section class="output-function">
+            <div class="output-function-head"><h3>動作確認信号（Heartbeat）</h3></div>
+            <div class="heartbeat-settings">
+              <div class="heartbeat-copy"><small>正常に記録できていることを、外部機器へ周期信号で知らせます。</small></div>
+              <div class="settings-field"><span class="field-label">使用</span><button class="switch" type="button" disabled aria-label="Heartbeat（デモ表示のみ）"><span></span></button></div>
+              <label>出力先<select disabled><option>OUT1</option></select></label>
+              <label>切替間隔<input value="5秒" disabled></label>
+            </div>
+          </section>
+          <section class="output-function">
+            <div class="output-function-head"><h3>条件ルール</h3><button class="secondary-button" type="button" disabled>条件ルールを追加</button></div>
+            <p class="demo-static-note">この画面では出力や条件ルールは動作しません。</p>
+          </section>
+        </section>
+
+        <section class="panel compact-panel settings-section" id="system-settings">
+          <div class="panel-head"><div><h2>本体・データ</h2><p>本体情報、時刻、アクセス保護、記録の保存期間を設定します。</p></div></div>
+          <div class="system-settings-grid">
+            <label>設備名<input value="第2組立機" disabled></label>
+            <label>ホスト名<input value="event-logger" disabled><small>変更は再起動後に反映されます。</small></label>
+            <label>タイムゾーン<select disabled><option>Asia/Tokyo</option></select></label>
+            <div class="settings-field"><span class="field-label">パスワード保護</span><button class="switch" type="button" disabled><span></span></button></div>
+            <label>記録を残す期間<select disabled><option>365日</option></select></label>
+          </div>
+          <p class="help-text">設定変更と保存はデモでは利用できません。</p>
+        </section>
+        <div class="settings-save-bar"><span>設定の保存はできません。</span><button class="primary-button" type="button" disabled>変更を保存</button></div>
+      </section>
+
+      <section class="view" id="view-diagnostics" aria-labelledby="diagnostics-heading">
+        <div class="page-heading"><div><h1 id="diagnostics-heading">点検・診断</h1><p>状態値はデモ用の固定表示です。</p></div></div>
+        <div class="diagnostic-grid">
+          <section class="panel health-overview">
+            <div class="panel-head"><div><h2>システム状態</h2></div></div>
+            <div class="health-items">
+              <div class="health-item"><span>ロガー</span><strong class="health-value">動作中（デモ）</strong></div>
+              <div class="health-item"><span>入力記録</span><strong class="health-value">シミュレーション</strong></div>
+              <div class="health-item"><span>データベース</span><strong class="health-value attention">未接続</strong></div>
+              <div class="health-item"><span>ソフトウェア更新</span><strong class="health-value attention">未確認</strong></div>
+            </div>
+          </section>
+          <section class="panel io-panel">
+            <div class="panel-head"><div><h2>現在の入出力</h2></div><span class="updated-time">1秒ごとに更新</span></div>
+            <div class="io-grid" id="diagnostic-io-grid"></div>
+          </section>
+          <section class="panel maintenance-panel">
+            <div class="panel-head"><div><h2>記録停止・出力テスト</h2></div></div>
+            <div class="maintenance-state"><span class="status-dot status-dot--ok"></span><div><strong>デモモード</strong><small>実際の記録停止や出力テストは行いません。</small></div></div>
+            <p class="safety-note">実機操作はデモから実行できません。</p>
+            <button class="danger-button" type="button" disabled>記録を停止して出力テストへ</button>
+            <div class="output-tests" aria-label="出力テスト">
+              <button class="test-button" type="button" disabled>OUT1 テスト</button><button class="test-button" type="button" disabled>OUT2 テスト</button><button class="test-button" type="button" disabled>OUT3 テスト</button>
+            </div>
+          </section>
+        </div>
+        <section class="panel update-panel">
+          <div class="panel-head"><div><h2>ソフトウェア更新</h2><p>更新確認と適用はデモでは利用できません。</p></div><div class="update-actions"><button class="secondary-button" type="button" disabled>更新を確認</button><button class="primary-button" type="button" disabled>更新を適用</button></div></div>
+          <dl class="update-versions"><div><dt>現在のVersion</dt><dd>デモ表示</dd></div><div><dt>最新の安定版</dt><dd>未確認</dd></div></dl>
+          <p class="update-status">更新状態は確認していません。</p>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div><h2>本体の再起動</h2><p>デモから本体の再起動は行えません。</p></div><button class="danger-button" type="button" disabled>本体を再起動</button></div>
+        </section>
+      </section>
+
+      <footer class="demo-footer" aria-label="関連リンク">
+        <span>24V Event Logger</span>
         <a href="https://github.com/raspikoubou/24v-event-logger-oss" target="_blank" rel="noopener noreferrer">ソフトウェア（GitHub）</a>
         <a href="https://raspikoubou.theshop.jp/items/92486466" target="_blank" rel="noopener noreferrer">対応HAT基板（BASE）</a>
       </footer>

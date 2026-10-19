@@ -4,6 +4,7 @@
   ".gitignore",
   "LICENSE",
   "README.md",
+  "docs/demo/app.css",
   "docs/demo/app.js",
   "docs/demo/index.html",
   "docs/demo/style.css",
