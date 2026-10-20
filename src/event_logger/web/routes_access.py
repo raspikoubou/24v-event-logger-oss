@@ -5,16 +5,49 @@
 
 from __future__ import annotations
 
+import secrets
 from typing import TYPE_CHECKING
 
-from flask import Flask, redirect, render_template
+from flask import Flask, Response, redirect, render_template, request, session
 from flask.typing import ResponseReturnValue
 
+from event_logger.loggerd.ipc import (
+    ControlCommand,
+    ControlRequest,
+    IpcProtocolError,
+    IpcRemoteError,
+    UnixControlClient,
+)
 from event_logger.web.auth import SharedPasswordAuth
+from event_logger.web.config_payloads import _json_int
+from event_logger.web.control_service import (
+    _clear_configuration_out_of_sync,
+    _configuration_fingerprint,
+    _mark_configuration_out_of_sync,
+    _stop_for_configuration_recovery,
+)
+from event_logger.web.http_responses import _error, _ok
 
 if TYPE_CHECKING:
-    from event_logger.web.app import WebContext
+    from event_logger.web.request_context import WebContext
 
+
+
+def _ensure_csrf_token() -> str:
+    """sessionにCSRF tokenを一度だけ発行する。
+
+        Args:
+            なし。
+
+        Returns:
+            sessionに保存済み、または新規生成したURL-safe CSRF token。
+                session lifetime中は同じ値を返す。
+    """
+    token = session.get("csrf_token")
+    if not isinstance(token, str) or not token:
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+    return token
 
 def _register_page_routes(app: Flask, context: WebContext) -> None:
     """製品画面とCSRF tokenのrouteを登録する。
@@ -26,13 +59,6 @@ def _register_page_routes(app: Flask, context: WebContext) -> None:
         Returns:
             None。関数の概要に記したroute登録・状態更新を行う。
     """
-
-    from event_logger.web.app import (
-        Response,
-        _ensure_csrf_token,
-        _ok,
-    )
-
 
     @app.get("/")
     def index() -> str:
@@ -73,16 +99,6 @@ def _register_auth_routes(app: Flask, auth: SharedPasswordAuth) -> None:
         Returns:
             None。関数の概要に記したroute登録・状態更新を行う。
     """
-
-    from event_logger.web.app import (
-        _ensure_csrf_token,
-        _error,
-        render_template,
-        request,
-        secrets,
-        session,
-    )
-
 
     @app.before_request
     def protect_request() -> ResponseReturnValue | None:
@@ -185,6 +201,139 @@ def _register_auth_routes(app: Flask, auth: SharedPasswordAuth) -> None:
         return redirect("/login" if auth.enabled else "/")
 
 
+
+def _control_endpoint(
+    context: WebContext,
+    control_request: ControlRequest,
+) -> Response:
+    """制御要求をIPCへ渡し、UI向けの安全なHTTP envelopeへ変換する。
+
+        Args:
+            context: 現在のWebContext。関数が使うRepository、Clock、
+                設定値や制御clientを所有する。
+            control_request: loggerdへ送る固定スキーマの制御要求。
+
+        Returns:
+            成功時はcontrol response dataを含む200 envelope。
+                loggerd拒否はcommand error/409、
+                接続・protocol障害はLOGGERD_UNAVAILABLE/503。
+    """
+    if context.control_client is None:
+        return _error(
+            "LOGGERD_UNAVAILABLE",
+            "loggerd control socket is not configured",
+            503,
+        )
+    sync_state = context.settings.get_json("daemon_config_sync", {})
+    if (
+        control_request.command
+        in {
+            ControlCommand.START_LOGGING,
+            ControlCommand.TEST_OUTPUT,
+        }
+        and isinstance(sync_state, dict)
+        and sync_state.get("out_of_sync") is True
+    ):
+        return _error(
+            "CONFIG_OUT_OF_SYNC",
+            "現在の設定がloggerdへ反映済みと確認できるまで再開・出力テストできません",
+            409,
+        )
+    if (
+        control_request.command is ControlCommand.RELOAD_CONFIG
+        and isinstance(sync_state, dict)
+        and sync_state.get("out_of_sync") is True
+    ):
+        stopped = _stop_for_configuration_recovery(context)
+        if not stopped:
+            return _error(
+                "LOGGERD_UNAVAILABLE",
+                "loggerdの停止と出力OFFを確認できません。実機のOUT状態を確認してください",
+                503,
+            )
+        _mark_configuration_out_of_sync(context, stopped=True)
+    # reload前に期待fingerprintを作り、ACK後のdigestと照合する。IPC成功だけでは
+    # 設定適用を証明しないため、違えばstart/testを許可できる同期状態へ戻さない。
+    expected_digest = (
+        _configuration_fingerprint(context)
+        if control_request.command is ControlCommand.RELOAD_CONFIG
+        else None
+    )
+    try:
+        data = context.control_client.request(control_request)
+    except IpcRemoteError as error:
+        if control_request.command is ControlCommand.RELOAD_CONFIG:
+            stopped = _stop_for_configuration_recovery(context)
+            _mark_configuration_out_of_sync(context, stopped=stopped)
+        return _error(error.code, error.message, 409)
+    except TimeoutError as error:
+        # timeout後もloggerdが要求を実行済みの場合がある。状態を再照会し、
+        # 確認できた操作だけ成功として返す。再送するとsessionやOUTを重複操作する。
+        # 再送ではなくSTATUSを照会して副作用の実施有無を確かめる。
+        # 不明な結果は成功扱いにせず、危険な二重操作を避けるため503へ返す。
+        try:
+            status_request = ControlRequest(ControlCommand.STATUS)
+            if isinstance(context.control_client, UnixControlClient):
+                # 元の要求を処理中のdaemonでも、処理完了後のSTATUSを待てる。
+                state = context.control_client.request(status_request, timeout=6.0)
+            else:
+                state = context.control_client.request(status_request)
+        except (OSError, IpcProtocolError, IpcRemoteError):
+            if control_request.command is ControlCommand.RELOAD_CONFIG:
+                stopped = _stop_for_configuration_recovery(context)
+                _mark_configuration_out_of_sync(context, stopped=stopped)
+            return _error("LOGGERD_UNAVAILABLE", str(error), 503)
+        command = control_request.command
+        confirmed = (
+            (
+                command is ControlCommand.STOP_LOGGING
+                and state.get("logger_status") == "maintenance"
+            )
+            or (
+                command is ControlCommand.START_LOGGING
+                and state.get("logger_status") == "logging"
+            )
+            or (
+                command is ControlCommand.TEST_OUTPUT
+                and state.get("output_test_channel") == control_request.channel
+            )
+            or (
+                command is ControlCommand.END_OUTPUT_TEST
+                and state.get("output_test_channel") is None
+            )
+            or (
+                command is ControlCommand.RELOAD_CONFIG
+                and state.get("configuration_digest") == expected_digest
+            )
+        )
+        if confirmed:
+            if command is ControlCommand.RELOAD_CONFIG:
+                _clear_configuration_out_of_sync(context)
+            return _ok(state)
+        if command is ControlCommand.RELOAD_CONFIG:
+            stopped = _stop_for_configuration_recovery(context)
+            _mark_configuration_out_of_sync(context, stopped=stopped)
+        return _error("LOGGERD_UNAVAILABLE", str(error), 503)
+    except (OSError, IpcProtocolError) as error:
+        if control_request.command is ControlCommand.RELOAD_CONFIG:
+            stopped = _stop_for_configuration_recovery(context)
+            _mark_configuration_out_of_sync(context, stopped=stopped)
+        return _error("LOGGERD_UNAVAILABLE", str(error), 503)
+    if (
+        control_request.command is ControlCommand.RELOAD_CONFIG
+        and data.get("configuration_digest") != expected_digest
+    ):
+        stopped = _stop_for_configuration_recovery(context)
+        _mark_configuration_out_of_sync(context, stopped=stopped)
+        return _error(
+            "CONFIG_NOT_APPLIED",
+            "loggerdが現在の設定を適用したことを確認できません",
+            503,
+        )
+    if control_request.command is ControlCommand.RELOAD_CONFIG:
+        _clear_configuration_out_of_sync(context)
+    return _ok(data)
+
 def _register_control_routes(app: Flask, context: WebContext) -> None:
     """loggerd制御系のHTTP routeをappへ登録する。
 
@@ -196,18 +345,6 @@ def _register_control_routes(app: Flask, context: WebContext) -> None:
         Returns:
             None。関数の概要に記したroute登録・状態更新を行う。
     """
-
-    from event_logger.web.app import (
-        ControlCommand,
-        ControlRequest,
-        IpcProtocolError,
-        Response,
-        _control_endpoint,
-        _error,
-        _json_int,
-        request,
-    )
-
 
     @app.post("/api/logging/stop")
     def stop_logging() -> Response:

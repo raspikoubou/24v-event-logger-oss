@@ -5,7 +5,6 @@
   const liveMode = Boolean(window.EVENT_LOGGER_LIVE);
 
   const {
-    createRefreshCoordinator,
     shouldRefreshDashboard,
     shouldDeferTimelineRender,
     shouldDeferTimelineWidgetRender,
@@ -288,9 +287,7 @@
   let dashboardCustomRangeDraft = null;
   let logging = fixtures.loggerStatus === "logging";
   let pendingAction = null;
-  let editingWidgetRow = null;
   let addingWidgetGroup = "realtime";
-  let widgetSettingsDirty = false;
   let nextDashboardRefreshAtMs = 0;
   let currentWidgetStep = 1;
   let timelineZoomIndex = 0;
@@ -302,15 +299,8 @@
   let dragWasDropped = false;
   let toastTimer = null;
   let activeView = "dashboard";
-  let logPage = 1;
-  let logPageEvents = [];
-  let logTotalCount = 0;
-  let logHasNext = false;
-  let logPageLoaded = false;
-  let logPageLoading = false;
-  let logRequestId = 0;
-  let logSearchRange = null;
-  let nextLogRefreshAtMs = 0;
+  const logState = window.EventLoggerUiState.createLogController();
+  const widgetEditor = window.EventLoggerUiState.createWidgetEditorState();
   let activeOutputTest = liveMode && fixtures.outputTestChannel
     ? { outputId: fixtures.outputTestChannel, timerId: null }
     : null;
@@ -340,7 +330,8 @@
     return demoClockBaseMs + performance.now() - demoClockStartedAtMs;
   }
 
-  const refreshLiveState = createRefreshCoordinator(refreshLiveStateOnce);
+  const liveState = window.EventLoggerUiState.createLiveStateController(refreshLiveStateOnce);
+  const refreshLiveState = liveState.refresh;
 
   /**
    * 一回分のlive状態を取得し、表示と次回更新時刻を更新する。
@@ -371,6 +362,8 @@
       customRangeForRefresh,
       activeView !== "logs"
     );
+    // UI描画中にログ取得が失敗しても、取得済みserver snapshotを失わない。
+    liveState.acceptSnapshot(next);
     // 取得したsnapshotをまとめて置き換えてから描画する。custom範囲draftだけは
     // statusの保存値に上書きさせず、「適用」前の画面入力を保持する。
     fixtures.nowMs = next.nowMs;
@@ -420,8 +413,7 @@
     const nextWidgets = next.widgets || [];
     if (
       liveMode
-      && !widgetSettingsDirty
-      && !widgetDialogOpen
+      && widgetEditor.shouldApplyServerWidgets(widgetDialogOpen)
       && JSON.stringify(fixtures.widgets || []) !== JSON.stringify(nextWidgets)
     ) {
       fixtures.widgets = nextWidgets;
@@ -434,15 +426,15 @@
       shouldRefreshLogPage({
         activeView,
         liveMode,
-        logPageLoading,
+        logPageLoading: logState.loading,
         periodKey: document.querySelector("#log-period").value,
         rangeEndMs: periodBounds(document.querySelector("#log-period").value).endMs,
-        nextRefreshAtMs: nextLogRefreshAtMs,
+        nextRefreshAtMs: logState.nextRefreshAtMs,
         nowMs: Date.now()
       })
     ) {
-      if (logPage === 1 && document.querySelector("#log-period").value !== "custom") {
-        logSearchRange = null;
+      if (logState.page === 1 && document.querySelector("#log-period").value !== "custom") {
+        logState.setSearchRange(null);
       }
       await loadLiveLogPage();
     }
@@ -453,6 +445,7 @@
     renderHealth();
     renderOutputTests();
     refreshCurrentStateCards();
+    return next;
   }
 
   /**
@@ -1400,7 +1393,7 @@
    * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
    */
   function markWidgetSettingsDirty() {
-    if (liveMode) widgetSettingsDirty = true;
+    if (liveMode) widgetEditor.dirty = true;
   }
 
   /**
@@ -1408,7 +1401,7 @@
    * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
    */
   async function saveWidgetSettings() {
-    if (!liveMode || !widgetSettingsDirty) return;
+    if (!liveMode || !widgetEditor.dirty) return;
     // 途中の通信失敗で一部だけ保存された場合も、再試行時はDBの最新状態を
     // 基準に差分を作る。古い一覧のままPOSTすると重複IDで復旧できなくなる。
     const current = await liveJson("/api/widgets");
@@ -1439,7 +1432,7 @@
     // dirty flagを落とす。途中throwならdirtyを保持し、次回は再び最新値から始める。
     const response = await liveJson("/api/widgets");
     fixtures.widgets = response.items || [];
-    widgetSettingsDirty = false;
+    widgetEditor.dirty = false;
     renderPersistedWidgets(fixtures.widgets);
   }
 
@@ -1813,23 +1806,23 @@
    */
   function renderLogs() {
     const pageSize = Number(document.querySelector("#log-page-size").value);
-    const events = liveMode ? logPageEvents : filteredEvents();
-    const totalCount = liveMode ? logTotalCount : events.length;
+    const events = liveMode ? logState.events : filteredEvents();
+    const totalCount = liveMode ? logState.totalCount : events.length;
     const pageCount = Math.max(1, Math.ceil(totalCount / pageSize));
-    logPage = Math.min(logPage, pageCount);
+    logState.setPage(Math.min(logState.page, pageCount));
     const pageEvents = liveMode
       ? events
-      : events.slice((logPage - 1) * pageSize, logPage * pageSize);
+      : events.slice((logState.page - 1) * pageSize, logState.page * pageSize);
     const tbody = document.querySelector("#log-table-body");
-    document.querySelector("#log-count").textContent = liveMode && !logPageLoaded
+    document.querySelector("#log-count").textContent = liveMode && !logState.loaded
       ? "--件"
       : `${totalCount}件`;
-    document.querySelector("#log-page-label").textContent = `${logPage} / ${pageCount}ページ`;
-    document.querySelector("#log-prev").disabled = logPageLoading || logPage === 1;
-    document.querySelector("#log-next").disabled = logPageLoading || (
-      liveMode ? !logHasNext : logPage === pageCount
+    document.querySelector("#log-page-label").textContent = `${logState.page} / ${pageCount}ページ`;
+    document.querySelector("#log-prev").disabled = logState.loading || logState.page === 1;
+    document.querySelector("#log-next").disabled = logState.loading || (
+      liveMode ? !logState.hasNext : logState.page === pageCount
     );
-    if (liveMode && !logPageLoaded) {
+    if (liveMode && !logState.loaded) {
       tbody.innerHTML = `<tr><td colspan="5">記録を読み込んでいます。</td></tr>`;
       return;
     }
@@ -1862,7 +1855,7 @@
     return buildLogApiQuery({
       periodKey,
       customBounds: periodKey === "custom" ? periodBounds(periodKey) : null,
-      logSearchRange,
+      logSearchRange: logState.searchRange,
       selectedSignal: document.querySelector("#log-signal").value,
       widgetLogSignals,
       selectedValue: document.querySelector("#log-value").value,
@@ -1870,7 +1863,7 @@
       selectedSource: document.querySelector("#log-source").value,
       includePaging,
       pageSize: includePaging ? Number(document.querySelector("#log-page-size").value) : null,
-      logPage
+      logPage: logState.page
     });
   }
 
@@ -1879,42 +1872,12 @@
    * @returns {Promise<void>} APIからpageを取得してlogs viewを更新後resolveする。transport/API失敗はrejectする。
    */
   async function loadLiveLogPage() {
-    const requestId = ++logRequestId;
-    logPageLoading = true;
-    renderLogs();
-    try {
-      const result = await liveJson(`/api/logs?${logApiQuery(true)}`);
-      if (requestId !== logRequestId) return;
-      logSearchRange = {
-        fromMs: Number(result.from_ms),
-        toMs: Number(result.to_ms)
-      };
-      logTotalCount = Number(result.total_count || 0);
-      const pageSize = Number(document.querySelector("#log-page-size").value);
-      const pageCount = Math.max(1, Math.ceil(logTotalCount / pageSize));
-      if (logPage > pageCount) {
-        logPage = pageCount;
-        await loadLiveLogPage();
-        return;
-      }
-      logPageEvents = (result.items || []).map((event, index) => ({
-        id: Number(event.id?.split(":").pop()) || index + 1,
-        timestamp: event.timestamp,
-        signal: event.signal,
-        value: event.value,
-        kind: event.kind,
-        source: event.source || "",
-        synced: Boolean(event.clock_synced)
-      }));
-      logHasNext = Boolean(result.has_next);
-      logPageLoaded = true;
-    } finally {
-      if (requestId === logRequestId) {
-        logPageLoading = false;
-        nextLogRefreshAtMs = Date.now() + 5_000;
-      }
-      renderLogs();
-    }
+    await logState.loadPage({
+      fetchPage: () => liveJson(`/api/logs?${logApiQuery(true)}`),
+      pageSize: () => Number(document.querySelector("#log-page-size").value),
+      now: () => Date.now(),
+      onChange: renderLogs
+    });
   }
 
   /**
@@ -1922,14 +1885,9 @@
    * @returns {Promise<void>} page 1の検索を再実行し、結果をDOMへ描画後resolveする。
    */
   function reloadLogQuery() {
-    logPage = 1;
     // フィルター変更後は新たな時間範囲を検索する。ページ送りの間だけ範囲を固定する。
-    logSearchRange = null;
+    logState.resetQuery();
     if (liveMode) {
-      logPageLoaded = false;
-      logPageEvents = [];
-      logTotalCount = 0;
-      logHasNext = false;
       loadLiveLogPage().catch((error) => showToast(error.message));
     } else {
       renderLogs();
@@ -2706,24 +2664,24 @@
     const typeSelect = document.querySelector("#new-widget-type");
     typeSelect.disabled = isEditing;
     renderWidgetChannelOptions();
-    if (isEditing && editingWidgetRow) {
-      addingWidgetGroup = editingWidgetRow.closest(".widget-group-list").dataset.widgetGroup;
-      setWidgetTypeOptions(addingWidgetGroup, widgetTypeForRow(editingWidgetRow));
-      setWidgetChannels(widgetChannelForRow(editingWidgetRow));
-      document.querySelector("#new-widget-on-label").value = editingWidgetRow.dataset.onLabel || "ON";
-      document.querySelector("#new-widget-off-label").value = editingWidgetRow.dataset.offLabel || "OFF";
-      setSwitchState(document.querySelector("#new-widget-show-elapsed"), editingWidgetRow.dataset.showElapsed !== "false");
-      document.querySelector("#new-widget-period").value = editingWidgetRow.dataset.widgetPeriod || "follow";
-      document.querySelector("#new-widget-edge").value = editingWidgetRow.dataset.widgetEdge || "ON";
-      document.querySelector("#new-widget-state").value = editingWidgetRow.dataset.widgetState || "ON";
-      document.querySelector("#new-widget-source").value = editingWidgetRow.dataset.widgetSource || "state";
-      document.querySelector("#new-widget-count").value = editingWidgetRow.dataset.widgetCount || "10";
-      document.querySelector("#new-widget-value").value = editingWidgetRow.dataset.widgetValue || "all";
-      document.querySelector("#new-widget-count-mode").value = editingWidgetRow.dataset.widgetCountMode || "period";
-      document.querySelector("#new-widget-unit").value = editingWidgetRow.dataset.widgetUnit || "回";
-      document.querySelector("#new-widget-time-unit").value = editingWidgetRow.dataset.widgetTimeUnit || "human";
-      setSwitchState(document.querySelector("#new-widget-show-absolute"), editingWidgetRow.dataset.showAbsolute !== "false");
-      setSwitchState(document.querySelector("#new-widget-show-event-elapsed"), editingWidgetRow.dataset.showEventElapsed === "true");
+    if (isEditing && widgetEditor.editingRow) {
+      addingWidgetGroup = widgetEditor.editingRow.closest(".widget-group-list").dataset.widgetGroup;
+      setWidgetTypeOptions(addingWidgetGroup, widgetTypeForRow(widgetEditor.editingRow));
+      setWidgetChannels(widgetChannelForRow(widgetEditor.editingRow));
+      document.querySelector("#new-widget-on-label").value = widgetEditor.editingRow.dataset.onLabel || "ON";
+      document.querySelector("#new-widget-off-label").value = widgetEditor.editingRow.dataset.offLabel || "OFF";
+      setSwitchState(document.querySelector("#new-widget-show-elapsed"), widgetEditor.editingRow.dataset.showElapsed !== "false");
+      document.querySelector("#new-widget-period").value = widgetEditor.editingRow.dataset.widgetPeriod || "follow";
+      document.querySelector("#new-widget-edge").value = widgetEditor.editingRow.dataset.widgetEdge || "ON";
+      document.querySelector("#new-widget-state").value = widgetEditor.editingRow.dataset.widgetState || "ON";
+      document.querySelector("#new-widget-source").value = widgetEditor.editingRow.dataset.widgetSource || "state";
+      document.querySelector("#new-widget-count").value = widgetEditor.editingRow.dataset.widgetCount || "10";
+      document.querySelector("#new-widget-value").value = widgetEditor.editingRow.dataset.widgetValue || "all";
+      document.querySelector("#new-widget-count-mode").value = widgetEditor.editingRow.dataset.widgetCountMode || "period";
+      document.querySelector("#new-widget-unit").value = widgetEditor.editingRow.dataset.widgetUnit || "回";
+      document.querySelector("#new-widget-time-unit").value = widgetEditor.editingRow.dataset.widgetTimeUnit || "human";
+      setSwitchState(document.querySelector("#new-widget-show-absolute"), widgetEditor.editingRow.dataset.showAbsolute !== "false");
+      setSwitchState(document.querySelector("#new-widget-show-event-elapsed"), widgetEditor.editingRow.dataset.showEventElapsed === "true");
     } else {
       addingWidgetGroup = widgetGroup;
       setWidgetTypeOptions(addingWidgetGroup, addingWidgetGroup === "realtime" ? "現在状態" : "イベント回数");
@@ -3036,8 +2994,7 @@
     );
     document.querySelector("#log-kind").value = "all";
     document.querySelector("#log-source").value = "all";
-    logSearchRange = null;
-    logPage = 1;
+    logState.resetQuery();
     renderLogs();
     switchView("logs");
   }
@@ -3213,7 +3170,6 @@
       select.addEventListener("change", () => {
       if (select.id === "log-period") {
         document.querySelector("#log-custom-period").hidden = select.value !== "custom";
-        logSearchRange = null;
       }
       if (select.id === "log-source" && select.value !== "all") {
         document.querySelector("#log-kind").value = "output";
@@ -3223,7 +3179,6 @@
   });
   document.querySelector("#apply-log-custom-period").addEventListener("click", () => {
     if (!applyCustomPeriod(document.querySelector("#log-custom-from"), document.querySelector("#log-custom-to"))) return;
-    logSearchRange = null;
     reloadLogQuery();
     showToast("任意期間を適用しました");
   });
@@ -3231,12 +3186,12 @@
     reloadLogQuery();
   });
   document.querySelector("#log-prev").addEventListener("click", () => {
-    logPage = Math.max(1, logPage - 1);
+    logState.setPage(logState.page - 1);
     if (liveMode) loadLiveLogPage().catch((error) => showToast(error.message));
     else renderLogs();
   });
   document.querySelector("#log-next").addEventListener("click", () => {
-    logPage += 1;
+    logState.setPage(logState.page + 1);
     if (liveMode) loadLiveLogPage().catch((error) => showToast(error.message));
     else renderLogs();
   });
@@ -3429,7 +3384,7 @@
   document.querySelector("#widget-settings-list").addEventListener("click", (event) => {
     const addButton = event.target.closest("[data-add-widget-group]");
     if (addButton) {
-      editingWidgetRow = null;
+      widgetEditor.editingRow = null;
       document.querySelector("#new-widget-title").value = "";
       openWidgetDialog(false, addButton.dataset.addWidgetGroup);
       return;
@@ -3459,7 +3414,7 @@
       return;
     }
     if (event.target.closest(".edit-widget") && row) {
-      editingWidgetRow = row;
+      widgetEditor.editingRow = row;
       document.querySelector("#new-widget-title").value = row.querySelector("strong").textContent;
       openWidgetDialog(true);
     }
@@ -3564,29 +3519,29 @@
     const showAbsolute = boolControlValue(document.querySelector("#new-widget-show-absolute"));
     const showEventElapsed = boolControlValue(document.querySelector("#new-widget-show-event-elapsed"));
     markWidgetSettingsDirty();
-    if (editingWidgetRow) {
-      editingWidgetRow.querySelector("strong").textContent = title;
-      editingWidgetRow.dataset.widgetType = type;
-      editingWidgetRow.dataset.widgetChannel = channelId;
-      editingWidgetRow.dataset.onLabel = onLabel;
-      editingWidgetRow.dataset.offLabel = offLabel;
-      editingWidgetRow.dataset.showElapsed = String(showElapsed);
-      editingWidgetRow.dataset.widgetPeriod = period;
-      editingWidgetRow.dataset.widgetEdge = edge;
-      editingWidgetRow.dataset.widgetState = state;
-      editingWidgetRow.dataset.widgetSource = source;
-      editingWidgetRow.dataset.widgetCount = String(count);
-      editingWidgetRow.dataset.widgetValue = value;
-      editingWidgetRow.dataset.widgetCountMode = countMode;
-      editingWidgetRow.dataset.widgetUnit = unit;
-      editingWidgetRow.dataset.widgetTimeUnit = timeUnit;
-      editingWidgetRow.dataset.showAbsolute = String(showAbsolute);
-      editingWidgetRow.dataset.showEventElapsed = String(showEventElapsed);
-      editingWidgetRow.querySelector(".widget-size select").setAttribute("aria-label", `${title}の表示幅`);
-      editingWidgetRow.querySelector(".move-up").setAttribute("aria-label", `${title}を上へ移動`);
-      editingWidgetRow.querySelector(".move-down").setAttribute("aria-label", `${title}を下へ移動`);
-      editingWidgetRow.querySelector(".switch").setAttribute("aria-label", `${title}を表示`);
-      editingWidgetRow.querySelector("small").textContent = widgetSettingSummary(type, channelId, period, {
+    if (widgetEditor.editingRow) {
+      widgetEditor.editingRow.querySelector("strong").textContent = title;
+      widgetEditor.editingRow.dataset.widgetType = type;
+      widgetEditor.editingRow.dataset.widgetChannel = channelId;
+      widgetEditor.editingRow.dataset.onLabel = onLabel;
+      widgetEditor.editingRow.dataset.offLabel = offLabel;
+      widgetEditor.editingRow.dataset.showElapsed = String(showElapsed);
+      widgetEditor.editingRow.dataset.widgetPeriod = period;
+      widgetEditor.editingRow.dataset.widgetEdge = edge;
+      widgetEditor.editingRow.dataset.widgetState = state;
+      widgetEditor.editingRow.dataset.widgetSource = source;
+      widgetEditor.editingRow.dataset.widgetCount = String(count);
+      widgetEditor.editingRow.dataset.widgetValue = value;
+      widgetEditor.editingRow.dataset.widgetCountMode = countMode;
+      widgetEditor.editingRow.dataset.widgetUnit = unit;
+      widgetEditor.editingRow.dataset.widgetTimeUnit = timeUnit;
+      widgetEditor.editingRow.dataset.showAbsolute = String(showAbsolute);
+      widgetEditor.editingRow.dataset.showEventElapsed = String(showEventElapsed);
+      widgetEditor.editingRow.querySelector(".widget-size select").setAttribute("aria-label", `${title}の表示幅`);
+      widgetEditor.editingRow.querySelector(".move-up").setAttribute("aria-label", `${title}を上へ移動`);
+      widgetEditor.editingRow.querySelector(".move-down").setAttribute("aria-label", `${title}を下へ移動`);
+      widgetEditor.editingRow.querySelector(".switch").setAttribute("aria-label", `${title}を表示`);
+      widgetEditor.editingRow.querySelector("small").textContent = widgetSettingSummary(type, channelId, period, {
         showElapsed,
         count,
         countMode,
@@ -3594,7 +3549,7 @@
         edge,
         state
       });
-      const widget = dashboardWidgetById(editingWidgetRow.dataset.widgetRow);
+      const widget = dashboardWidgetById(widgetEditor.editingRow.dataset.widgetRow);
       if (widget && type === "現在状態") {
         updateCurrentStateCard(widget, { title, channelId, onLabel, offLabel, showElapsed });
       } else {
@@ -3622,8 +3577,8 @@
         }
         renderDashboardPeriod();
       }
-      editingWidgetRow.classList.add("is-highlighted");
-      editingWidgetRow = null;
+      widgetEditor.editingRow.classList.add("is-highlighted");
+      widgetEditor.editingRow = null;
       showToast("表示項目の設定を変更しました");
       return;
     }

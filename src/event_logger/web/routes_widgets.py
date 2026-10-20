@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import replace
-from typing import TYPE_CHECKING
 
-from flask import Flask
+from flask import Flask, Response, request
 
+from event_logger.domain.widgets import WidgetType
 from event_logger.loggerd.ipc import IpcProtocolError, IpcRemoteError
-from event_logger.web.control_service import _save_counter_reset
-
-if TYPE_CHECKING:
-    from event_logger.web.app import WebContext
+from event_logger.web.config_payloads import (
+    _build_output_rule,
+    _build_widget,
+    _counter_definition_changed,
+    _output_rule_payload,
+    _widget_payload,
+)
+from event_logger.web.control_service import (
+    _reload_after_rollback,
+    _request_config_reload,
+    _save_counter_reset,
+)
+from event_logger.web.http_responses import _error, _ok
+from event_logger.web.request_context import WebContext
 
 
 def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
@@ -24,20 +35,6 @@ def _register_output_rule_routes(app: Flask, context: WebContext) -> None:
         Returns:
             None。関数の概要に記したroute登録・状態更新を行う。
     """
-
-    from event_logger.web.app import (
-        IpcProtocolError,
-        IpcRemoteError,
-        Response,
-        _build_output_rule,
-        _error,
-        _ok,
-        _output_rule_payload,
-        _reload_after_rollback,
-        _request_config_reload,
-        request,
-        sqlite3,
-    )
 
     @app.post("/api/output-rules")
     def create_output_rule() -> Response:
@@ -199,18 +196,6 @@ def _register_widget_routes(app: Flask, context: WebContext) -> None:
         Returns:
             None。関数の概要に記したroute登録・状態更新を行う。
     """
-
-    from event_logger.web.app import (
-        Response,
-        WidgetType,
-        _build_widget,
-        _counter_definition_changed,
-        _error,
-        _ok,
-        _widget_payload,
-        request,
-        sqlite3,
-    )
 
     @app.get("/api/widgets")
     def list_widgets() -> Response:

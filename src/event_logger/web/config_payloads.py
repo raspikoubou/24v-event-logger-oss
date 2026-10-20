@@ -17,7 +17,7 @@ from event_logger.domain.widgets import (
 )
 
 if TYPE_CHECKING:
-    from event_logger.web.app import WebContext
+    from event_logger.web.request_context import WebContext
 
 
 def _json_int(value: object, field_name: str) -> int:

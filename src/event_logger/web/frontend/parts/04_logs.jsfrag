@@ -4,23 +4,23 @@
    */
   function renderLogs() {
     const pageSize = Number(document.querySelector("#log-page-size").value);
-    const events = liveMode ? logPageEvents : filteredEvents();
-    const totalCount = liveMode ? logTotalCount : events.length;
+    const events = liveMode ? logState.events : filteredEvents();
+    const totalCount = liveMode ? logState.totalCount : events.length;
     const pageCount = Math.max(1, Math.ceil(totalCount / pageSize));
-    logPage = Math.min(logPage, pageCount);
+    logState.setPage(Math.min(logState.page, pageCount));
     const pageEvents = liveMode
       ? events
-      : events.slice((logPage - 1) * pageSize, logPage * pageSize);
+      : events.slice((logState.page - 1) * pageSize, logState.page * pageSize);
     const tbody = document.querySelector("#log-table-body");
-    document.querySelector("#log-count").textContent = liveMode && !logPageLoaded
+    document.querySelector("#log-count").textContent = liveMode && !logState.loaded
       ? "--件"
       : `${totalCount}件`;
-    document.querySelector("#log-page-label").textContent = `${logPage} / ${pageCount}ページ`;
-    document.querySelector("#log-prev").disabled = logPageLoading || logPage === 1;
-    document.querySelector("#log-next").disabled = logPageLoading || (
-      liveMode ? !logHasNext : logPage === pageCount
+    document.querySelector("#log-page-label").textContent = `${logState.page} / ${pageCount}ページ`;
+    document.querySelector("#log-prev").disabled = logState.loading || logState.page === 1;
+    document.querySelector("#log-next").disabled = logState.loading || (
+      liveMode ? !logState.hasNext : logState.page === pageCount
     );
-    if (liveMode && !logPageLoaded) {
+    if (liveMode && !logState.loaded) {
       tbody.innerHTML = `<tr><td colspan="5">記録を読み込んでいます。</td></tr>`;
       return;
     }
@@ -53,7 +53,7 @@
     return buildLogApiQuery({
       periodKey,
       customBounds: periodKey === "custom" ? periodBounds(periodKey) : null,
-      logSearchRange,
+      logSearchRange: logState.searchRange,
       selectedSignal: document.querySelector("#log-signal").value,
       widgetLogSignals,
       selectedValue: document.querySelector("#log-value").value,
@@ -61,7 +61,7 @@
       selectedSource: document.querySelector("#log-source").value,
       includePaging,
       pageSize: includePaging ? Number(document.querySelector("#log-page-size").value) : null,
-      logPage
+      logPage: logState.page
     });
   }
 
@@ -70,42 +70,12 @@
    * @returns {Promise<void>} APIからpageを取得してlogs viewを更新後resolveする。transport/API失敗はrejectする。
    */
   async function loadLiveLogPage() {
-    const requestId = ++logRequestId;
-    logPageLoading = true;
-    renderLogs();
-    try {
-      const result = await liveJson(`/api/logs?${logApiQuery(true)}`);
-      if (requestId !== logRequestId) return;
-      logSearchRange = {
-        fromMs: Number(result.from_ms),
-        toMs: Number(result.to_ms)
-      };
-      logTotalCount = Number(result.total_count || 0);
-      const pageSize = Number(document.querySelector("#log-page-size").value);
-      const pageCount = Math.max(1, Math.ceil(logTotalCount / pageSize));
-      if (logPage > pageCount) {
-        logPage = pageCount;
-        await loadLiveLogPage();
-        return;
-      }
-      logPageEvents = (result.items || []).map((event, index) => ({
-        id: Number(event.id?.split(":").pop()) || index + 1,
-        timestamp: event.timestamp,
-        signal: event.signal,
-        value: event.value,
-        kind: event.kind,
-        source: event.source || "",
-        synced: Boolean(event.clock_synced)
-      }));
-      logHasNext = Boolean(result.has_next);
-      logPageLoaded = true;
-    } finally {
-      if (requestId === logRequestId) {
-        logPageLoading = false;
-        nextLogRefreshAtMs = Date.now() + 5_000;
-      }
-      renderLogs();
-    }
+    await logState.loadPage({
+      fetchPage: () => liveJson(`/api/logs?${logApiQuery(true)}`),
+      pageSize: () => Number(document.querySelector("#log-page-size").value),
+      now: () => Date.now(),
+      onChange: renderLogs
+    });
   }
 
   /**
@@ -113,14 +83,9 @@
    * @returns {Promise<void>} page 1の検索を再実行し、結果をDOMへ描画後resolveする。
    */
   function reloadLogQuery() {
-    logPage = 1;
     // フィルター変更後は新たな時間範囲を検索する。ページ送りの間だけ範囲を固定する。
-    logSearchRange = null;
+    logState.resetQuery();
     if (liveMode) {
-      logPageLoaded = false;
-      logPageEvents = [];
-      logTotalCount = 0;
-      logHasNext = false;
       loadLiveLogPage().catch((error) => showToast(error.message));
     } else {
       renderLogs();

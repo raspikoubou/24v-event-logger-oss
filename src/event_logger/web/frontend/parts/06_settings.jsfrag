@@ -8,24 +8,24 @@
     const typeSelect = document.querySelector("#new-widget-type");
     typeSelect.disabled = isEditing;
     renderWidgetChannelOptions();
-    if (isEditing && editingWidgetRow) {
-      addingWidgetGroup = editingWidgetRow.closest(".widget-group-list").dataset.widgetGroup;
-      setWidgetTypeOptions(addingWidgetGroup, widgetTypeForRow(editingWidgetRow));
-      setWidgetChannels(widgetChannelForRow(editingWidgetRow));
-      document.querySelector("#new-widget-on-label").value = editingWidgetRow.dataset.onLabel || "ON";
-      document.querySelector("#new-widget-off-label").value = editingWidgetRow.dataset.offLabel || "OFF";
-      setSwitchState(document.querySelector("#new-widget-show-elapsed"), editingWidgetRow.dataset.showElapsed !== "false");
-      document.querySelector("#new-widget-period").value = editingWidgetRow.dataset.widgetPeriod || "follow";
-      document.querySelector("#new-widget-edge").value = editingWidgetRow.dataset.widgetEdge || "ON";
-      document.querySelector("#new-widget-state").value = editingWidgetRow.dataset.widgetState || "ON";
-      document.querySelector("#new-widget-source").value = editingWidgetRow.dataset.widgetSource || "state";
-      document.querySelector("#new-widget-count").value = editingWidgetRow.dataset.widgetCount || "10";
-      document.querySelector("#new-widget-value").value = editingWidgetRow.dataset.widgetValue || "all";
-      document.querySelector("#new-widget-count-mode").value = editingWidgetRow.dataset.widgetCountMode || "period";
-      document.querySelector("#new-widget-unit").value = editingWidgetRow.dataset.widgetUnit || "回";
-      document.querySelector("#new-widget-time-unit").value = editingWidgetRow.dataset.widgetTimeUnit || "human";
-      setSwitchState(document.querySelector("#new-widget-show-absolute"), editingWidgetRow.dataset.showAbsolute !== "false");
-      setSwitchState(document.querySelector("#new-widget-show-event-elapsed"), editingWidgetRow.dataset.showEventElapsed === "true");
+    if (isEditing && widgetEditor.editingRow) {
+      addingWidgetGroup = widgetEditor.editingRow.closest(".widget-group-list").dataset.widgetGroup;
+      setWidgetTypeOptions(addingWidgetGroup, widgetTypeForRow(widgetEditor.editingRow));
+      setWidgetChannels(widgetChannelForRow(widgetEditor.editingRow));
+      document.querySelector("#new-widget-on-label").value = widgetEditor.editingRow.dataset.onLabel || "ON";
+      document.querySelector("#new-widget-off-label").value = widgetEditor.editingRow.dataset.offLabel || "OFF";
+      setSwitchState(document.querySelector("#new-widget-show-elapsed"), widgetEditor.editingRow.dataset.showElapsed !== "false");
+      document.querySelector("#new-widget-period").value = widgetEditor.editingRow.dataset.widgetPeriod || "follow";
+      document.querySelector("#new-widget-edge").value = widgetEditor.editingRow.dataset.widgetEdge || "ON";
+      document.querySelector("#new-widget-state").value = widgetEditor.editingRow.dataset.widgetState || "ON";
+      document.querySelector("#new-widget-source").value = widgetEditor.editingRow.dataset.widgetSource || "state";
+      document.querySelector("#new-widget-count").value = widgetEditor.editingRow.dataset.widgetCount || "10";
+      document.querySelector("#new-widget-value").value = widgetEditor.editingRow.dataset.widgetValue || "all";
+      document.querySelector("#new-widget-count-mode").value = widgetEditor.editingRow.dataset.widgetCountMode || "period";
+      document.querySelector("#new-widget-unit").value = widgetEditor.editingRow.dataset.widgetUnit || "回";
+      document.querySelector("#new-widget-time-unit").value = widgetEditor.editingRow.dataset.widgetTimeUnit || "human";
+      setSwitchState(document.querySelector("#new-widget-show-absolute"), widgetEditor.editingRow.dataset.showAbsolute !== "false");
+      setSwitchState(document.querySelector("#new-widget-show-event-elapsed"), widgetEditor.editingRow.dataset.showEventElapsed === "true");
     } else {
       addingWidgetGroup = widgetGroup;
       setWidgetTypeOptions(addingWidgetGroup, addingWidgetGroup === "realtime" ? "現在状態" : "イベント回数");
@@ -338,8 +338,7 @@
     );
     document.querySelector("#log-kind").value = "all";
     document.querySelector("#log-source").value = "all";
-    logSearchRange = null;
-    logPage = 1;
+    logState.resetQuery();
     renderLogs();
     switchView("logs");
   }

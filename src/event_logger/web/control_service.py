@@ -27,7 +27,7 @@ from event_logger.loggerd.ipc import (
 )
 
 if TYPE_CHECKING:
-    from event_logger.web.app import WebContext
+    from event_logger.web.request_context import WebContext
 
 
 _LOGGER = logging.getLogger("event_logger.web.app")
@@ -203,10 +203,18 @@ def _daemon_status(
             (logger_status, error, data)。IPC成功時はloggerd status/payload、
                 失敗時はunknownと安全なerror表示を返す。
     """
-    if context.control_client is None:
-        return context.status_provider(), None, {}
+    return _read_daemon_snapshot(context.control_client, context.status_provider)
+
+
+def _read_daemon_snapshot(
+    control_client: ControlClient | None,
+    status_provider: Callable[[], str],
+) -> tuple[str, str | None, Mapping[str, object]]:
+    """制御portからstatus snapshotを読み、IPC失敗時はunknownへ倒す。"""
+    if control_client is None:
+        return status_provider(), None, {}
     try:
-        data = context.control_client.request(ControlRequest(ControlCommand.STATUS))
+        data = control_client.request(ControlRequest(ControlCommand.STATUS))
     except (OSError, IpcProtocolError, IpcRemoteError) as error:
         return "unknown", str(error), {}
     raw_status = data.get("logger_status")

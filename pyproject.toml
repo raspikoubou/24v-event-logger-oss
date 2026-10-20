@@ -43,7 +43,7 @@ where = ["src"]
 event_logger = ["database/schema.sql", "web/templates/*.html", "web/static/*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["packaging"]
 pythonpath = ["src"]
 markers = [
     "hardware: requires Raspberry Pi hardware and the 24V I/O HAT",
