@@ -2,30 +2,45 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any
 
-from flask import Flask, stream_with_context
+from flask import Flask, Response, request, stream_with_context
 
-from event_logger.domain.widget_values import evaluate_widget
-from event_logger.domain.widgets import widget_end_ms, widget_start_ms
+from event_logger.common.timeutil import format_timestamp
+from event_logger.loggerd.ipc import UnixControlClient
 from event_logger.web.auth import SharedPasswordAuth
+from event_logger.web.control_service import (
+    _clear_configuration_out_of_sync,
+    _configuration_fingerprint,
+    _daemon_status,
+    _mark_configuration_out_of_sync,
+)
 from event_logger.web.csv_export import generate_csv
-from event_logger.web.dashboard_periods import _fixed_widget_calendar_ranges
+from event_logger.web.dashboard_periods import (
+    _stored_dashboard_custom_range,
+    _stored_dashboard_period,
+)
 from event_logger.web.dashboard_queries import (
-    _DASHBOARD_TIMELINE_MAX_INTERVALS,
-    _dashboard_events,
-    _dashboard_output_events,
-    _dashboard_period_counts,
-    _dashboard_reset_counts,
-    _dashboard_timeline_event_count_exceeds_limit,
-    _dashboard_timeline_interval_count,
     _dashboard_timeline_limit_warning,
-    _stored_widget_count,
+)
+from event_logger.web.dashboard_service import (
+    DashboardReadDependencies,
+    load_dashboard_values,
+)
+from event_logger.web.http_payloads import _channel_payload, _log_payload
+from event_logger.web.http_responses import _error, _ok
+from event_logger.web.log_filters import (
+    _format_local_input,
+    _parse_log_filters,
+    _query_int,
+)
+from event_logger.web.request_context import WebContext
+from event_logger.web.system_settings import (
+    _effective_timezone,
+    _system_settings_payload,
 )
 
-if TYPE_CHECKING:
-    from event_logger.web.app import WebContext
-
+_DASHBOARD_TIMELINE_MAX_JSON_BYTES = 2 * 1024 * 1024
 
 def _register_log_routes(app: Flask, context: WebContext) -> None:
     """検索ログとCSV出力のrouteをappへ登録する。
@@ -37,18 +52,6 @@ def _register_log_routes(app: Flask, context: WebContext) -> None:
         Returns:
             None。関数の概要に記したroute登録・状態更新を行う。
     """
-
-    from event_logger.web.app import (
-        Response,
-        _effective_timezone,
-        _error,
-        _format_local_input,
-        _log_payload,
-        _ok,
-        _parse_log_filters,
-        request,
-    )
-
 
     @app.get("/api/logs")
     def logs() -> Response:
@@ -164,22 +167,6 @@ def _register_status_routes(
             None。関数の概要に記したroute登録・状態更新を行う。
     """
 
-    from event_logger.web.app import (
-        Any,
-        Response,
-        UnixControlClient,
-        _channel_payload,
-        _clear_configuration_out_of_sync,
-        _configuration_fingerprint,
-        _daemon_status,
-        _mark_configuration_out_of_sync,
-        _ok,
-        _stored_dashboard_custom_range,
-        _stored_dashboard_period,
-        _system_settings_payload,
-    )
-
-
     @app.get("/api/status")
     def status() -> Response:
         """診断画面用の現在状態を返す。
@@ -265,8 +252,10 @@ def _register_status_routes(
         payload["heartbeat"] = heartbeat
         retention_days = context.settings.get_json("retention_days", 365)
         payload["retention_days"] = retention_days
-        payload["dashboard_period"] = _stored_dashboard_period(context)
-        payload["dashboard_custom_range"] = _stored_dashboard_custom_range(context)
+        payload["dashboard_period"] = _stored_dashboard_period(context.settings)
+        payload["dashboard_custom_range"] = _stored_dashboard_custom_range(
+            context.settings
+        )
         payload["system"] = _system_settings_payload(context, app, auth)
         try:
             storage = context.storage_monitor.inspect(context.database_path)
@@ -305,23 +294,6 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
             None。関数の概要に記したroute登録・状態更新を行う。
     """
 
-    from event_logger.web.app import (
-        _DASHBOARD_TIMELINE_MAX_JSON_BYTES,
-        Mapping,
-        Response,
-        _daemon_status,
-        _dashboard_range_ms,
-        _effective_timezone,
-        _error,
-        _ok,
-        _query_int,
-        _stored_dashboard_custom_range,
-        _stored_dashboard_period,
-        format_timestamp,
-        request,
-    )
-
-
     @app.get("/api/dashboard")
     def dashboard() -> Response:
         """保存済みwidgetをDomain計算値付きで返す。
@@ -336,215 +308,47 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
                         timeline件数が上限を超える場合は全計算をせず、
                     期間を絞る案内payloadをJSON 200で返す。
         """
-        now_ms = context.clock.now_utc_ms()
         timezone_name = _effective_timezone(context)
-        # URLに期間がない場合だけ保存済み選択を使う。明示されたcustom範囲を
-        # 保存値で上書きしないよう、query解決はRepository検索より先に終える。
         period = request.args.get("period")
-        if period is None and request.args.get("from_ms") is None:
-            period = _stored_dashboard_period(context)
         try:
-            if period is None or period == "custom":
-                stored_range = _stored_dashboard_custom_range(context)
-                start_default = (
-                    stored_range["from_ms"]
-                    if stored_range is not None and "from_ms" not in request.args
-                    else -1
-                )
-                end_default = (
-                    stored_range["to_ms"]
-                    if stored_range is not None
-                    and "from_ms" not in request.args
-                    and "to_ms" not in request.args
-                    else now_ms
-                )
-                requested_start = _query_int("from_ms", start_default)
-                requested_end = _query_int("to_ms", end_default)
-                if requested_start < 0:
-                    raise ValueError("custom range requires a non-negative from_ms")
-            else:
-                requested_start, requested_end = _dashboard_range_ms(
-                    context.clock,
-                    timezone_name=timezone_name,
-                    period=period,
-                )
-        except ValueError as error:
-            return _error("INVALID_FILTER", str(error), 400)
-        # API範囲は過去の半開区間に丸め、未来だけの範囲や空区間をDBへ渡さない。
-        start_ms = max(0, min(requested_start, now_ms - 1))
-        period_end_ms = min(requested_end, now_ms)
-        if start_ms >= period_end_ms:
-            return _error(
-                "INVALID_FILTER",
-                "from_ms must be before to_ms and both must include past time",
-                400,
-            )
-        now_mono_ns = context.clock.now_monotonic_ns()
-        widgets = context.widgets.list_all(include_disabled=False)
-        channels = context.channels.list_all()
-        enabled_channel_ids = {channel.id for channel in channels if channel.enabled}
-        disabled_channel_ids = {
-            channel.id for channel in channels if not channel.enabled
-        }
-        try:
-            fixed_calendar_ranges = _fixed_widget_calendar_ranges(
-                widgets,
-                context.clock,
+            result = load_dashboard_values(
+                DashboardReadDependencies(
+                    clock=context.clock,
+                    settings=context.settings,
+                    widgets=context.widgets,
+                    channels=context.channels,
+                    events=context.events,
+                    counter_resets=context.counter_resets,
+                    output_events=context.output_events,
+                    sessions=context.sessions,
+                    status_provider=context.status_provider,
+                    control_client=context.control_client,
+                ),
                 timezone_name=timezone_name,
+                period=period,
+                from_ms=(
+                    _query_int("from_ms", 0)
+                    if "from_ms" in request.args
+                    else None
+                ),
+                to_ms=(
+                    _query_int("to_ms", 0) if "to_ms" in request.args else None
+                ),
             )
         except ValueError as error:
             return _error("INVALID_FILTER", str(error), 400)
-        # timelineが重いと判明したら、COUNT系の個別集計やdaemon IPCを始める前に
-        # 説明payloadを返す。部分的なwidget表示を正常応答に見せない。
-        if _dashboard_timeline_event_count_exceeds_limit(
-            context,
-            widgets,
-            start_ms=start_ms,
-            period_end_ms=period_end_ms,
-            now_ms=now_ms,
-            fixed_calendar_ranges=fixed_calendar_ranges,
-        ):
-            # 上限超過時はcounter等の全件集計やloggerd IPCを始めない。
-            # 部分表示も遅い巨大応答も返さず、絞込み案内を先に返す。
+        window = result.window
+        if result.timeline_too_large:
             return _ok(
                 _dashboard_timeline_limit_warning(
-                    start_ms=start_ms,
-                    end_ms=period_end_ms,
-                    period=period or "custom",
+                    start_ms=window.start_ms,
+                    end_ms=window.end_ms,
+                    period=window.period,
                     timezone_name=timezone_name,
                 )
             )
-        widget_ranges = {
-            widget.id: (
-                fixed_calendar_ranges[widget.id]
-                if widget.id in fixed_calendar_ranges
-                else (
-                    widget_start_ms(
-                        widget,
-                        dashboard_start_ms=start_ms,
-                        now_ms=now_ms,
-                    ),
-                    widget_end_ms(
-                        widget,
-                        dashboard_end_ms=period_end_ms,
-                        now_ms=now_ms,
-                    ),
-                )
-            )
-            for widget in widgets
-        }
-        # 先にreset境界と集計値を揃える。後続のイベント取得をwidget評価に必要な
-        # 範囲へ絞り、retentionに依存した全件走査を避ける。
-        resets = {
-            widget.id: context.counter_resets.latest(widget.id) for widget in widgets
-        }
-        reset_counts = _dashboard_reset_counts(context, widgets, resets)
-        period_counts = _dashboard_period_counts(context, widgets, widget_ranges)
-        stored_counts = {
-            widget.id: _stored_widget_count(context, widget)
-            for widget in widgets
-            if widget.config.get("count_mode", "period") == "stored"
-        }
-        sessions = context.sessions.list_all()
-        # 現在値はDBの最新eventから推測せず、同じdaemon status snapshotに含まれる
-        # session・入力値・monotonic開始時刻を一組として使う。
-        daemon_status, _, daemon_data = _daemon_status(context)
-        raw_session_id = daemon_data.get("session_id")
-        active_session_id = (
-            raw_session_id
-            if daemon_status == "logging" and isinstance(raw_session_id, int)
-            else None
-        )
-        current_inputs: dict[int, bool] = {}
-        current_input_since_ns: dict[int, int] = {}
-        raw_inputs = daemon_data.get("inputs")
-        if active_session_id is not None and isinstance(raw_inputs, Mapping):
-            for raw_channel, raw_value in raw_inputs.items():
-                try:
-                    channel_id = int(raw_channel)
-                except (TypeError, ValueError):
-                    continue
-                # loggerd statusが値を返しても、Web設定上監視していない入力は
-                # eventへ記録されず、現在状態widgetではUNKNOWNとして扱う。
-                if channel_id not in enabled_channel_ids:
-                    continue
-                if isinstance(raw_value, bool) or raw_value not in (0, 1):
-                    continue
-                current_inputs[channel_id] = bool(raw_value)
-        raw_input_since = daemon_data.get("input_since_mono_ns")
-        if active_session_id is not None and isinstance(raw_input_since, Mapping):
-            for raw_channel, raw_since in raw_input_since.items():
-                try:
-                    channel_id = int(raw_channel)
-                except (TypeError, ValueError):
-                    continue
-                if channel_id not in enabled_channel_ids:
-                    continue
-                if isinstance(raw_since, bool) or not isinstance(raw_since, int):
-                    continue
-                current_input_since_ns[channel_id] = raw_since
-        if (
-            active_session_id is None
-            and daemon_status == "unknown"
-            and context.control_client is None
-        ):
-            # Web単体のfixture/test serverにはloggerd statusがない。未終了の
-            # 最新sessionを表示上のactiveとして扱い、OUT履歴のfixtureを
-            # 直ちにUNKNOWNへ潰さない。実daemon接続時はstatusを正とする。
-            open_sessions = [
-                session.id for session in sessions if session.ended_at_ms is None
-            ]
-            if len(open_sessions) == 1:
-                active_session_id = open_sessions[0]
-        # 入力と出力を別Repositoryから取得する。評価時に必要な直前状態も含めて
-        # からDomain計算へ渡すことで、route内で履歴を再解釈しない。
-        events = _dashboard_events(
-            context,
-            widgets,
-            widget_ranges=widget_ranges,
-            current_before_ms=now_ms + 1,
-            active_session_id=active_session_id,
-        )
-        output_events = _dashboard_output_events(
-            context,
-            widgets,
-            widget_ranges=widget_ranges,
-        )
-        # Repository結果と現在snapshotをDomain widget評価へまとめて渡し、表示用
-        # timestampの変換は計算後に行う。保存値のepoch millisecondは保持する。
-        items: list[dict[str, object]] = []
-        for widget in widgets:
-            reset = resets[widget.id]
-            fixed_calendar_range = fixed_calendar_ranges.get(widget.id)
-            try:
-                value = evaluate_widget(
-                    widget,
-                    events=events,
-                    sessions=sessions,
-                    now_ms=now_ms,
-                    start_ms=start_ms,
-                    period_end_ms=period_end_ms,
-                    fixed_period_range=fixed_calendar_range,
-                    active_session_id=active_session_id,
-                    now_mono_ns=now_mono_ns,
-                    current_inputs=current_inputs,
-                    current_input_since_ns=current_input_since_ns,
-                    disabled_channel_ids=frozenset(disabled_channel_ids),
-                    output_events=output_events,
-                    carried_count=reset.carried_count if reset else 0,
-                    after_event_id=reset.after_event_id if reset else None,
-                    reset_at_ms=reset.reset_at_ms if reset else None,
-                    reset_count=reset_counts.get(widget.id),
-                    period_count=period_counts.get(widget.id),
-                    stored_count=stored_counts.get(widget.id),
-                )
-            except ValueError as error:
-                value = {
-                    "widget_id": widget.id,
-                    "type": widget.widget_type.value,
-                    "title": widget.title,
-                    "error": str(error),
-                }
+        items = result.items
+        for value in items:
             raw_events = value.get("events")
             if isinstance(raw_events, list):
                 for raw_event in raw_events:
@@ -560,23 +364,10 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
             reset_at_ms = value.get("reset_at_ms")
             if isinstance(reset_at_ms, int):
                 value["reset_at"] = format_timestamp(reset_at_ms, timezone_name)
-            items.append(value)
-        if (
-            _dashboard_timeline_interval_count(items)
-            > _DASHBOARD_TIMELINE_MAX_INTERVALS
-        ):
-            return _ok(
-                _dashboard_timeline_limit_warning(
-                    start_ms=start_ms,
-                    end_ms=period_end_ms,
-                    period=period or "custom",
-                    timezone_name=timezone_name,
-                )
-            )
         data = {
-            "from_ms": start_ms,
-            "to_ms": period_end_ms,
-            "period": period or "custom",
+            "from_ms": window.start_ms,
+            "to_ms": window.end_ms,
+            "period": window.period,
             "timezone": timezone_name,
             "items": items,
         }
@@ -586,9 +377,9 @@ def _register_dashboard_routes(app: Flask, context: WebContext) -> None:
         if len(response.get_data()) > _DASHBOARD_TIMELINE_MAX_JSON_BYTES:
             return _ok(
                 _dashboard_timeline_limit_warning(
-                    start_ms=start_ms,
-                    end_ms=period_end_ms,
-                    period=period or "custom",
+                    start_ms=window.start_ms,
+                    end_ms=window.end_ms,
+                    period=window.period,
                     timezone_name=timezone_name,
                 )
             )

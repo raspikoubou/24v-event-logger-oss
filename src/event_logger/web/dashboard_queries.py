@@ -6,9 +6,14 @@ HTTPルートと独立し、DBへのquery範囲を表示項目に応じて制限
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import Protocol, cast
 
 from event_logger.common.models import CounterReset, InputEvent, OutputEvent
+from event_logger.database.repositories import (
+    CounterResetRepository,
+    EventRepository,
+    OutputEventRepository,
+)
 from event_logger.domain.widgets import (
     Widget,
     WidgetType,
@@ -16,15 +21,19 @@ from event_logger.domain.widgets import (
     widget_start_ms,
 )
 
-if TYPE_CHECKING:
-    from event_logger.web.app import WebContext
-
-
 _DASHBOARD_TIMELINE_MAX_INTERVALS = 10_000
 
 
+class DashboardQueryPorts(Protocol):
+    """Dashboard集計に必要なRepository portだけを公開する。"""
+
+    events: EventRepository
+    counter_resets: CounterResetRepository
+    output_events: OutputEventRepository
+
+
 def _dashboard_events(
-    context: WebContext,
+    context: DashboardQueryPorts,
     widgets: list[Widget],
     *,
     widget_ranges: Mapping[str, tuple[int, int]],
@@ -153,7 +162,7 @@ def _dashboard_events(
 
 
 def _dashboard_period_counts(
-    context: WebContext,
+    context: DashboardQueryPorts,
     widgets: list[Widget],
     widget_ranges: Mapping[str, tuple[int, int]],
 ) -> dict[str, int]:
@@ -232,7 +241,7 @@ Returns:
 
 
 def _dashboard_reset_counts(
-    context: WebContext,
+    context: DashboardQueryPorts,
     widgets: list[Widget],
     resets: Mapping[str, CounterReset | None],
 ) -> dict[str, int]:
@@ -277,7 +286,7 @@ def _dashboard_reset_counts(
 
 
 def _dashboard_output_events(
-    context: WebContext,
+    context: DashboardQueryPorts,
     widgets: list[Widget],
     *,
     widget_ranges: Mapping[str, tuple[int, int]],
@@ -358,7 +367,7 @@ def _dashboard_output_events(
 
 
 def _dashboard_timeline_event_count_exceeds_limit(
-    context: WebContext,
+    context: DashboardQueryPorts,
     widgets: list[Widget],
     *,
     start_ms: int,
@@ -541,7 +550,7 @@ def _widget_input_channels(widget: Widget) -> set[int]:
     return channels
 
 
-def _stored_widget_count(context: WebContext, widget: Widget) -> int:
+def _stored_widget_count(context: DashboardQueryPorts, widget: Widget) -> int:
     """保存期間内累計widgetを全保存eventから数える。
 
         Args:

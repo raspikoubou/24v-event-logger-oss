@@ -17,7 +17,7 @@ from event_logger.web.auth import SharedPasswordAuth, hash_password
 from event_logger.web.config_payloads import _json_bool, _json_int, _json_text
 
 if TYPE_CHECKING:
-    from event_logger.web.app import WebContext
+    from event_logger.web.request_context import WebContext
 
 
 def _system_settings_payload(

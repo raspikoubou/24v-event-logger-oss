@@ -6,7 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from flask import Flask, request
+from flask import Flask, Response, request
 
 from event_logger.maintenance.update import (
     GitHubReleaseClient,
@@ -19,6 +19,7 @@ from event_logger.maintenance.update import (
     launch_updater,
     request_reboot,
 )
+from event_logger.web.http_responses import _error, _ok
 
 
 def _release_token(release: ReleaseInfo) -> str:
@@ -57,13 +58,6 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
         Returns:
             None。関数の概要に記したroute登録・状態更新を行う。
     """
-
-    from event_logger.web.app import (
-        Response,
-        _error,
-        _ok,
-        _read_update_status,
-    )
 
     @app.post("/api/system/reboot")
     def reboot_system() -> Response:
@@ -256,3 +250,30 @@ def _register_update_routes(app: Flask, demo: bool) -> None:
         )
         response.status_code = 202
         return response
+
+
+def _read_update_status(path_value: object) -> dict[str, object] | None:
+    """root updaterが出力した状態を表示用に読み取る。
+
+        Args:
+            path_value: 状態fileまたは設定fileのpath文字列。
+                存在しない場合の扱いは呼出元の契約に従う。
+
+        Returns:
+            許可されたfieldだけを持つlocal updater status dict。
+                file不在・破損・型不正ならNone。
+    """
+    if not isinstance(path_value, str) or not path_value:
+        return None
+    try:
+        with open(path_value, encoding="utf-8") as file:
+            payload = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return {
+        key: value
+        for key, value in payload.items()
+        if key in {"status", "version", "message", "updated_at", "attempt_id"}
+    }

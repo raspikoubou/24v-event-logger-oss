@@ -169,7 +169,6 @@
       select.addEventListener("change", () => {
       if (select.id === "log-period") {
         document.querySelector("#log-custom-period").hidden = select.value !== "custom";
-        logSearchRange = null;
       }
       if (select.id === "log-source" && select.value !== "all") {
         document.querySelector("#log-kind").value = "output";
@@ -179,7 +178,6 @@
   });
   document.querySelector("#apply-log-custom-period").addEventListener("click", () => {
     if (!applyCustomPeriod(document.querySelector("#log-custom-from"), document.querySelector("#log-custom-to"))) return;
-    logSearchRange = null;
     reloadLogQuery();
     showToast("任意期間を適用しました");
   });
@@ -187,12 +185,12 @@
     reloadLogQuery();
   });
   document.querySelector("#log-prev").addEventListener("click", () => {
-    logPage = Math.max(1, logPage - 1);
+    logState.setPage(logState.page - 1);
     if (liveMode) loadLiveLogPage().catch((error) => showToast(error.message));
     else renderLogs();
   });
   document.querySelector("#log-next").addEventListener("click", () => {
-    logPage += 1;
+    logState.setPage(logState.page + 1);
     if (liveMode) loadLiveLogPage().catch((error) => showToast(error.message));
     else renderLogs();
   });

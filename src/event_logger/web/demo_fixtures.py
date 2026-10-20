@@ -18,7 +18,7 @@ from event_logger.domain.widgets import (
 from event_logger.version import VERSION
 
 if TYPE_CHECKING:
-    from event_logger.web.app import WebContext
+    from event_logger.web.request_context import WebContext
 
 
 def _seed_demo_data(context: WebContext) -> None:

@@ -170,7 +170,7 @@
    * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
    */
   function markWidgetSettingsDirty() {
-    if (liveMode) widgetSettingsDirty = true;
+    if (liveMode) widgetEditor.dirty = true;
   }
 
   /**
@@ -178,7 +178,7 @@
    * @returns {void} DOM表示またはcontroller stateを更新する。値を返さない。
    */
   async function saveWidgetSettings() {
-    if (!liveMode || !widgetSettingsDirty) return;
+    if (!liveMode || !widgetEditor.dirty) return;
     // 途中の通信失敗で一部だけ保存された場合も、再試行時はDBの最新状態を
     // 基準に差分を作る。古い一覧のままPOSTすると重複IDで復旧できなくなる。
     const current = await liveJson("/api/widgets");
@@ -209,7 +209,7 @@
     // dirty flagを落とす。途中throwならdirtyを保持し、次回は再び最新値から始める。
     const response = await liveJson("/api/widgets");
     fixtures.widgets = response.items || [];
-    widgetSettingsDirty = false;
+    widgetEditor.dirty = false;
     renderPersistedWidgets(fixtures.widgets);
   }
 

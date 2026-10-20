@@ -5,7 +5,6 @@
   const liveMode = Boolean(window.EVENT_LOGGER_LIVE);
 
   const {
-    createRefreshCoordinator,
     shouldRefreshDashboard,
     shouldDeferTimelineRender,
     shouldDeferTimelineWidgetRender,

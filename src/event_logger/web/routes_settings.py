@@ -2,15 +2,41 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from flask import Flask
+from flask import Flask, Response, request
 
+from event_logger.domain.widgets import WIDGET_PERIOD_DURATIONS_MS
+from event_logger.loggerd.ipc import (
+    ControlCommand,
+    ControlRequest,
+    IpcProtocolError,
+    IpcRemoteError,
+)
 from event_logger.maintenance.main import RETENTION_CHOICES
-from event_logger.web.auth import SharedPasswordAuth
-
-if TYPE_CHECKING:
-    from event_logger.web.app import WebContext
+from event_logger.web.auth import SharedPasswordAuth, hash_password
+from event_logger.web.config_payloads import _json_bool, _json_int, _json_text
+from event_logger.web.control_service import (
+    _daemon_status,
+    _mark_configuration_out_of_sync,
+    _reload_after_rollback,
+    _request_config_reload,
+    _restore_channel,
+    _restore_heartbeat,
+)
+from event_logger.web.dashboard_periods import _stored_dashboard_custom_range
+from event_logger.web.http_payloads import _channel_payload
+from event_logger.web.http_responses import _error, _ok
+from event_logger.web.request_context import WebContext
+from event_logger.web.system_settings import (
+    _parse_setup_channels,
+    _safe_default_hostname,
+    _save_system_settings,
+    _system_settings_payload,
+    _validate_hostname,
+    _validated_system_settings,
+)
 
 
 def _register_channel_routes(app: Flask, context: WebContext) -> None:
@@ -23,24 +49,6 @@ def _register_channel_routes(app: Flask, context: WebContext) -> None:
         Returns:
             None。関数の概要に記したroute登録・状態更新を行う。
     """
-
-    from event_logger.web.app import (
-        IpcProtocolError,
-        IpcRemoteError,
-        Response,
-        _channel_payload,
-        _error,
-        _json_bool,
-        _json_int,
-        _json_text,
-        _mark_configuration_out_of_sync,
-        _ok,
-        _reload_after_rollback,
-        _request_config_reload,
-        _restore_channel,
-        request,
-    )
-
 
     @app.post("/api/channels/<int:channel_id>")
     def update_channel(channel_id: int) -> Response:
@@ -114,24 +122,6 @@ def _register_basic_settings_routes(app: Flask, context: WebContext) -> None:
         Returns:
             None。関数の概要に記したroute登録・状態更新を行う。
     """
-
-    from event_logger.web.app import (
-        WIDGET_PERIOD_DURATIONS_MS,
-        IpcProtocolError,
-        IpcRemoteError,
-        Response,
-        _error,
-        _json_bool,
-        _json_int,
-        _mark_configuration_out_of_sync,
-        _ok,
-        _reload_after_rollback,
-        _request_config_reload,
-        _restore_heartbeat,
-        _stored_dashboard_custom_range,
-        request,
-    )
-
 
     @app.post("/api/settings/heartbeat")
     def update_heartbeat() -> Response:
@@ -273,7 +263,7 @@ def _register_basic_settings_routes(app: Flask, context: WebContext) -> None:
                 "period is not a supported dashboard period",
                 400,
             )
-        custom_range = _stored_dashboard_custom_range(context)
+        custom_range = _stored_dashboard_custom_range(context.settings)
         if period == "custom":
             # custom以外を選ぶときは以前の有効custom rangeを保持する。
             # 値の検証は一括保存前に完了させ、periodだけ先に更新される状態を避ける。
@@ -316,21 +306,6 @@ def _register_system_settings_routes(
         Returns:
             None。関数の概要に記したroute登録・状態更新を行う。
     """
-
-    from event_logger.web.app import (
-        Response,
-        ZoneInfo,
-        ZoneInfoNotFoundError,
-        _error,
-        _json_bool,
-        _json_text,
-        _ok,
-        _system_settings_payload,
-        _validate_hostname,
-        hash_password,
-        request,
-    )
-
 
     @app.get("/api/settings/system")
     def system_settings() -> Response:
@@ -432,30 +407,6 @@ def _register_setup_routes(
         Returns:
             None。関数の概要に記したroute登録・状態更新を行う。
     """
-
-    from event_logger.web.app import (
-        ControlCommand,
-        ControlRequest,
-        IpcProtocolError,
-        IpcRemoteError,
-        Response,
-        ZoneInfoNotFoundError,
-        _channel_payload,
-        _daemon_status,
-        _error,
-        _json_int,
-        _ok,
-        _parse_setup_channels,
-        _reload_after_rollback,
-        _request_config_reload,
-        _safe_default_hostname,
-        _save_system_settings,
-        _system_settings_payload,
-        _validated_system_settings,
-        cast,
-        request,
-    )
-
 
     @app.get("/api/setup")
     def setup_status() -> Response:

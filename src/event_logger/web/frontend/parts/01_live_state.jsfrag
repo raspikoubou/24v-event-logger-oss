@@ -10,9 +10,7 @@
   let dashboardCustomRangeDraft = null;
   let logging = fixtures.loggerStatus === "logging";
   let pendingAction = null;
-  let editingWidgetRow = null;
   let addingWidgetGroup = "realtime";
-  let widgetSettingsDirty = false;
   let nextDashboardRefreshAtMs = 0;
   let currentWidgetStep = 1;
   let timelineZoomIndex = 0;
@@ -24,15 +22,8 @@
   let dragWasDropped = false;
   let toastTimer = null;
   let activeView = "dashboard";
-  let logPage = 1;
-  let logPageEvents = [];
-  let logTotalCount = 0;
-  let logHasNext = false;
-  let logPageLoaded = false;
-  let logPageLoading = false;
-  let logRequestId = 0;
-  let logSearchRange = null;
-  let nextLogRefreshAtMs = 0;
+  const logState = window.EventLoggerUiState.createLogController();
+  const widgetEditor = window.EventLoggerUiState.createWidgetEditorState();
   let activeOutputTest = liveMode && fixtures.outputTestChannel
     ? { outputId: fixtures.outputTestChannel, timerId: null }
     : null;
@@ -62,7 +53,8 @@
     return demoClockBaseMs + performance.now() - demoClockStartedAtMs;
   }
 
-  const refreshLiveState = createRefreshCoordinator(refreshLiveStateOnce);
+  const liveState = window.EventLoggerUiState.createLiveStateController(refreshLiveStateOnce);
+  const refreshLiveState = liveState.refresh;
 
   /**
    * 一回分のlive状態を取得し、表示と次回更新時刻を更新する。
@@ -93,6 +85,8 @@
       customRangeForRefresh,
       activeView !== "logs"
     );
+    // UI描画中にログ取得が失敗しても、取得済みserver snapshotを失わない。
+    liveState.acceptSnapshot(next);
     // 取得したsnapshotをまとめて置き換えてから描画する。custom範囲draftだけは
     // statusの保存値に上書きさせず、「適用」前の画面入力を保持する。
     fixtures.nowMs = next.nowMs;
@@ -142,8 +136,7 @@
     const nextWidgets = next.widgets || [];
     if (
       liveMode
-      && !widgetSettingsDirty
-      && !widgetDialogOpen
+      && widgetEditor.shouldApplyServerWidgets(widgetDialogOpen)
       && JSON.stringify(fixtures.widgets || []) !== JSON.stringify(nextWidgets)
     ) {
       fixtures.widgets = nextWidgets;
@@ -156,15 +149,15 @@
       shouldRefreshLogPage({
         activeView,
         liveMode,
-        logPageLoading,
+        logPageLoading: logState.loading,
         periodKey: document.querySelector("#log-period").value,
         rangeEndMs: periodBounds(document.querySelector("#log-period").value).endMs,
-        nextRefreshAtMs: nextLogRefreshAtMs,
+        nextRefreshAtMs: logState.nextRefreshAtMs,
         nowMs: Date.now()
       })
     ) {
-      if (logPage === 1 && document.querySelector("#log-period").value !== "custom") {
-        logSearchRange = null;
+      if (logState.page === 1 && document.querySelector("#log-period").value !== "custom") {
+        logState.setSearchRange(null);
       }
       await loadLiveLogPage();
     }
@@ -175,6 +168,7 @@
     renderHealth();
     renderOutputTests();
     refreshCurrentStateCards();
+    return next;
   }
 
   /**

@@ -1,7 +1,7 @@
   document.querySelector("#widget-settings-list").addEventListener("click", (event) => {
     const addButton = event.target.closest("[data-add-widget-group]");
     if (addButton) {
-      editingWidgetRow = null;
+      widgetEditor.editingRow = null;
       document.querySelector("#new-widget-title").value = "";
       openWidgetDialog(false, addButton.dataset.addWidgetGroup);
       return;
@@ -31,7 +31,7 @@
       return;
     }
     if (event.target.closest(".edit-widget") && row) {
-      editingWidgetRow = row;
+      widgetEditor.editingRow = row;
       document.querySelector("#new-widget-title").value = row.querySelector("strong").textContent;
       openWidgetDialog(true);
     }
@@ -136,29 +136,29 @@
     const showAbsolute = boolControlValue(document.querySelector("#new-widget-show-absolute"));
     const showEventElapsed = boolControlValue(document.querySelector("#new-widget-show-event-elapsed"));
     markWidgetSettingsDirty();
-    if (editingWidgetRow) {
-      editingWidgetRow.querySelector("strong").textContent = title;
-      editingWidgetRow.dataset.widgetType = type;
-      editingWidgetRow.dataset.widgetChannel = channelId;
-      editingWidgetRow.dataset.onLabel = onLabel;
-      editingWidgetRow.dataset.offLabel = offLabel;
-      editingWidgetRow.dataset.showElapsed = String(showElapsed);
-      editingWidgetRow.dataset.widgetPeriod = period;
-      editingWidgetRow.dataset.widgetEdge = edge;
-      editingWidgetRow.dataset.widgetState = state;
-      editingWidgetRow.dataset.widgetSource = source;
-      editingWidgetRow.dataset.widgetCount = String(count);
-      editingWidgetRow.dataset.widgetValue = value;
-      editingWidgetRow.dataset.widgetCountMode = countMode;
-      editingWidgetRow.dataset.widgetUnit = unit;
-      editingWidgetRow.dataset.widgetTimeUnit = timeUnit;
-      editingWidgetRow.dataset.showAbsolute = String(showAbsolute);
-      editingWidgetRow.dataset.showEventElapsed = String(showEventElapsed);
-      editingWidgetRow.querySelector(".widget-size select").setAttribute("aria-label", `${title}の表示幅`);
-      editingWidgetRow.querySelector(".move-up").setAttribute("aria-label", `${title}を上へ移動`);
-      editingWidgetRow.querySelector(".move-down").setAttribute("aria-label", `${title}を下へ移動`);
-      editingWidgetRow.querySelector(".switch").setAttribute("aria-label", `${title}を表示`);
-      editingWidgetRow.querySelector("small").textContent = widgetSettingSummary(type, channelId, period, {
+    if (widgetEditor.editingRow) {
+      widgetEditor.editingRow.querySelector("strong").textContent = title;
+      widgetEditor.editingRow.dataset.widgetType = type;
+      widgetEditor.editingRow.dataset.widgetChannel = channelId;
+      widgetEditor.editingRow.dataset.onLabel = onLabel;
+      widgetEditor.editingRow.dataset.offLabel = offLabel;
+      widgetEditor.editingRow.dataset.showElapsed = String(showElapsed);
+      widgetEditor.editingRow.dataset.widgetPeriod = period;
+      widgetEditor.editingRow.dataset.widgetEdge = edge;
+      widgetEditor.editingRow.dataset.widgetState = state;
+      widgetEditor.editingRow.dataset.widgetSource = source;
+      widgetEditor.editingRow.dataset.widgetCount = String(count);
+      widgetEditor.editingRow.dataset.widgetValue = value;
+      widgetEditor.editingRow.dataset.widgetCountMode = countMode;
+      widgetEditor.editingRow.dataset.widgetUnit = unit;
+      widgetEditor.editingRow.dataset.widgetTimeUnit = timeUnit;
+      widgetEditor.editingRow.dataset.showAbsolute = String(showAbsolute);
+      widgetEditor.editingRow.dataset.showEventElapsed = String(showEventElapsed);
+      widgetEditor.editingRow.querySelector(".widget-size select").setAttribute("aria-label", `${title}の表示幅`);
+      widgetEditor.editingRow.querySelector(".move-up").setAttribute("aria-label", `${title}を上へ移動`);
+      widgetEditor.editingRow.querySelector(".move-down").setAttribute("aria-label", `${title}を下へ移動`);
+      widgetEditor.editingRow.querySelector(".switch").setAttribute("aria-label", `${title}を表示`);
+      widgetEditor.editingRow.querySelector("small").textContent = widgetSettingSummary(type, channelId, period, {
         showElapsed,
         count,
         countMode,
@@ -166,7 +166,7 @@
         edge,
         state
       });
-      const widget = dashboardWidgetById(editingWidgetRow.dataset.widgetRow);
+      const widget = dashboardWidgetById(widgetEditor.editingRow.dataset.widgetRow);
       if (widget && type === "現在状態") {
         updateCurrentStateCard(widget, { title, channelId, onLabel, offLabel, showElapsed });
       } else {
@@ -194,8 +194,8 @@
         }
         renderDashboardPeriod();
       }
-      editingWidgetRow.classList.add("is-highlighted");
-      editingWidgetRow = null;
+      widgetEditor.editingRow.classList.add("is-highlighted");
+      widgetEditor.editingRow = null;
       showToast("表示項目の設定を変更しました");
       return;
     }

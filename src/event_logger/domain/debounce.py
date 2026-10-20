@@ -128,7 +128,7 @@ class Debouncer:
             value: 論理入力/出力値。 ONはTrueまたは1、 OFFはFalseまたは0。
 
         Returns:
-            判定対象が条件を満たす場合True、 その他はFalse。
+            確定した論理値。OFFのFalseも正常な確定結果で、失敗を示さない。
         """
         self.stable_value = value
         self._candidate_value = None

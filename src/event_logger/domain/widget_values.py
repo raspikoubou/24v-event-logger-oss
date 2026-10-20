@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import cast
 
 from event_logger.common.models import (
@@ -21,6 +22,38 @@ from event_logger.domain.widgets import (
     widget_end_ms,
     widget_start_ms,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _EvaluationPeriod:
+    """一度だけ解決した表示期間と、その範囲内の履歴を保持する。"""
+
+    start_ms: int
+    end_ms: int
+    events: list[InputEvent]
+    output_events: list[OutputEvent]
+    active_session_id: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class _LiveSnapshot:
+    """daemonから取得した論理入力状態と連続開始時刻を保持する。"""
+
+    current_inputs: Mapping[int, bool] | None
+    since_ns: Mapping[int, int] | None
+    disabled_channel_ids: frozenset[int]
+
+
+@dataclass(frozen=True, slots=True)
+class _CounterValues:
+    """Repositoryが用意したcounter値とreset境界を保持する。"""
+
+    carried_count: int
+    after_event_id: int | None
+    reset_at_ms: int | None
+    reset_count: int | None
+    period_count: int | None
+    stored_count: int | None
 
 
 def evaluate_widget(
@@ -47,9 +80,9 @@ def evaluate_widget(
 ) -> dict[str, object]:
     """1 widgetの設定に応じた表示値を返す。
 
-    UNKNOWN区間はON/OFFへ補間しない。 DBに保存されたイベントとsessionだけを
-    用いて計算し、 表示層で別の集計ロジックを複製しない。 暦に基づく固定期間は
-    timezoneを扱うWeb adapterがUTCの開始・終了境界をまとめて渡す。
+    UNKNOWN区間はON/OFFへ補間しない。集計は保存eventとsessionを基礎にする。
+    現在状態の表示は監視中のlive snapshotを優先し、表示層に集計を複製しない。
+    暦に基づく固定期間はtimezoneを扱うWeb adapterがUTC境界へ解決して渡す。
 
     Args:
         widget: 表示・集計対象のWidget設定。 信号と期間はconfigで決まる。
@@ -65,7 +98,7 @@ def evaluate_widget(
             明示されたsessionだけ現在時刻まで延長する。
         now_mono_ns: 現在monotonic timestamp（ns）。 active
             session内の経過時間計算に使う。
-        current_inputs: IN番号ごとの現在論理状態。 widgetのlive表示に使う。
+        current_inputs: IN番号ごとの現在論理状態。 監視中の現在状態表示に使う。
         current_input_since_ns: IN番号から状態継続開始monotonic時刻（ns）へのmapping。
         disabled_channel_ids: 無効状態としてwidget表示や集計から除くchannel番号集合。
         output_events: loggerが保存したOUT履歴。 入力eventとは別のsignalとして扱う。
@@ -83,15 +116,69 @@ def evaluate_widget(
     Raises:
         ValueError: 「start_ms must be before now_ms」に該当すると判定した場合。
     """
-    # Web層が渡した暦期間を優先し、それ以外はwidget設定の期間を同じ境界形式へ解決する。
+    period = _resolve_period(
+        widget,
+        events,
+        output_events,
+        now_ms=now_ms,
+        start_ms=start_ms,
+        period_end_ms=period_end_ms,
+        fixed_period_range=fixed_period_range,
+        active_session_id=active_session_id,
+    )
+    live = _LiveSnapshot(current_inputs, current_input_since_ns, disabled_channel_ids)
+    counter = _CounterValues(
+        carried_count,
+        after_event_id,
+        reset_at_ms,
+        reset_count,
+        period_count,
+        stored_count,
+    )
+    base: dict[str, object] = {
+        "widget_id": widget.id,
+        "type": widget.widget_type.value,
+        "title": widget.title,
+        "size": widget.size.value,
+        "sort_order": widget.sort_order,
+    }
+    if widget.widget_type is WidgetType.EVENT_COUNT:
+        return _evaluate_event_count(widget, period, counter, base)
+    if widget.widget_type is WidgetType.TIMELINE:
+        return _evaluate_timeline(
+            widget, sessions, period, now_mono_ns, base
+        )
+    if widget.widget_type is WidgetType.EVENT_LIST:
+        return _evaluate_event_list(widget, period, base)
+    return _evaluate_single_input_widget(
+        widget,
+        events,
+        sessions,
+        period,
+        live,
+        now_ms=now_ms,
+        now_mono_ns=now_mono_ns,
+        active_session_id=active_session_id,
+        base=base,
+    )
+
+
+def _resolve_period(
+    widget: Widget,
+    events: Sequence[InputEvent],
+    output_events: Sequence[OutputEvent],
+    *,
+    now_ms: int,
+    start_ms: int,
+    period_end_ms: int | None,
+    fixed_period_range: tuple[int, int] | None,
+    active_session_id: int | None,
+) -> _EvaluationPeriod:
+    """期間境界を解決し、右境界以降のeventを表示用から除外する。"""
     effective_start_ms = (
         fixed_period_range[0]
         if fixed_period_range is not None
-        else widget_start_ms(
-            widget,
-            dashboard_start_ms=start_ms,
-            now_ms=now_ms,
-        )
+        else widget_start_ms(widget, dashboard_start_ms=start_ms, now_ms=now_ms)
     )
     effective_end_ms = min(
         now_ms,
@@ -105,198 +192,183 @@ def evaluate_widget(
     )
     if effective_start_ms >= effective_end_ms:
         raise ValueError("start_ms must be before now_ms")
-    # 終了境界より後の履歴を先に除外し、以後のwidget分岐へ同じsnapshotを渡す。
-    period_events = [event for event in events if event.ts_utc_ms < effective_end_ms]
-    period_output_events = [
-        event for event in output_events if event.ts_utc_ms < effective_end_ms
-    ]
-    period_session_id = active_session_id if effective_end_ms >= now_ms else None
-    # 全widgetで共通の識別・並び替え情報を先に作り、個別表示値へ合成する。
-    base: dict[str, object] = {
-        "widget_id": widget.id,
-        "type": widget.widget_type.value,
-        "title": widget.title,
-        "size": widget.size.value,
-        "sort_order": widget.sort_order,
+    return _EvaluationPeriod(
+        start_ms=effective_start_ms,
+        end_ms=effective_end_ms,
+        events=[event for event in events if event.ts_utc_ms < effective_end_ms],
+        output_events=[
+            event for event in output_events if event.ts_utc_ms < effective_end_ms
+        ],
+        active_session_id=(
+            active_session_id if effective_end_ms >= now_ms else None
+        ),
+    )
+
+
+def _evaluate_event_count(
+    widget: Widget,
+    period: _EvaluationPeriod,
+    counter: _CounterValues,
+    base: dict[str, object],
+) -> dict[str, object]:
+    """counter用のID境界とRepository値から表示payloadを構成する。"""
+    _single_channel(widget)
+    count_mode = str(widget.config.get("count_mode", "period"))
+    return {
+        **base,
+        "value": _event_count(
+            widget,
+            period.events,
+            start_ms=period.start_ms,
+            end_ms=period.end_ms,
+            carried_count=counter.carried_count,
+            after_event_id=counter.after_event_id,
+            reset_count=counter.reset_count,
+            period_count=counter.period_count,
+            stored_count=counter.stored_count,
+        ),
+        "unit": str(widget.config.get("unit", "回")),
+        "count_mode": count_mode,
+        "reset_available": count_mode == "reset",
+        "reset_at_ms": counter.reset_at_ms if count_mode == "reset" else None,
     }
-    # 回数はevent ID境界とretention carryで求めるため、
-    # 状態区間を使うwidgetとは別経路で計算する。
-    if widget.widget_type is WidgetType.EVENT_COUNT:
-        # event_count自身はconfigを読むが、他の単一入力widgetと同じ境界検証を
-        # ここでも通し、不正なchannels設定を表示計算まで持ち込まない。
-        _single_channel(widget)
-        count_mode = str(widget.config.get("count_mode", "period"))
-        return {
-            **base,
-            "value": _event_count(
-                widget,
-                period_events,
-                start_ms=effective_start_ms,
-                end_ms=effective_end_ms,
-                carried_count=carried_count,
-                after_event_id=after_event_id,
-                reset_count=reset_count,
-                period_count=period_count,
-                stored_count=stored_count,
+
+
+def _evaluate_timeline(
+    widget: Widget,
+    sessions: Sequence[Session],
+    period: _EvaluationPeriod,
+    now_mono_ns: int | None,
+    base: dict[str, object],
+) -> dict[str, object]:
+    """IN/OUT timeline payloadを構成する。"""
+    return {
+        **base,
+        "channels": _timeline_rows(
+            widget,
+            period.events,
+            period.output_events,
+            sessions,
+            start_ms=period.start_ms,
+            end_ms=period.end_ms,
+            active_session_id=period.active_session_id,
+            now_mono_ns=(
+                now_mono_ns if period.active_session_id is not None else None
             ),
-            "unit": str(widget.config.get("unit", "回")),
-            "count_mode": count_mode,
-            "reset_available": count_mode == "reset",
-            # reset_at_msは表示用の派生情報であり、集計境界そのものは
-            # after_event_idに保持する。リセット前の値を時刻で再計算しない。
-            "reset_at_ms": reset_at_ms if count_mode == "reset" else None,
-        }
-    # timelineは設定されたIN/OUT signalごとに時系列区間を構成する。
-    if widget.widget_type is WidgetType.TIMELINE:
-        return {
-            **base,
-            "channels": _timeline_rows(
-                widget,
-                period_events,
-                period_output_events,
-                sessions,
-                start_ms=effective_start_ms,
-                end_ms=effective_end_ms,
-                active_session_id=period_session_id,
-                now_mono_ns=(now_mono_ns if period_session_id is not None else None),
-            ),
-        }
-    # event listは状態区間へ集約せず、期間内の元eventを並べて返す。
-    if widget.widget_type is WidgetType.EVENT_LIST:
-        return {
-            **base,
-            "events": _event_list_rows(
-                widget,
-                period_events,
-                period_output_events,
-                start_ms=effective_start_ms,
-                end_ms=effective_end_ms,
-            ),
-        }
-    # ここからは単一入力channelを使うwidget群。
-    # 複数signal対応のtimeline/listは上で処理済み。
+        ),
+    }
+
+
+def _evaluate_event_list(
+    widget: Widget, period: _EvaluationPeriod, base: dict[str, object]
+) -> dict[str, object]:
+    """期間内の元eventをイベント一覧payloadへ変換する。"""
+    return {
+        **base,
+        "events": _event_list_rows(
+            widget,
+            period.events,
+            period.output_events,
+            start_ms=period.start_ms,
+            end_ms=period.end_ms,
+        ),
+    }
+
+
+def _evaluate_single_input_widget(
+    widget: Widget,
+    events: Sequence[InputEvent],
+    sessions: Sequence[Session],
+    period: _EvaluationPeriod,
+    live: _LiveSnapshot,
+    *,
+    now_ms: int,
+    now_mono_ns: int | None,
+    active_session_id: int | None,
+    base: dict[str, object],
+) -> dict[str, object]:
+    """単一IN widgetのlive表示または履歴集計を行う。"""
     channel_id = _single_channel(widget)
-    # 監視中は現在値snapshotを優先し、無効channelはUNKNOWNのまま表示する。
     if widget.widget_type is WidgetType.CURRENT_STATE:
-        if channel_id in disabled_channel_ids:
-            return {
-                **base,
-                "state": "UNKNOWN",
-                "on_label": str(widget.config.get("on_label", "ON")),
-                "off_label": str(widget.config.get("off_label", "OFF")),
-            }
+        if channel_id in live.disabled_channel_ids:
+            return _current_state_payload(widget, base, "UNKNOWN")
         if (
             active_session_id is not None
-            and current_inputs is not None
-            and channel_id in current_inputs
+            and live.current_inputs is not None
+            and channel_id in live.current_inputs
         ):
-            current_state: DisplayState = "ON" if current_inputs[channel_id] else "OFF"
-            direct_since_ns = (
-                current_input_since_ns.get(channel_id)
-                if current_input_since_ns is not None
-                else None
-            )
-            result = {
-                **base,
-                "state": current_state,
-                "on_label": str(widget.config.get("on_label", "ON")),
-                "off_label": str(widget.config.get("off_label", "OFF")),
-            }
+            state = "ON" if live.current_inputs[channel_id] else "OFF"
+            result = _current_state_payload(widget, base, state)
+            since_ns = live.since_ns.get(channel_id) if live.since_ns else None
             if (
                 widget.config.get("show_elapsed", False)
                 and now_mono_ns is not None
-                and direct_since_ns is not None
+                and since_ns is not None
             ):
-                result["elapsed_ms"] = max(
-                    0, (now_mono_ns - direct_since_ns) // 1_000_000
-                )
+                result["elapsed_ms"] = max(0, (now_mono_ns - since_ns) // 1_000_000)
             return result
-    # event基準は最後の一致edge、state基準は対象状態の継続区間から経過時間を求める。
+
     if widget.widget_type is WidgetType.ELAPSED_TIME:
         if widget.config.get("source", "state") == "event":
             event = _last_edge(events, channel_id, _edge_value(widget))
             return {
                 **base,
                 "elapsed_ms": (
-                    _event_elapsed_ms(
-                        event,
-                        now_ms=now_ms,
-                        now_mono_ns=now_mono_ns,
-                        active_session_id=active_session_id,
-                    )
-                    if event
-                    else None
+                    _event_elapsed_ms(event, now_ms=now_ms, now_mono_ns=now_mono_ns,
+                                      active_session_id=active_session_id)
+                    if event else None
                 ),
             }
         if (
             active_session_id is not None
-            and current_inputs is not None
-            and channel_id in current_inputs
-            and current_input_since_ns is not None
-            and channel_id in current_input_since_ns
+            and live.current_inputs is not None
+            and channel_id in live.current_inputs
+            and live.since_ns is not None
+            and channel_id in live.since_ns
             and now_mono_ns is not None
         ):
-            current_state = "ON" if current_inputs[channel_id] else "OFF"
+            current_state = "ON" if live.current_inputs[channel_id] else "OFF"
             state = str(widget.config.get("state", "ON"))
-            since_ns = current_input_since_ns[channel_id]
             return {
                 **base,
                 "elapsed_ms": (
-                    max(0, (now_mono_ns - since_ns) // 1_000_000)
+                    max(
+                        0,
+                        (now_mono_ns - live.since_ns[channel_id]) // 1_000_000,
+                    )
                     if current_state == state
                     else None
                 ),
             }
-    # last eventは選択期間内の一致edgeを探し、記録時刻と経過時間を返す。
+
     if widget.widget_type is WidgetType.LAST_EVENT:
         event = _last_edge(
-            period_events,
-            channel_id,
-            _edge_value(widget),
-            start_ms=effective_start_ms,
-            end_ms=effective_end_ms,
+            period.events, channel_id, _edge_value(widget),
+            start_ms=period.start_ms, end_ms=period.end_ms,
         )
         return {
             **base,
             "timestamp_ms": event.ts_utc_ms if event is not None else None,
             "elapsed_ms": (
-                _event_elapsed_ms(
-                    event,
-                    now_ms=now_ms,
-                    now_mono_ns=now_mono_ns,
-                    active_session_id=active_session_id,
-                )
-                if event
-                else None
+                _event_elapsed_ms(event, now_ms=now_ms, now_mono_ns=now_mono_ns,
+                                  active_session_id=active_session_id)
+                if event else None
             ),
         }
-    # ON/OFF時間・継続時間の集計に使う状態区間を生成する。
+
     intervals = build_state_intervals(
-        events,
-        sessions,
-        channel_id=channel_id,
-        start_ms=effective_start_ms,
-        end_ms=effective_end_ms,
-        active_session_id=period_session_id,
-        end_mono_ns=(now_mono_ns if period_session_id is not None else None),
+        events, sessions, channel_id=channel_id,
+        start_ms=period.start_ms, end_ms=period.end_ms,
+        active_session_id=period.active_session_id,
+        end_mono_ns=(now_mono_ns if period.active_session_id is not None else None),
     )
     if widget.widget_type is WidgetType.CURRENT_STATE:
         current_intervals = build_state_intervals(
-            events,
-            sessions,
-            channel_id=channel_id,
-            start_ms=0,
-            end_ms=now_ms,
-            active_session_id=active_session_id,
-            end_mono_ns=now_mono_ns,
+            events, sessions, channel_id=channel_id, start_ms=0, end_ms=now_ms,
+            active_session_id=active_session_id, end_mono_ns=now_mono_ns,
         )
         interval = _current_interval(current_intervals, now_ms, channel_id)
-        result = {
-            **base,
-            "state": interval.state,
-            "on_label": str(widget.config.get("on_label", "ON")),
-            "off_label": str(widget.config.get("off_label", "OFF")),
-        }
+        result = _current_state_payload(widget, base, interval.state)
         if widget.config.get("show_elapsed", False) and interval.state != "UNKNOWN":
             result["elapsed_ms"] = (
                 interval.duration_ms
@@ -312,30 +384,31 @@ def evaluate_widget(
             "duration_ms": total_duration_ms(intervals, state=state),
         }
     if widget.widget_type is WidgetType.ELAPSED_TIME:
-        # 経過時間widgetは期間内だけでなくsession開始以降の区間が必要なため、
-        # 全履歴範囲を作り直す。
         elapsed_intervals = build_state_intervals(
-            events,
-            sessions,
-            channel_id=channel_id,
-            start_ms=0,
-            end_ms=now_ms,
-            active_session_id=active_session_id,
-            end_mono_ns=now_mono_ns,
+            events, sessions, channel_id=channel_id, start_ms=0, end_ms=now_ms,
+            active_session_id=active_session_id, end_mono_ns=now_mono_ns,
         )
         return {
             **base,
             "elapsed_ms": _elapsed_time(
-                widget,
-                events,
-                elapsed_intervals,
-                channel_id=channel_id,
-                now_ms=now_ms,
-                now_mono_ns=now_mono_ns,
+                widget, events, elapsed_intervals, channel_id=channel_id,
+                now_ms=now_ms, now_mono_ns=now_mono_ns,
                 active_session_id=active_session_id,
             ),
         }
     raise ValueError(f"unsupported widget type: {widget.widget_type.value}")
+
+
+def _current_state_payload(
+    widget: Widget, base: dict[str, object], state: str
+) -> dict[str, object]:
+    """現在状態と設定済みラベルを共通schemaで返す。"""
+    return {
+        **base,
+        "state": state,
+        "on_label": str(widget.config.get("on_label", "ON")),
+        "off_label": str(widget.config.get("off_label", "OFF")),
+    }
 
 
 def _single_channel(widget: Widget) -> int:
